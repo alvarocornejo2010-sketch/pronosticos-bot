@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pronósticos ⚽</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 700px; margin: 0 auto; padding: 16px; background: #0f1115; color: #eee; }
+  h1 { font-size: 1.4rem; }
+  #estado-bar { font-size: 0.85rem; color: #999; margin-bottom: 16px; }
+  .partido { border: 1px solid #333; border-radius: 10px; padding: 14px; margin-bottom: 12px; background: #1a1d24; opacity: 0; animation: aparecer 0.4s forwards; }
+  @keyframes aparecer { to { opacity: 1; } }
+  .equipos { font-weight: 600; font-size: 1.05rem; }
+  .liga { color: #888; font-size: 0.8rem; }
+  .xg { color: #666; font-size: 0.8rem; margin: 4px 0; }
+  .fila { display: flex; justify-content: space-between; margin: 2px 0; font-size: 0.92rem; }
+  .doble { color: #4ade80; font-weight: 600; margin-top: 6px; }
+  .vacio { color: #999; text-align: center; margin-top: 40px; }
+</style>
+</head>
+<body>
+  <h1>⚽ Pronósticos</h1>
+  <div id="estado-bar">Cargando...</div>
+  <div id="partidos"></div>
+
+<script>
+async function actualizarVista() {
+  const resp = await fetch("/api/estado");
+  const data = await resp.json();
+
+  const barra = document.getElementById("estado-bar");
+  const cont = document.getElementById("partidos");
+
+  if (data.estado === "sin_datos") {
+    barra.textContent = "Todavía no hay datos. Esperando primera actualización...";
+    cont.innerHTML = "";
+    return;
+  }
+  if (data.estado === "sin_partidos") {
+    barra.textContent = "Última revisión: " + new Date(data.ultima_actualizacion).toLocaleString();
+    cont.innerHTML = '<div class="vacio">No hay partidos próximos en tus ligas seguidas.</div>';
+    return;
+  }
+
+  barra.textContent = (data.estado === "actualizando" ? "Actualizando... " : "Listo. ") +
+    "Mostrando: " + data.dia_mostrado + " — " + new Date(data.ultima_actualizacion).toLocaleTimeString();
+
+  const idsActuales = new Set(Array.from(cont.children).map(el => el.dataset.id));
+
+  data.partidos.forEach((p) => {
+    const id = p.local + "_" + p.visita;
+    if (idsActuales.has(id)) return; // ya está en pantalla, no lo dupliques
+
+    const div = document.createElement("div");
+    div.className = "partido";
+    div.dataset.id = id;
+    div.innerHTML = `
+      <div class="equipos">${p.local} vs ${p.visita}</div>
+      <div class="liga">${p.liga}</div>
+      <div class="xg">xG estimado: ${p.xg_local} - ${p.xg_visita}</div>
+      <div class="fila"><span>Victoria Local</span><span>${p.prob_local}%</span></div>
+      <div class="fila"><span>Empate</span><span>${p.prob_empate}%</span></div>
+      <div class="fila"><span>Victoria Visita</span><span>${p.prob_visita}%</span></div>
+      <div class="doble">Doble Oportunidad (1X): ${p.prob_1x}%</div>
+    `;
+    cont.appendChild(div);
+  });
+}
+
+setInterval(actualizarVista, 5000);
+actualizarVista();
+</script>
+</body>
+</html>

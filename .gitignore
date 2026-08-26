@@ -1,0 +1,10 @@
+# Nunca subas esto a GitHub:
+.env
+cache.json
+data.json
+
+# Basura estándar de Python:
+__pycache__/
+*.pyc
+.venv/
+venv/
