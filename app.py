@@ -185,6 +185,7 @@ def calcular_poisson(gla, gvi, limite=5):
 # BUSCAR EL PRIMER DÍA CON PARTIDOS (hoy, luego mañana, etc.)
 # ==========================================
 def buscar_dia_con_partidos():
+    debug_por_dia = []  # para poder ver exactamente qué devolvió la API cada día revisado
     for dias in range(MAX_DIAS_BUSQUEDA + 1):
         fecha = (datetime.now() + timedelta(days=dias)).strftime("%Y-%m-%d")
         resp = get_con_pausa(f"{BASE_URL}/matches", {
@@ -192,9 +193,16 @@ def buscar_dia_con_partidos():
         })
         body = resp.json()
         matches = body.get("matches", [])
+        debug_por_dia.append({
+            "fecha_consultada": fecha,
+            "http_status": resp.status_code,
+            "cantidad_encontrada": len(matches),
+            "mensaje_api": body.get("message"),  # si la API rechazó algo, aparece aquí
+            "hora_servidor_utc": datetime.now().isoformat()
+        })
         if matches:
-            return fecha, dias, matches
-    return None, None, []
+            return fecha, dias, matches, debug_por_dia
+    return None, None, [], debug_por_dia
 
 # ==========================================
 # PIPELINE COMPLETO (corre en un hilo de fondo)
@@ -207,14 +215,15 @@ def correr_actualizacion():
 
     try:
         cache = cargar_cache()
-        fecha, dias_adelante, matches = buscar_dia_con_partidos()
+        fecha, dias_adelante, matches, debug_busqueda = buscar_dia_con_partidos()
 
         if not matches:
             escribir_estado({
                 "estado": "sin_partidos",
                 "dia_mostrado": None,
                 "partidos": [],
-                "ultima_actualizacion": datetime.now().isoformat()
+                "ultima_actualizacion": datetime.now().isoformat(),
+                "debug_busqueda": debug_busqueda  # que día se reviso, cuantos partidos crudos vinieron, etc.
             })
             return
 
