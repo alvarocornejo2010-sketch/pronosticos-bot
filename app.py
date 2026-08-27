@@ -33,14 +33,17 @@ HEADER = {"X-Auth-Token": API_TOKEN}
 BASE_URL = "https://api.football-data.org/v4"
 
 LIGAS = {
-    "Premier League": "PL",
     "La Liga": "PD",
-    "Ligue 1": "FL1",
-    "Bundesliga": "BL1",
-    "Champions League": "CL",
+    # Ligas comentadas temporalmente mientras se prueba con un nicho más chico.
+    # Descoméntalas cuando quieras volver a las 5 ligas:
+    # "Premier League": "PL",
+    # "Ligue 1": "FL1",
+    # "Bundesliga": "BL1",
+    # "Champions League": "CL",
 }
 
-MIN_INTERVALO_ACTUALIZACION = timedelta(minutes=45)  # protege tu cuota si el cron se configura mal
+MIN_INTERVALO_ACTUALIZACION = timedelta(minutes=25)  # un poco menos que los 30 min del cron,
+                                                       # así nunca se solapan por pequeñas diferencias de reloj
 
 CACHE_FILE = "cache.json"       # promedios de liga/equipo (igual que antes)
 DATA_FILE = "data.json"         # lo que ve la página web, se va llenando poco a poco
