@@ -435,6 +435,9 @@ def _ficha_base(match):
         "local": match["homeTeam"]["name"],
         "visita": match["awayTeam"]["name"],
         "liga": match["competition"]["name"],
+        # código estable ("PD", "PL"...) para que la web pueda agrupar por liga
+        # sin depender del nombre, que puede venir escrito de formas distintas
+        "liga_codigo": match["competition"]["code"],
         "hora": match["_fecha_local"].strftime("%H:%M"),
         "utcDate": match["utcDate"],
     }
