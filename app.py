@@ -589,6 +589,10 @@ def agregar_headers_seguridad(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
+    # Esto es un panel en vivo: cachear el HTML solo consigue que después de un
+    # deploy sigas viendo la interfaz anterior hasta que hagas Ctrl+F5. Y el JSON
+    # de /api/estado cambia cada pocos segundos, así que cachearlo es peor aún.
+    response.headers["Cache-Control"] = "no-store, must-revalidate"
     return response
 
 
