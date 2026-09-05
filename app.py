@@ -5,8 +5,8 @@ import json
 import time
 import threading
 from collections import defaultdict
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 from flask import Flask, jsonify, render_template, request
@@ -47,7 +47,17 @@ LIGAS = {
 # Zona horaria de referencia para decidir qué es "hoy".
 # Render corre en UTC; sin esto, a partir de las 19:00 de Lima el servidor
 # ya está en el día siguiente y te muestra los partidos equivocados.
-TZ = ZoneInfo(os.environ.get("TZ_LOCAL", "America/Lima"))
+_TZ_NOMBRE = os.environ.get("TZ_LOCAL", "America/Lima")
+try:
+    TZ = ZoneInfo(_TZ_NOMBRE)
+except ZoneInfoNotFoundError:
+    # Windows no incluye base de datos de zonas horarias (Linux sí, por eso en
+    # Render funciona). Se arregla con  pip install tzdata , pero mientras tanto
+    # caemos a un offset fijo de UTC-5, que para Perú es exacto todo el año
+    # porque no aplica horario de verano.
+    print(f"AVISO: no se encontró la zona '{_TZ_NOMBRE}'. Usando UTC-5 fijo. "
+          "Instala el paquete tzdata para tener la zona real.", file=sys.stderr)
+    TZ = timezone(timedelta(hours=-5))
 
 # Espera mínima entre actualizaciones, en minutos. Por defecto 25: un poco menos
 # que los 30 del cron, así nunca se solapan por diferencias de reloj.
