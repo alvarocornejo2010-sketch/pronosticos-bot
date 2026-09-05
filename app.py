@@ -4,6 +4,7 @@ import hmac
 import json
 import time
 import threading
+from collections import defaultdict
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -62,7 +63,9 @@ CACHE_VERSION = 2               # subir esto invalida cachés con formato viejo
 DIAS_VALIDEZ_EQUIPO = 3
 DIAS_VALIDEZ_LIGA = 7
 PAUSA_ENTRE_REQUESTS = 6.5      # 10 requests/min en el plan free
-MAX_DIAS_BUSQUEDA = 3           # si no hay partidos hoy, prueba hasta 3 días adelante
+MAX_DIAS_BUSQUEDA = 7           # cuántos días hacia delante mirar. Con el endpoint por
+                                # competición esto cuesta 1 request por liga en total,
+                                # así que se puede ser generoso.
 
 # --- Parámetros del modelo ---
 VENTANA_DIAS = 400              # cuántos días atrás mirar para las stats de un equipo.
@@ -299,24 +302,56 @@ def calcular_poisson(gla, gvi, limite=LIMITE_GOLES):
 # BUSCAR EL PRIMER DÍA CON PARTIDOS (hoy, luego mañana, etc.)
 # ==========================================
 def buscar_dia_con_partidos():
-    debug_por_dia = []  # para poder ver exactamente qué devolvió la API cada día revisado
-    for dias in range(MAX_DIAS_BUSQUEDA + 1):
-        fecha = (ahora() + timedelta(days=dias)).strftime("%Y-%m-%d")
-        resp = get_con_pausa(f"{BASE_URL}/matches", {
-            "dateFrom": fecha, "dateTo": fecha, "competitions": ",".join(LIGAS.values())
+    """Devuelve el primer día (de hoy en adelante) que tenga partidos por jugar.
+
+    IMPORTANTE: usa /competitions/{codigo}/matches y NO el endpoint global
+    /v4/matches. En el plan free de football-data.org el global responde
+    HTTP 200 con una lista VACÍA en vez de dar un 403, así que parece que
+    simplemente no hay partidos. Ese era el bug de "no hay partidos próximos".
+    """
+    hoy = ahora().date()
+    hasta = hoy + timedelta(days=MAX_DIAS_BUSQUEDA)
+    debug = []
+    por_fecha = defaultdict(list)
+
+    for nombre_liga, codigo in LIGAS.items():
+        resp = get_con_pausa(f"{BASE_URL}/competitions/{codigo}/matches", {
+            "dateFrom": hoy.isoformat(),
+            "dateTo": hasta.isoformat(),
+            # solo lo que aún no se ha jugado: es una web de pronósticos,
+            # no tiene sentido "predecir" un partido que ya terminó
+            "status": "SCHEDULED,TIMED",
         })
         body = resp.json() if resp.status_code == 200 else {}
         matches = body.get("matches", [])
-        debug_por_dia.append({
-            "fecha_consultada": fecha,
+
+        for m in matches:
+            # el endpoint por competición no repite el bloque "competition" en
+            # cada partido, así que se lo inyectamos: el resto del pipeline lo usa
+            m["competition"] = {"code": codigo, "name": nombre_liga}
+            # la fecha viene en UTC; la pasamos a hora local para que "hoy"
+            # signifique lo mismo para ti que para el servidor
+            fecha_local = datetime.fromisoformat(
+                m["utcDate"].replace("Z", "+00:00")).astimezone(TZ).date()
+            por_fecha[fecha_local].append(m)
+
+        debug.append({
+            "liga": codigo,
+            "rango_consultado": f"{hoy} a {hasta}",
             "http_status": resp.status_code,
             "cantidad_encontrada": len(matches),
-            "mensaje_api": body.get("message"),  # si la API rechazó algo, aparece aquí
-            "hora_servidor_local": ahora().isoformat()
+            "mensaje_api": body.get("message"),
+            "hora_servidor_local": ahora().isoformat(),
         })
-        if matches:
-            return fecha, dias, matches, debug_por_dia
-    return None, None, [], debug_por_dia
+
+    if not por_fecha:
+        return None, None, [], debug
+
+    primera = min(por_fecha)
+    dias_adelante = (primera - hoy).days
+    # ordena los partidos del día por hora de inicio
+    partidos = sorted(por_fecha[primera], key=lambda m: m["utcDate"])
+    return primera.isoformat(), dias_adelante, partidos, debug
 
 
 # ==========================================
