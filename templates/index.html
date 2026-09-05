@@ -5,100 +5,203 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pronósticos ⚽</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 700px; margin: 0 auto; padding: 16px; background: #0f1115; color: #eee; }
-  h1 { font-size: 1.4rem; }
-  #estado-bar { font-size: 0.85rem; color: #999; margin-bottom: 16px; }
-  .partido { border: 1px solid #333; border-radius: 10px; padding: 14px; margin-bottom: 12px; background: #1a1d24; opacity: 0; animation: aparecer 0.4s forwards; }
-  @keyframes aparecer { to { opacity: 1; } }
-  .equipos { font-weight: 600; font-size: 1.05rem; }
-  .liga { color: #888; font-size: 0.8rem; }
-  .xg { color: #666; font-size: 0.8rem; margin: 4px 0 10px; }
-  .aviso { color: #fbbf24; font-size: 0.75rem; margin: 4px 0 10px; }
-  .fila { margin: 6px 0; font-size: 0.92rem; }
-  .fila-cab { display: flex; justify-content: space-between; margin-bottom: 3px; }
+  :root {
+    --fondo: #0f1115; --tarjeta: #1a1d24; --borde: #2b303b;
+    --texto: #e8eaed; --tenue: #8b93a1; --muy-tenue: #5c6472;
+    --local: #60a5fa; --empate: #a1a1aa; --visita: #f472b6; --doble: #4ade80;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 720px;
+         margin: 0 auto; padding: 16px 16px 60px; background: var(--fondo); color: var(--texto); }
+  h1 { font-size: 1.35rem; margin: 0 0 4px; }
+
+  #barra-estado { font-size: 0.85rem; color: var(--tenue); margin-bottom: 6px; }
+  #progreso { height: 4px; background: var(--borde); border-radius: 2px; overflow: hidden; margin-bottom: 22px; }
+  #progreso > span { display: block; height: 100%; background: var(--doble); width: 0; transition: width 0.4s; }
+
+  .dia { margin-bottom: 26px; }
+  .dia-cab { display: flex; align-items: baseline; gap: 8px; padding-bottom: 6px;
+             margin-bottom: 10px; border-bottom: 1px solid var(--borde); }
+  .dia-cab b { font-size: 1rem; }
+  .dia-cab span { font-size: 0.78rem; color: var(--muy-tenue); }
+
+  .partido { border: 1px solid var(--borde); border-radius: 10px; padding: 13px;
+             margin-bottom: 10px; background: var(--tarjeta); }
+  .partido.pendiente { opacity: 0.5; }
+  .cab { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .equipos { font-weight: 600; font-size: 1rem; }
+  .hora { font-size: 0.8rem; color: var(--tenue); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .liga { color: var(--muy-tenue); font-size: 0.75rem; margin-top: 2px; }
+  .xg { color: var(--tenue); font-size: 0.78rem; margin: 8px 0 2px; font-variant-numeric: tabular-nums; }
+  .aviso { color: #fbbf24; font-size: 0.73rem; margin: 6px 0 2px; }
+  .esperando { color: var(--muy-tenue); font-size: 0.8rem; margin-top: 8px; font-style: italic; }
+
+  .fila { margin: 7px 0; font-size: 0.88rem; }
+  .fila-cab { display: flex; justify-content: space-between; margin-bottom: 3px;
+              font-variant-numeric: tabular-nums; }
   .barra { height: 6px; background: #262a33; border-radius: 3px; overflow: hidden; }
-  .barra > span { display: block; height: 100%; background: #60a5fa; }
-  .dobles { display: flex; gap: 8px; margin-top: 12px; }
-  .doble { flex: 1; background: #14261c; border: 1px solid #22543d; border-radius: 8px; padding: 6px; text-align: center; }
-  .doble b { display: block; color: #4ade80; font-size: 0.95rem; }
-  .doble span { color: #7a8a80; font-size: 0.7rem; }
-  .vacio { color: #999; text-align: center; margin-top: 40px; }
+  .barra > span { display: block; height: 100%; transition: width 0.3s; }
+
+  .dobles { display: flex; gap: 7px; margin-top: 12px; }
+  .doble { flex: 1; background: #14261c; border: 1px solid #22543d; border-radius: 8px;
+           padding: 6px 4px; text-align: center; }
+  .doble b { display: block; color: var(--doble); font-size: 0.92rem; font-variant-numeric: tabular-nums; }
+  .doble span { color: #6b8578; font-size: 0.68rem; }
+
+  .vacio { color: var(--tenue); text-align: center; margin-top: 40px; }
 </style>
 </head>
 <body>
   <h1>⚽ Pronósticos</h1>
-  <div id="estado-bar">Cargando...</div>
-  <div id="partidos"></div>
+  <div id="barra-estado">Cargando...</div>
+  <div id="progreso"><span></span></div>
+  <div id="contenedor"></div>
 
 <script>
-function fila(etiqueta, valor, color) {
+const cont = document.getElementById("contenedor");
+const barra = document.getElementById("barra-estado");
+const progreso = document.querySelector("#progreso > span");
+
+function filaProb(etiqueta, valor, color) {
   return `<div class="fila">
-      <div class="fila-cab"><span>${etiqueta}</span><span>${valor}%</span></div>
+      <div class="fila-cab"><span>${etiqueta}</span><span>${valor.toFixed(1)}%</span></div>
       <div class="barra"><span style="width:${valor}%;background:${color}"></span></div>
     </div>`;
 }
 
-async function actualizarVista() {
-  const resp = await fetch("/api/estado");
-  const data = await resp.json();
+function htmlPartido(p) {
+  const cabecera = `
+    <div class="cab">
+      <div>
+        <div class="equipos">${p.local} vs ${p.visita}</div>
+        <div class="liga">${p.liga}</div>
+      </div>
+      <div class="hora">${p.hora}</div>
+    </div>`;
 
-  const barra = document.getElementById("estado-bar");
-  const cont = document.getElementById("partidos");
+  if (p.pendiente) {
+    return cabecera + `<div class="esperando">Pendiente de calcular…</div>`;
+  }
 
-  if (data.estado === "sin_datos") {
-    barra.textContent = "Todavía no hay datos. Esperando primera actualización...";
-    cont.innerHTML = "";
+  // Si hay muy pocos partidos previos, la predicción está dominada por la media
+  // de la liga. Mejor decirlo que fingir precisión que no existe.
+  const muestra = Math.min(p.muestra_local ?? 99, p.muestra_visita ?? 99);
+  const aviso = muestra < 4
+    ? `<div class="aviso">⚠ Pocos partidos previos (${muestra}); la estimación tira hacia la media de la liga.</div>`
+    : "";
+
+  return cabecera + `
+    <div class="xg">xG estimado: ${p.xg_local} - ${p.xg_visita}</div>
+    ${aviso}
+    ${filaProb("Victoria Local", p.prob_local, "var(--local)")}
+    ${filaProb("Empate", p.prob_empate, "var(--empate)")}
+    ${filaProb("Victoria Visita", p.prob_visita, "var(--visita)")}
+    <div class="dobles">
+      <div class="doble"><b>${p.prob_1x}%</b><span>1X</span></div>
+      <div class="doble"><b>${p.prob_x2}%</b><span>X2</span></div>
+      <div class="doble"><b>${p.prob_12}%</b><span>12</span></div>
+    </div>`;
+}
+
+// Actualiza en el sitio en vez de repintar todo: así no parpadea ni se pierde
+// el scroll cuando llega una tanda nueva de partidos calculados.
+function pintar(dias) {
+  const vistos = new Set();
+
+  dias.forEach((dia, i) => {
+    vistos.add("dia-" + dia.fecha);
+    let secc = document.getElementById("dia-" + dia.fecha);
+    if (!secc) {
+      secc = document.createElement("div");
+      secc.className = "dia";
+      secc.id = "dia-" + dia.fecha;
+      secc.innerHTML = `<div class="dia-cab"><b></b><span></span></div><div class="lista"></div>`;
+      cont.appendChild(secc);
+    }
+    if (cont.children[i] !== secc) cont.insertBefore(secc, cont.children[i]);
+
+    secc.querySelector(".dia-cab b").textContent = dia.etiqueta;
+    secc.querySelector(".dia-cab span").textContent =
+      `${dia.fecha} · ${dia.partidos.length} partido${dia.partidos.length === 1 ? "" : "s"}`;
+
+    const lista = secc.querySelector(".lista");
+    dia.partidos.forEach((p, j) => {
+      const id = "p-" + p.id;
+      vistos.add(id);
+      let card = document.getElementById(id);
+      if (!card) {
+        card = document.createElement("div");
+        card.id = id;
+        lista.appendChild(card);
+      }
+      if (card.parentNode !== lista) lista.appendChild(card);
+      if (lista.children[j] !== card) lista.insertBefore(card, lista.children[j]);
+
+      // solo se toca el DOM si el contenido cambió de verdad
+      const huella = JSON.stringify(p);
+      if (card.dataset.huella !== huella) {
+        card.dataset.huella = huella;
+        card.className = "partido" + (p.pendiente ? " pendiente" : "");
+        card.innerHTML = htmlPartido(p);
+      }
+    });
+  });
+
+  // fuera lo que ya no está en la ventana
+  document.querySelectorAll("#contenedor [id]").forEach(el => {
+    if (!vistos.has(el.id)) el.remove();
+  });
+}
+
+const TEXTO_ESTADO = {
+  actualizando: "Calculando…",
+  parcial: "Pausado por límite de la API. Sigue en la próxima actualización.",
+  listo: "Al día.",
+  error: "Error en la última actualización",
+};
+
+async function refrescar() {
+  let data;
+  try {
+    data = await (await fetch("/api/estado")).json();
+  } catch (e) {
+    barra.textContent = "Sin conexión con el servidor.";
     return;
   }
-  if (data.estado === "error") {
-    barra.textContent = "Error en la última actualización: " + (data.error || "desconocido");
+
+  if (data.estado === "sin_datos") {
+    barra.textContent = "Todavía no hay datos. Esperando la primera actualización…";
     return;
   }
   if (data.estado === "sin_partidos") {
     barra.textContent = "Última revisión: " + new Date(data.ultima_actualizacion).toLocaleString();
-    cont.innerHTML = '<div class="vacio">No hay partidos próximos en tus ligas seguidas.</div>';
+    cont.innerHTML = '<div class="vacio">No hay partidos programados en los próximos días.</div>';
+    progreso.style.width = "0";
     return;
   }
 
-  barra.textContent = (data.estado === "actualizando" ? "Actualizando... " : "Listo. ") +
-    "Mostrando: " + data.dia_mostrado + " — " + new Date(data.ultima_actualizacion).toLocaleTimeString();
+  const hechos = (data.total || 0) - (data.pendientes || 0);
+  const texto = data.estado === "error"
+    ? TEXTO_ESTADO.error + ": " + (data.error || "desconocido")
+    : TEXTO_ESTADO[data.estado] || data.estado;
 
-  const idsActuales = new Set(Array.from(cont.children).map(el => el.dataset.id));
+  barra.textContent = `${texto} ${hechos}/${data.total} partidos calculados · `
+    + new Date(data.ultima_actualizacion).toLocaleTimeString();
 
-  data.partidos.forEach((p) => {
-    const id = p.local + "_" + p.visita;
-    if (idsActuales.has(id)) return; // ya está en pantalla, no lo dupliques
+  // sondeo rápido mientras se está calculando, lento cuando ya no cambia nada
+  periodo = (data.estado === "actualizando") ? 4000 : 30000;
+  progreso.style.width = data.total ? (100 * hechos / data.total) + "%" : "0";
 
-    // Si hay muy pocos partidos previos, la predicción está dominada por la media
-    // de la liga. Mejor decirlo que fingir precisión que no existe.
-    const muestra = Math.min(p.muestra_local ?? 99, p.muestra_visita ?? 99);
-    const aviso = muestra < 4
-      ? `<div class="aviso">⚠ Pocos partidos previos (${muestra}); la estimación tira hacia la media de la liga.</div>`
-      : "";
-
-    const div = document.createElement("div");
-    div.className = "partido";
-    div.dataset.id = id;
-    div.innerHTML = `
-      <div class="equipos">${p.local} vs ${p.visita}</div>
-      <div class="liga">${p.liga}</div>
-      <div class="xg">xG estimado: ${p.xg_local} - ${p.xg_visita}</div>
-      ${aviso}
-      ${fila("Victoria Local", p.prob_local, "#60a5fa")}
-      ${fila("Empate", p.prob_empate, "#a1a1aa")}
-      ${fila("Victoria Visita", p.prob_visita, "#f472b6")}
-      <div class="dobles">
-        <div class="doble"><b>${p.prob_1x}%</b><span>1X</span></div>
-        <div class="doble"><b>${p.prob_x2}%</b><span>X2</span></div>
-        <div class="doble"><b>${p.prob_12}%</b><span>12</span></div>
-      </div>
-    `;
-    cont.appendChild(div);
-  });
+  pintar(data.dias || []);
 }
 
-setInterval(actualizarVista, 5000);
-actualizarVista();
+// mientras queda trabajo se sondea rápido; cuando está al día, se relaja
+let periodo = 4000;
+async function bucle() {
+  await refrescar();
+  setTimeout(bucle, periodo);
+}
+bucle();
 </script>
 </body>
 </html>

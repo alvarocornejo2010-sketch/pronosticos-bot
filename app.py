@@ -78,9 +78,25 @@ CACHE_VERSION = 2               # subir esto invalida cachés con formato viejo
 DIAS_VALIDEZ_EQUIPO = 3
 DIAS_VALIDEZ_LIGA = 7
 PAUSA_ENTRE_REQUESTS = 6.5      # 10 requests/min en el plan free
-MAX_DIAS_BUSQUEDA = 7           # cuántos días hacia delante mirar. Con el endpoint por
+MAX_DIAS_BUSQUEDA = int(os.environ.get("DIAS_ADELANTE", "7"))
+                                # cuántos días hacia delante mostrar. Con el endpoint por
                                 # competición esto cuesta 1 request por liga en total,
                                 # así que se puede ser generoso.
+
+# Presupuesto de peticiones a la API por cada ejecución de la actualización.
+# Cuando se agota, la pasada termina dejando el resto marcado como pendiente y
+# la SIGUIENTE ejecución continúa por donde se quedó. Así se pueden cubrir
+# muchos días sin pelearse con el límite de 10 peticiones/minuto ni tener un
+# hilo corriendo media hora.
+# A 6.5s por petición, 40 peticiones son unos 4,5 minutos de reloj.
+PRESUPUESTO_REQUESTS = int(os.environ.get("PRESUPUESTO_REQUESTS", "40"))
+
+# Cuánto vale una predicción ya calculada antes de rehacerla. Mientras siga
+# fresca no se recalcula, así las pasadas siguientes gastan el presupuesto en
+# los partidos que aún no tienen número en vez de repetir trabajo.
+HORAS_VALIDEZ_PREDICCION = 24
+
+DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 # --- Parámetros del modelo ---
 VENTANA_DIAS = 400              # cuántos días atrás mirar para las stats de un equipo.
@@ -137,7 +153,21 @@ def esta_vigente(fecha_str, dias_validez):
     return ahora() - _parsear_fecha(fecha_str) < timedelta(days=dias_validez)
 
 
+_requests_gastadas = 0
+
+
+def reset_presupuesto():
+    global _requests_gastadas
+    _requests_gastadas = 0
+
+
+def presupuesto_agotado():
+    return _requests_gastadas >= PRESUPUESTO_REQUESTS
+
+
 def get_con_pausa(url, params=None):
+    global _requests_gastadas
+    _requests_gastadas += 1
     resp = requests.get(url, headers=HEADER, params=params, timeout=30)
     time.sleep(PAUSA_ENTRE_REQUESTS)
     return resp
@@ -153,7 +183,8 @@ def leer_estado():
                 return json.load(f)
         except (json.JSONDecodeError, OSError):
             pass
-    return {"estado": "sin_datos", "dia_mostrado": None, "partidos": [], "ultima_actualizacion": None}
+    return {"estado": "sin_datos", "dias": [], "total": 0, "pendientes": 0,
+            "ultima_actualizacion": None}
 
 
 def escribir_estado(estado):
@@ -316,13 +347,26 @@ def calcular_poisson(gla, gvi, limite=LIMITE_GOLES):
 # ==========================================
 # BUSCAR EL PRIMER DÍA CON PARTIDOS (hoy, luego mañana, etc.)
 # ==========================================
-def buscar_dia_con_partidos():
-    """Devuelve el primer día (de hoy en adelante) que tenga partidos por jugar.
+def etiqueta_de_dia(fecha, hoy):
+    """'Hoy', 'Mañana', o el día de la semana con la fecha."""
+    dias = (fecha - hoy).days
+    if dias == 0:
+        return "Hoy"
+    if dias == 1:
+        return "Mañana"
+    return DIAS_SEMANA[fecha.weekday()].capitalize()
+
+
+def obtener_fixtures():
+    """Todos los partidos por jugar en la ventana, agrupados por día local.
 
     IMPORTANTE: usa /competitions/{codigo}/matches y NO el endpoint global
     /v4/matches. En el plan free de football-data.org el global responde
     HTTP 200 con una lista VACÍA en vez de dar un 403, así que parece que
-    simplemente no hay partidos. Ese era el bug de "no hay partidos próximos".
+    simplemente no hay partidos.
+
+    Cuesta 1 petición por liga para TODA la ventana, así que ampliar los días
+    que se muestran es gratis; lo que cuesta son las stats de cada equipo.
     """
     hoy = ahora().date()
     hasta = hoy + timedelta(days=MAX_DIAS_BUSQUEDA)
@@ -346,9 +390,9 @@ def buscar_dia_con_partidos():
             m["competition"] = {"code": codigo, "name": nombre_liga}
             # la fecha viene en UTC; la pasamos a hora local para que "hoy"
             # signifique lo mismo para ti que para el servidor
-            fecha_local = datetime.fromisoformat(
-                m["utcDate"].replace("Z", "+00:00")).astimezone(TZ).date()
-            por_fecha[fecha_local].append(m)
+            m["_fecha_local"] = datetime.fromisoformat(
+                m["utcDate"].replace("Z", "+00:00")).astimezone(TZ)
+            por_fecha[m["_fecha_local"].date()].append(m)
 
         debug.append({
             "liga": codigo,
@@ -359,54 +403,138 @@ def buscar_dia_con_partidos():
             "hora_servidor_local": ahora().isoformat(),
         })
 
-    if not por_fecha:
-        return None, None, [], debug
-
-    primera = min(por_fecha)
-    dias_adelante = (primera - hoy).days
-    # ordena los partidos del día por hora de inicio
-    partidos = sorted(por_fecha[primera], key=lambda m: m["utcDate"])
-    return primera.isoformat(), dias_adelante, partidos, debug
+    for fecha in por_fecha:
+        por_fecha[fecha].sort(key=lambda m: m["utcDate"])
+    return por_fecha, debug
 
 
 # ==========================================
 # PIPELINE COMPLETO (corre en un hilo de fondo)
 # ==========================================
+def _predicciones_previas(estado):
+    """Predicciones ya calculadas en pasadas anteriores, indexadas por id de partido."""
+    previas = {}
+    for dia in estado.get("dias", []):
+        for p in dia.get("partidos", []):
+            if p.get("id") is not None and p.get("prob_local") is not None:
+                previas[p["id"]] = p
+    return previas
+
+
+def _sigue_fresca(partido):
+    calculado = partido.get("calculado")
+    if not calculado:
+        return False
+    return ahora() - _parsear_fecha(calculado) < timedelta(hours=HORAS_VALIDEZ_PREDICCION)
+
+
+def _ficha_base(match):
+    """Los datos del partido que se conocen sin gastar ni una petición."""
+    return {
+        "id": match["id"],
+        "local": match["homeTeam"]["name"],
+        "visita": match["awayTeam"]["name"],
+        "liga": match["competition"]["name"],
+        "hora": match["_fecha_local"].strftime("%H:%M"),
+        "utcDate": match["utcDate"],
+    }
+
+
+def _construir_estado(por_fecha, calculadas, estado_texto, debug=None):
+    """Arma el JSON que consume la web: días en orden, partidos en orden de hora."""
+    hoy = ahora().date()
+    dias = []
+    pendientes = 0
+    total = 0
+    for fecha in sorted(por_fecha):
+        partidos = []
+        for m in por_fecha[fecha]:
+            total += 1
+            ficha = calculadas.get(m["id"])
+            if ficha is None:
+                # todavía sin calcular: se muestra igualmente, con los datos que
+                # ya tenemos, para que se vea el calendario completo desde el principio
+                ficha = dict(_ficha_base(m), pendiente=True)
+                pendientes += 1
+            partidos.append(ficha)
+        dias.append({
+            "fecha": fecha.isoformat(),
+            "etiqueta": etiqueta_de_dia(fecha, hoy),
+            "partidos": partidos,
+        })
+
+    estado = {
+        "estado": estado_texto,
+        "dias": dias,
+        "total": total,
+        "pendientes": pendientes,
+        "requests_gastadas": _requests_gastadas,
+        "ultima_actualizacion": ahora().isoformat(),
+    }
+    if debug is not None:
+        estado["debug_busqueda"] = debug
+    return estado
+
+
 def correr_actualizacion():
+    """Calcula las predicciones de la ventana completa, poco a poco.
+
+    Cada ejecución gasta como mucho PRESUPUESTO_REQUESTS peticiones. Lo que no
+    da tiempo a calcular queda marcado como pendiente y lo recoge la siguiente
+    ejecución, que empieza por los partidos más cercanos. Las predicciones ya
+    hechas se conservan mientras sigan frescas, así el presupuesto se gasta en
+    lo que falta y no en rehacer lo mismo.
+    """
     global actualizando_ahora
     if actualizando_ahora:
         return  # ya hay una actualización en curso, no dupliques
     actualizando_ahora = True
+    reset_presupuesto()
 
     try:
         cache = cargar_cache()
-        fecha, dias_adelante, matches, debug_busqueda = buscar_dia_con_partidos()
+        por_fecha, debug = obtener_fixtures()
 
-        if not matches:
+        if not por_fecha:
             escribir_estado({
                 "estado": "sin_partidos",
-                "dia_mostrado": None,
-                "partidos": [],
+                "dias": [],
+                "total": 0,
+                "pendientes": 0,
                 "ultima_actualizacion": ahora().isoformat(),
-                "debug_busqueda": debug_busqueda  # qué día se revisó, cuántos partidos crudos vinieron, etc.
+                "debug_busqueda": debug,
             })
             return
 
-        etiqueta_dia = "Hoy" if dias_adelante == 0 else ("Mañana" if dias_adelante == 1 else f"En {dias_adelante} días")
+        # Arrancamos de lo que ya había calculado y sigue siendo válido.
+        previas = _predicciones_previas(leer_estado())
+        calculadas = {}
+        for fecha in por_fecha:
+            for m in por_fecha[fecha]:
+                anterior = previas.get(m["id"])
+                if anterior and _sigue_fresca(anterior):
+                    calculadas[m["id"]] = anterior
 
-        # arranca con la lista vacía y estado "actualizando" para que la web lo muestre en vivo
-        escribir_estado({
-            "estado": "actualizando",
-            "dia_mostrado": f"{etiqueta_dia} ({fecha})",
-            "partidos": [],
-            "ultima_actualizacion": ahora().isoformat()
-        })
+        # Se pinta ya el calendario entero: los partidos sin número salen como
+        # pendientes en vez de no aparecer.
+        escribir_estado(_construir_estado(por_fecha, calculadas, "actualizando", debug))
 
-        partidos_procesados = []
-        for match in matches:
-            local, visita = match["homeTeam"]["name"], match["awayTeam"]["name"]
-            local_id, visita_id = match["homeTeam"]["id"], match["awayTeam"]["id"]
-            codigo_liga, nombre_liga = match["competition"]["code"], match["competition"]["name"]
+        # Orden cronológico: lo más cercano primero, que es lo que interesa antes.
+        cola = [m for fecha in sorted(por_fecha) for m in por_fecha[fecha]
+                if m["id"] not in calculadas]
+
+        agotado = False
+        for match in cola:
+            # Un partido cuyos dos equipos ya están en caché no gasta peticiones,
+            # así que se calcula igual aunque quede poco presupuesto. Solo paramos
+            # cuando de verdad se agotó.
+            if presupuesto_agotado():
+                agotado = True
+                break
+
+            local_id = match["homeTeam"]["id"]
+            visita_id = match["awayTeam"]["id"]
+            codigo_liga = match["competition"]["code"]
 
             promedio_liga = obtener_promedio_liga(codigo_liga, cache)
             stats_local = obtener_stats_equipo(local_id, codigo_liga, cache)
@@ -414,32 +542,29 @@ def correr_actualizacion():
             xg_local, xg_visita = calcular_xg_partido(stats_local, stats_visita, promedio_liga)
             probs = calcular_poisson(xg_local, xg_visita)
 
-            partidos_procesados.append({
-                "local": local, "visita": visita, "liga": nombre_liga,
-                "xg_local": xg_local, "xg_visita": xg_visita,
+            calculadas[match["id"]] = dict(
+                _ficha_base(match),
+                xg_local=xg_local, xg_visita=xg_visita,
                 # cuántos partidos reales hay detrás de cada lado: si son pocos,
                 # la predicción está dominada por la media de liga y conviene saberlo
-                "muestra_local": stats_local["n_local"],
-                "muestra_visita": stats_visita["n_visita"],
+                muestra_local=stats_local["n_local"],
+                muestra_visita=stats_visita["n_visita"],
+                calculado=ahora().isoformat(),
+                pendiente=False,
                 **probs
-            })
+            )
 
-            # escribe el progreso DESPUÉS de cada partido -> esto es lo que hace
-            # que la web los vaya mostrando "poco a poco" en vez de todos de golpe
-            escribir_estado({
-                "estado": "actualizando",
-                "dia_mostrado": f"{etiqueta_dia} ({fecha})",
-                "partidos": partidos_procesados,
-                "ultima_actualizacion": ahora().isoformat()
-            })
+            # se escribe el progreso DESPUÉS de cada partido -> la web los va
+            # rellenando de uno en uno en vez de todos de golpe al final
+            escribir_estado(_construir_estado(por_fecha, calculadas, "actualizando", debug))
             guardar_cache(cache)
 
-        escribir_estado({
-            "estado": "listo",
-            "dia_mostrado": f"{etiqueta_dia} ({fecha})",
-            "partidos": partidos_procesados,
-            "ultima_actualizacion": ahora().isoformat()
-        })
+        guardar_cache(cache)
+        # "parcial" = quedan partidos sin calcular y hay que esperar a la siguiente
+        # pasada del cron. "listo" = la ventana entera tiene número.
+        final = _construir_estado(por_fecha, calculadas,
+                                  "parcial" if agotado else "listo", debug)
+        escribir_estado(final)
 
     except Exception as e:
         print(f"Error en la actualización: {e}", file=sys.stderr)
