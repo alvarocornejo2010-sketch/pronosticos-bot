@@ -12,9 +12,16 @@
   @keyframes aparecer { to { opacity: 1; } }
   .equipos { font-weight: 600; font-size: 1.05rem; }
   .liga { color: #888; font-size: 0.8rem; }
-  .xg { color: #666; font-size: 0.8rem; margin: 4px 0; }
-  .fila { display: flex; justify-content: space-between; margin: 2px 0; font-size: 0.92rem; }
-  .doble { color: #4ade80; font-weight: 600; margin-top: 6px; }
+  .xg { color: #666; font-size: 0.8rem; margin: 4px 0 10px; }
+  .aviso { color: #fbbf24; font-size: 0.75rem; margin: 4px 0 10px; }
+  .fila { margin: 6px 0; font-size: 0.92rem; }
+  .fila-cab { display: flex; justify-content: space-between; margin-bottom: 3px; }
+  .barra { height: 6px; background: #262a33; border-radius: 3px; overflow: hidden; }
+  .barra > span { display: block; height: 100%; background: #60a5fa; }
+  .dobles { display: flex; gap: 8px; margin-top: 12px; }
+  .doble { flex: 1; background: #14261c; border: 1px solid #22543d; border-radius: 8px; padding: 6px; text-align: center; }
+  .doble b { display: block; color: #4ade80; font-size: 0.95rem; }
+  .doble span { color: #7a8a80; font-size: 0.7rem; }
   .vacio { color: #999; text-align: center; margin-top: 40px; }
 </style>
 </head>
@@ -24,6 +31,13 @@
   <div id="partidos"></div>
 
 <script>
+function fila(etiqueta, valor, color) {
+  return `<div class="fila">
+      <div class="fila-cab"><span>${etiqueta}</span><span>${valor}%</span></div>
+      <div class="barra"><span style="width:${valor}%;background:${color}"></span></div>
+    </div>`;
+}
+
 async function actualizarVista() {
   const resp = await fetch("/api/estado");
   const data = await resp.json();
@@ -34,6 +48,10 @@ async function actualizarVista() {
   if (data.estado === "sin_datos") {
     barra.textContent = "Todavía no hay datos. Esperando primera actualización...";
     cont.innerHTML = "";
+    return;
+  }
+  if (data.estado === "error") {
+    barra.textContent = "Error en la última actualización: " + (data.error || "desconocido");
     return;
   }
   if (data.estado === "sin_partidos") {
@@ -51,6 +69,13 @@ async function actualizarVista() {
     const id = p.local + "_" + p.visita;
     if (idsActuales.has(id)) return; // ya está en pantalla, no lo dupliques
 
+    // Si hay muy pocos partidos previos, la predicción está dominada por la media
+    // de la liga. Mejor decirlo que fingir precisión que no existe.
+    const muestra = Math.min(p.muestra_local ?? 99, p.muestra_visita ?? 99);
+    const aviso = muestra < 4
+      ? `<div class="aviso">⚠ Pocos partidos previos (${muestra}); la estimación tira hacia la media de la liga.</div>`
+      : "";
+
     const div = document.createElement("div");
     div.className = "partido";
     div.dataset.id = id;
@@ -58,10 +83,15 @@ async function actualizarVista() {
       <div class="equipos">${p.local} vs ${p.visita}</div>
       <div class="liga">${p.liga}</div>
       <div class="xg">xG estimado: ${p.xg_local} - ${p.xg_visita}</div>
-      <div class="fila"><span>Victoria Local</span><span>${p.prob_local}%</span></div>
-      <div class="fila"><span>Empate</span><span>${p.prob_empate}%</span></div>
-      <div class="fila"><span>Victoria Visita</span><span>${p.prob_visita}%</span></div>
-      <div class="doble">Doble Oportunidad (1X): ${p.prob_1x}%</div>
+      ${aviso}
+      ${fila("Victoria Local", p.prob_local, "#60a5fa")}
+      ${fila("Empate", p.prob_empate, "#a1a1aa")}
+      ${fila("Victoria Visita", p.prob_visita, "#f472b6")}
+      <div class="dobles">
+        <div class="doble"><b>${p.prob_1x}%</b><span>1X</span></div>
+        <div class="doble"><b>${p.prob_x2}%</b><span>X2</span></div>
+        <div class="doble"><b>${p.prob_12}%</b><span>12</span></div>
+      </div>
     `;
     cont.appendChild(div);
   });

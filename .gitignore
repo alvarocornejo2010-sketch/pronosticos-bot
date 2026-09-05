@@ -2,6 +2,7 @@
 .env
 cache.json
 data.json
+backtest_cache/
 
 # Basura estándar de Python:
 __pycache__/
