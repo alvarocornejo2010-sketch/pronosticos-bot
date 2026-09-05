@@ -49,8 +49,13 @@ LIGAS = {
 # ya está en el día siguiente y te muestra los partidos equivocados.
 TZ = ZoneInfo(os.environ.get("TZ_LOCAL", "America/Lima"))
 
-MIN_INTERVALO_ACTUALIZACION = timedelta(minutes=25)  # un poco menos que los 30 min del cron,
-                                                     # así nunca se solapan por pequeñas diferencias de reloj
+# Espera mínima entre actualizaciones, en minutos. Por defecto 25: un poco menos
+# que los 30 del cron, así nunca se solapan por diferencias de reloj.
+# En desarrollo ponlo a 0 (variable de entorno MIN_MINUTOS_ACTUALIZACION=0) para
+# poder refrescar cuando quieras. También puedes saltártelo puntualmente
+# añadiendo &forzar=1 a la URL de /actualizar.
+MIN_INTERVALO_ACTUALIZACION = timedelta(
+    minutes=int(os.environ.get("MIN_MINUTOS_ACTUALIZACION", "25")))
 
 # En Render el disco es efímero: se borra en cada deploy y cuando el free tier
 # duerme el servicio. Si algún día contratas un disco persistente, apúntalo con
@@ -471,9 +476,13 @@ def actualizar():
     if actualizando_ahora:
         return jsonify({"mensaje": "ya hay una actualización en curso"})
 
+    # &forzar=1 salta la espera. Sigue exigiendo el token, así que no lo puede
+    # usar cualquiera; es solo para desarrollar sin esperar.
+    forzar = request.args.get("forzar") in ("1", "true", "si")
+
     estado_actual = leer_estado()
     ultima = estado_actual.get("ultima_actualizacion")
-    if ultima:
+    if ultima and not forzar:
         transcurrido = ahora() - _parsear_fecha(ultima)
         if transcurrido < MIN_INTERVALO_ACTUALIZACION:
             faltan = MIN_INTERVALO_ACTUALIZACION - transcurrido
