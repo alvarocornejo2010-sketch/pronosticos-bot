@@ -51,12 +51,17 @@ def descargar_temporada(season):
             return json.load(f)
 
     print(f"Descargando {LIGA} {season}...")
-    resp = requests.get(
-        f"{BASE_URL}/competitions/{LIGA}/matches",
-        headers={"X-Auth-Token": os.environ["FOOTBALL_DATA_TOKEN"]},
-        params={"season": season, "status": "FINISHED"},
-        timeout=30,
-    )
+    try:
+        resp = requests.get(
+            f"{BASE_URL}/competitions/{LIGA}/matches",
+            headers={"X-Auth-Token": os.environ["FOOTBALL_DATA_TOKEN"]},
+            params={"season": season, "status": "FINISHED"},
+            timeout=30,
+        )
+    except requests.RequestException as e:
+        # sin conexión, proxy, DNS... da igual: se devuelve vacío y quien llama avisa
+        print(f"  No se pudo conectar: {e}")
+        return []
     if resp.status_code != 200:
         print(f"  HTTP {resp.status_code}: {resp.text[:200]}")
         return []

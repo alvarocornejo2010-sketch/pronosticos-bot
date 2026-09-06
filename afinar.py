@@ -18,6 +18,7 @@ Reutiliza las temporadas ya descargadas en backtest_cache/.
 import os
 import sys
 import math
+import statistics as stats
 from collections import defaultdict, deque
 
 import numpy as np
@@ -155,9 +156,26 @@ def evaluar(partidos, pseudo, rho, recoger=False):
 
 
 def cargar(seasons):
+    """Carga temporadas y AVISA de las que no vinieron.
+
+    Antes se tragaba un 403 en silencio y luego decía "temporadas [2021,2022,2023]"
+    cuando en realidad solo había cargado una. Un error que te hace creer que tienes
+    tres veces más datos de los que tienes es peor que un error que revienta.
+    """
     todos = []
+    vacias = []
     for s in seasons:
-        todos.extend(descargar_temporada(s))
+        ms = descargar_temporada(s)
+        if not ms:
+            vacias.append(s)
+        todos.extend(ms)
+    if vacias:
+        print()
+        print("  " + "!" * 68)
+        print(f"  AVISO: no se pudo cargar {vacias}. El plan free de football-data.org")
+        print(f"  solo cubre las temporadas recientes. Se sigue con lo que hay,")
+        print(f"  pero NO son las temporadas que pediste.")
+        print("  " + "!" * 68)
     limpios = []
     for m in todos:
         ft = m.get("score", {}).get("fullTime", {})
@@ -188,6 +206,24 @@ def tabla_calibracion(detalle, minimo=20):
     return filas
 
 
+def comparar_pareado(partidos, config_a, config_b):
+    """¿La diferencia entre dos configuraciones supera el ruido?
+
+    Se comparan sobre LOS MISMOS partidos y se mira la diferencia partido a
+    partido (test pareado). Eso cancela la dificultad de cada partido y deja
+    solo el efecto de cambiar los parámetros. Sin esto es facilísimo celebrar
+    una mejora de 0.002 que es puro azar muestral.
+    """
+    da = evaluar(partidos, *config_a, recoger=True)["detalle"]
+    db = evaluar(partidos, *config_b, recoger=True)["detalle"]
+    la = [logloss(p, y) for p, y in da]
+    lb = [logloss(p, y) for p, y in db]
+    dif = [x - y for x, y in zip(la, lb)]          # positivo = b es mejor
+    media = stats.mean(dif)
+    se = stats.stdev(dif) / math.sqrt(len(dif))
+    return media, se, abs(media) > 2 * se
+
+
 def main():
     args = [int(a) for a in sys.argv[1:]] or [2023, 2024]
     if len(args) < 2:
@@ -196,8 +232,10 @@ def main():
 
     train = cargar(train_s)
     test = cargar(test_s)
-    print(f"\nAjuste  (train): temporadas {train_s} -> {len(train)} partidos")
-    print(f"Validación (test): temporadas {test_s} -> {len(test)} partidos")
+    print(f"\nAjuste  (train): {len(train)} partidos (pedidas: {train_s})")
+    print(f"Validación (test): {len(test)} partidos (pedidas: {test_s})")
+    if len(train) < 300 or len(test) < 300:
+        print("  OJO: muy pocos partidos. Cualquier conclusión será frágil.")
     print("Los parámetros se eligen SOLO con train. El test no se toca hasta el final.\n")
 
     print("=" * 74)
@@ -236,18 +274,24 @@ def main():
     print(f"  {f'Config nueva (pseudo={mejor[0]}, rho={mejor[1]})':<34}"
           f"{r_mej['brier']:>9.4f}{r_mej['logloss']:>10.4f}{r_mej['acierto']:>9.1f}%")
 
-    d_ll = r_act["logloss"] - r_mej["logloss"]
-    d_br = r_act["brier"] - r_mej["brier"]
+    media, se, significativo = comparar_pareado(test, actual, mejor)
     print()
-    if d_ll > 0.002 and d_br > 0.001:
-        print(f"  MEJORA CONFIRMADA en datos no vistos: LogLoss {d_ll:+.4f}, Brier {d_br:+.4f}.")
-        print("  Merece la pena cambiar los parámetros en app.py.")
-    elif d_ll < -0.002:
-        print(f"  EMPEORA en test (LogLoss {d_ll:+.4f}). La ganadora del train lo era por suerte.")
-        print("  NO cambies nada: el sobreajuste estaba ahí y el test lo ha cazado.")
+    print(f"  Diferencia pareada de LogLoss: {media:+.4f} ± {se:.4f} (1 s.e.)")
+    print(f"  {'Supera el ruido' if significativo else 'NO supera el ruido'} "
+          f"(hace falta |dif| > 2 s.e. = {2*se:.4f})")
+    print()
+    if significativo and media > 0:
+        print(f"  MEJORA CONFIRMADA en datos no vistos y por encima del ruido.")
+        print(f"  Cambia PSEUDO_PARTIDOS a {mejor[0]} en app.py"
+              + (f" y añade la corrección Dixon-Coles con rho={mejor[1]}." if mejor[1] else "."))
+    elif significativo and media < 0:
+        print("  EMPEORA en test, y de forma significativa. La ganadora del train lo era")
+        print("  por sobreajuste. NO cambies nada: el test acaba de hacer su trabajo.")
     else:
-        print(f"  Diferencia despreciable en test (LogLoss {d_ll:+.4f}).")
-        print("  No hay motivo para tocar los parámetros; quédate con los actuales.")
+        print("  Empate estadístico: con estos datos no se puede distinguir una")
+        print("  configuración de la otra. NO cambies nada — cambiar parámetros")
+        print("  persiguiendo ruido es como no hacer nada, pero con más pasos.")
+        print("  Para afinar de verdad harían falta más temporadas.")
 
     print()
     print("=" * 74)
