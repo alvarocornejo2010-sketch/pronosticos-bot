@@ -36,12 +36,25 @@ BASE_URL = "https://api.football-data.org/v4"
 
 LIGAS = {
     "La Liga": "PD",
-    # Ligas comentadas temporalmente mientras se prueba con un nicho más chico.
-    # Descoméntalas cuando quieras volver a las 5 ligas:
-    # "Premier League": "PL",
-    # "Ligue 1": "FL1",
-    # "Bundesliga": "BL1",
-    # "Champions League": "CL",
+    "Premier League": "PL",
+    "Ligue 1": "FL1",
+    "Bundesliga": "BL1",
+    # Serie A ("SA") y Eredivisie ("DED") también entran en el plan free si las quieres.
+
+    # "Champions League": "CL",  <- NO la actives sin cambiar el modelo antes.
+    #
+    # El modelo calcula la fuerza de un equipo con sus partidos EN ESA MISMA
+    # competición. En una liga doméstica son ~19 en casa y ~19 fuera; en Champions
+    # son 4 y 4. Con esa muestra el encogimiento manda casi por completo y todos los
+    # partidos saldrían parecidos.
+    #
+    # Y peor: la "media de la liga" en Champions no significa nada. Mezcla al Bayern
+    # con el campeón de Kazajistán, así que dividir entre esa media no mide fuerza
+    # relativa, que es justo lo que el modelo necesita.
+    #
+    # Para hacerla bien habría que coger las stats de cada equipo de SU liga
+    # doméstica y normalizarlas entre ligas. Es un proyecto aparte, no un
+    # descomentar.
 }
 
 # Zona horaria de referencia para decidir qué es "hoy".
@@ -75,7 +88,7 @@ CACHE_FILE = os.path.join(DATA_DIR, "cache.json")   # sumas crudas por equipo y 
 DATA_FILE = os.path.join(DATA_DIR, "data.json")     # lo que ve la página web, se va llenando poco a poco
 
 CACHE_VERSION = 2               # subir esto invalida cachés con formato viejo
-DIAS_VALIDEZ_EQUIPO = 3
+DIAS_VALIDEZ_EQUIPO = int(os.environ.get("DIAS_VALIDEZ_EQUIPO", "3"))
 DIAS_VALIDEZ_LIGA = 7
 PAUSA_ENTRE_REQUESTS = 6.5      # 10 requests/min en el plan free
 MAX_DIAS_BUSQUEDA = int(os.environ.get("DIAS_ADELANTE", "7"))
@@ -623,8 +636,16 @@ def actualizar():
     forzar = request.args.get("forzar") in ("1", "true", "si")
 
     estado_actual = leer_estado()
+
+    # Si la pasada anterior se quedó a medias, continuar NO es rehacer trabajo:
+    # son partidos que aún no tienen número. La espera existe para no gastar cuota
+    # repitiendo lo mismo, así que no debe frenar esto. Con varias ligas la ventana
+    # no cabe en una sola pasada y sin esto tardaría horas en llenarse.
+    quedan_pendientes = (estado_actual.get("estado") == "parcial"
+                         and estado_actual.get("pendientes", 0) > 0)
+
     ultima = estado_actual.get("ultima_actualizacion")
-    if ultima and not forzar:
+    if ultima and not forzar and not quedan_pendientes:
         transcurrido = ahora() - _parsear_fecha(ultima)
         if transcurrido < MIN_INTERVALO_ACTUALIZACION:
             faltan = MIN_INTERVALO_ACTUALIZACION - transcurrido
