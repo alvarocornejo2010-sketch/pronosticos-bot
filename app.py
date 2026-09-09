@@ -106,6 +106,12 @@ MAX_DIAS_BUSQUEDA = int(os.environ.get("DIAS_ADELANTE", "7"))
 # A 6.5s por petición, 40 peticiones son unos 4,5 minutos de reloj.
 PRESUPUESTO_REQUESTS = int(os.environ.get("PRESUPUESTO_REQUESTS", "40"))
 
+# Cuánto vale una lista de partidos antes de volver a pedirla. Un calendario a 7 días
+# no cambia de un cuarto de hora a otro, y pedirlo en cada pasada era el 90% de las
+# peticiones: 4 por pasada, 26 segundos de espera, y en régimen estacionario para
+# descubrir que no había nada que hacer.
+HORAS_VALIDEZ_FIXTURES = int(os.environ.get("HORAS_VALIDEZ_FIXTURES", "2"))
+
 # Cuánto vale una predicción ya calculada antes de rehacerla. Mientras siga
 # fresca no se recalcula, así las pasadas siguientes gastan el presupuesto en
 # los partidos que aún no tienen número en vez de repetir trabajo.
@@ -421,13 +427,15 @@ def calcular_poisson(gla, gvi, limite=LIMITE_GOLES):
 
     # Nombres con prefijo "prob_" para que NUNCA choquen con las claves
     # "local"/"visita" que ya usamos para los nombres de los equipos.
+    # float() a propósito: scipy devuelve np.float64 y eso se propaga hasta el JSON,
+    # donde revienta al serializar (y las comparaciones acaban dando np.bool_).
     return {
-        "prob_local": round(pl * 100, 2),
-        "prob_empate": round(pe * 100, 2),
-        "prob_visita": round(pv * 100, 2),
-        "prob_1x": round((pl + pe) * 100, 2),
-        "prob_x2": round((pe + pv) * 100, 2),
-        "prob_12": round((pl + pv) * 100, 2),
+        "prob_local": round(float(pl) * 100, 2),
+        "prob_empate": round(float(pe) * 100, 2),
+        "prob_visita": round(float(pv) * 100, 2),
+        "prob_1x": round(float(pl + pe) * 100, 2),
+        "prob_x2": round(float(pe + pv) * 100, 2),
+        "prob_12": round(float(pl + pv) * 100, 2),
     }
 
 
@@ -444,51 +452,75 @@ def etiqueta_de_dia(fecha, hoy):
     return DIAS_SEMANA[fecha.weekday()].capitalize()
 
 
-def obtener_fixtures():
+def obtener_fixtures(cache, forzar=False):
     """Todos los partidos por jugar en la ventana, agrupados por día local.
 
     IMPORTANTE: usa /competitions/{codigo}/matches y NO el endpoint global
-    /v4/matches. En el plan free de football-data.org el global responde
-    HTTP 200 con una lista VACÍA en vez de dar un 403, así que parece que
-    simplemente no hay partidos.
+    /v4/matches. En el plan free el global responde HTTP 200 con lista VACÍA en vez
+    de dar un 403, así que parece que simplemente no hay partidos.
 
-    Cuesta 1 petición por liga para TODA la ventana, así que ampliar los días
-    que se muestran es gratis; lo que cuesta son las stats de cada equipo.
+    La lista se cachea HORAS_VALIDEZ_FIXTURES. Los partidos que ya empezaron se
+    descartan al leer, no al pedir, así que la caché no hace que se muestren partidos
+    viejos. La caché se invalida sola cuando cambia el día, porque el rango de fechas
+    forma parte de la clave.
     """
     hoy = ahora().date()
     hasta = hoy + timedelta(days=MAX_DIAS_BUSQUEDA)
+    rango = f"{hoy}/{hasta}"
+    guardadas = cache.setdefault("fixtures", {})
+
     debug = []
     por_fecha = defaultdict(list)
+    ahora_utc = datetime.now(timezone.utc)
 
     for nombre_liga, codigo in LIGAS.items():
-        resp = get_con_pausa(f"{BASE_URL}/competitions/{codigo}/matches", {
-            "dateFrom": hoy.isoformat(),
-            "dateTo": hasta.isoformat(),
-            # solo lo que aún no se ha jugado: es una web de pronósticos,
-            # no tiene sentido "predecir" un partido que ya terminó
-            "status": "SCHEDULED,TIMED",
-        })
-        body = resp.json() if resp.status_code == 200 else {}
-        matches = body.get("matches", [])
+        entrada = guardadas.get(codigo)
+        vigente = (entrada and not forzar
+                   and entrada.get("rango") == rango
+                   and entrada.get("actualizado")
+                   and ahora() - _parsear_fecha(entrada["actualizado"])
+                       < timedelta(hours=HORAS_VALIDEZ_FIXTURES))
 
+        if vigente:
+            matches = entrada["matches"]
+            edad = int((ahora() - _parsear_fecha(entrada["actualizado"])).total_seconds() / 60)
+            info = {"liga": codigo, "origen": f"caché ({edad} min)", "http_status": None}
+        else:
+            resp = get_con_pausa(f"{BASE_URL}/competitions/{codigo}/matches", {
+                "dateFrom": hoy.isoformat(),
+                "dateTo": hasta.isoformat(),
+                # solo lo que aún no se ha jugado: es una web de pronósticos
+                "status": "SCHEDULED,TIMED",
+            })
+            body = resp.json() if resp.status_code == 200 else {}
+            matches = body.get("matches", [])
+            info = {"liga": codigo, "origen": "API", "http_status": resp.status_code,
+                    "mensaje_api": body.get("message")}
+            if resp.status_code == 200:
+                guardadas[codigo] = {"matches": matches, "rango": rango,
+                                     "actualizado": ahora().isoformat()}
+            elif entrada and entrada.get("rango") == rango:
+                # la API falló pero teníamos algo del mismo rango: mejor eso que nada
+                matches = entrada["matches"]
+                info["origen"] = "caché (la API falló)"
+
+        vivos = 0
         for m in matches:
-            # el endpoint por competición no repite el bloque "competition" en
-            # cada partido, así que se lo inyectamos: el resto del pipeline lo usa
-            m["competition"] = {"code": codigo, "name": nombre_liga}
-            # la fecha viene en UTC; la pasamos a hora local para que "hoy"
-            # signifique lo mismo para ti que para el servidor
-            m["_fecha_local"] = datetime.fromisoformat(
-                m["utcDate"].replace("Z", "+00:00")).astimezone(TZ)
-            por_fecha[m["_fecha_local"].date()].append(m)
+            dt = datetime.fromisoformat(m["utcDate"].replace("Z", "+00:00"))
+            if dt <= ahora_utc:
+                continue   # ya empezó: fuera, aunque la caché aún lo traiga
+            p = dict(m)
+            # el endpoint por competición no repite el bloque "competition" en cada
+            # partido, así que se lo inyectamos: el resto del pipeline lo usa
+            p["competition"] = {"code": codigo, "name": nombre_liga}
+            # la fecha viene en UTC; a hora local para que "hoy" signifique lo mismo
+            p["_fecha_local"] = dt.astimezone(TZ)
+            por_fecha[p["_fecha_local"].date()].append(p)
+            vivos += 1
 
-        debug.append({
-            "liga": codigo,
-            "rango_consultado": f"{hoy} a {hasta}",
-            "http_status": resp.status_code,
-            "cantidad_encontrada": len(matches),
-            "mensaje_api": body.get("message"),
-            "hora_servidor_local": ahora().isoformat(),
-        })
+        info.update({"rango_consultado": rango, "en_lista": len(matches),
+                     "por_jugar": vivos, "hora_servidor_local": ahora().isoformat()})
+        debug.append(info)
 
     for fecha in por_fecha:
         por_fecha[fecha].sort(key=lambda m: m["utcDate"])
@@ -566,7 +598,7 @@ def _construir_estado(por_fecha, calculadas, estado_texto, debug=None):
     return estado
 
 
-def correr_actualizacion():
+def correr_actualizacion(forzar=False):
     """Calcula las predicciones de la ventana completa, poco a poco.
 
     Cada ejecución gasta como mucho PRESUPUESTO_REQUESTS peticiones. Lo que no
@@ -583,7 +615,9 @@ def correr_actualizacion():
 
     try:
         cache = cargar_cache()
-        por_fecha, debug = obtener_fixtures()
+        por_fecha, debug = obtener_fixtures(cache, forzar=forzar)
+        guardar_cache(cache)   # que la lista recién pedida no se pierda
+                               # si la pasada se corta a la mitad
 
         if not por_fecha:
             escribir_estado({
@@ -729,8 +763,39 @@ def actualizar():
             })
 
     # corre en un hilo aparte para responder rápido al cron y no colgar la request
-    threading.Thread(target=correr_actualizacion, daemon=True).start()
+    threading.Thread(target=correr_actualizacion, kwargs={"forzar": forzar},
+                     daemon=True).start()
     return jsonify({"mensaje": "actualización iniciada"})
+
+
+@app.route("/api/validacion")
+def api_validacion():
+    """Resultado del backtest del modelo desplegado, liga por liga."""
+    import validacion
+    return jsonify(validacion.leer_resultado())
+
+
+@app.route("/validar")
+def validar():
+    """Lanza el backtest. Mismo token que /actualizar.
+
+    Cuesta 2 peticiones por liga y solo la primera vez: las temporadas terminadas
+    no cambian, así que quedan cacheadas en disco.
+    """
+    if not hmac.compare_digest(request.args.get("token", ""), UPDATE_SECRET):
+        return jsonify({"error": "token inválido"}), 403
+
+    import validacion
+    if validacion.validando_ahora:
+        return jsonify({"mensaje": "ya hay una validación en curso"})
+    if actualizando_ahora:
+        return jsonify({"mensaje": "hay una actualización en curso; prueba en un minuto"})
+
+    season = request.args.get("temporada", type=int)
+    threading.Thread(target=validacion.correr_validacion, kwargs={"season": season},
+                     daemon=True).start()
+    return jsonify({"mensaje": "validación iniciada",
+                    "consulta": "/api/validacion"})
 
 
 @app.route("/api/ligas")
