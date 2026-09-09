@@ -659,5 +659,115 @@ def actualizar():
     return jsonify({"mensaje": "actualización iniciada"})
 
 
+@app.route("/salud")
+def salud():
+    """Endpoint barato para el keep-alive y para mirar el estado de un vistazo."""
+    e = leer_estado()
+    return jsonify({
+        "ok": True,
+        "estado": e.get("estado"),
+        "total": e.get("total"),
+        "pendientes": e.get("pendientes"),
+        "ultima_actualizacion": e.get("ultima_actualizacion"),
+        "hora": ahora().isoformat(),
+    })
+
+
+# ==========================================
+# PLANIFICADOR INTERNO
+# ==========================================
+# Sustituye a cron-job.org: la app se programa sus propias actualizaciones.
+#
+# El obstáculo: Render free duerme el servicio tras 15 minutos SIN PETICIONES
+# ENTRANTES. Un hilo de fondo no cuenta como tráfico, así que un simple
+# temporizador se moriría con el contenedor. La solución es que la app se pida a
+# sí misma por HTTP cada pocos minutos; Render publica su propia URL en la
+# variable RENDER_EXTERNAL_URL, así que no hay que configurar nada.
+
+EN_RENDER = bool(os.environ.get("RENDER_EXTERNAL_URL"))
+URL_PROPIA = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
+
+# En local viene desactivado por defecto: al importar app.py para el backtest o
+# para una prueba no queremos que se ponga a gastar cuota de la API por su cuenta.
+AUTO_ACTUALIZAR = os.environ.get(
+    "AUTO_ACTUALIZAR", "1" if EN_RENDER else "0").lower() not in ("0", "false", "no")
+
+SEGUNDOS_KEEPALIVE = int(os.environ.get("SEGUNDOS_KEEPALIVE", "540"))   # 9 min < 15 de Render
+SEGUNDOS_TICK = int(os.environ.get("SEGUNDOS_TICK", "300"))            # cada cuánto se revisa
+
+_planificador_arrancado = False
+
+
+def _toca_actualizar():
+    """¿Hay algo que hacer ahora mismo?"""
+    e = leer_estado()
+    estado = e.get("estado")
+
+    if estado in (None, "sin_datos", "error"):
+        return True, "no hay datos todavía"
+
+    # Continuar una pasada a medias no es rehacer trabajo: son partidos que aún
+    # no tienen número. No debe esperar a que pase el intervalo completo.
+    if estado == "parcial" and e.get("pendientes", 0) > 0:
+        return True, f"quedan {e['pendientes']} partidos por calcular"
+
+    ultima = e.get("ultima_actualizacion")
+    if not ultima:
+        return True, "sin marca de tiempo"
+
+    transcurrido = ahora() - _parsear_fecha(ultima)
+    if transcurrido >= MIN_INTERVALO_ACTUALIZACION:
+        return True, f"última hace {int(transcurrido.total_seconds()/60)} min"
+    return False, ""
+
+
+def _bucle_keepalive():
+    """Se pide a sí misma para que Render no duerma el servicio."""
+    if not URL_PROPIA:
+        print("Sin RENDER_EXTERNAL_URL: keep-alive desactivado.", file=sys.stderr)
+        return
+    while True:
+        time.sleep(SEGUNDOS_KEEPALIVE)
+        try:
+            requests.get(f"{URL_PROPIA}/salud", timeout=15)
+        except requests.RequestException as e:
+            # que falle un ping no es grave; el siguiente lo intenta otra vez
+            print(f"keep-alive falló: {e}", file=sys.stderr)
+
+
+def _bucle_actualizacion():
+    time.sleep(20)   # deja que el servidor termine de levantarse
+    while True:
+        try:
+            toca, motivo = _toca_actualizar()
+            if toca:
+                print(f"Planificador: actualizando ({motivo})", file=sys.stderr)
+                correr_actualizacion()
+        except Exception as e:
+            # pase lo que pase, el bucle no se muere: si se muere, la web se
+            # queda congelada para siempre y no hay quien la despierte
+            print(f"Planificador: error no esperado: {e}", file=sys.stderr)
+        time.sleep(SEGUNDOS_TICK)
+
+
+def arrancar_planificador():
+    global _planificador_arrancado
+    if _planificador_arrancado or not AUTO_ACTUALIZAR:
+        return
+    _planificador_arrancado = True
+    threading.Thread(target=_bucle_keepalive, daemon=True, name="keepalive").start()
+    threading.Thread(target=_bucle_actualizacion, daemon=True, name="actualizador").start()
+    print(f"Planificador arrancado. Keep-alive cada {SEGUNDOS_KEEPALIVE}s, "
+          f"revisión cada {SEGUNDOS_TICK}s. URL propia: {URL_PROPIA or '(ninguna)'}",
+          file=sys.stderr)
+
+
+# Se arranca al importar el módulo, que es lo que hace gunicorn con `gunicorn app:app`.
+# Con un solo worker (el de por defecto) hay exactamente un planificador. Si algún día
+# escalas a varios workers, pon AUTO_ACTUALIZAR=0 en todos menos uno, o volverás a
+# tener varias actualizaciones pisándose.
+arrancar_planificador()
+
+
 if __name__ == "__main__":
     app.run(debug=False)

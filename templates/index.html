@@ -3,85 +3,160 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
 <title>Pronósticos ⚽</title>
 <style>
   :root {
     --fondo: #0f1115; --tarjeta: #1a1d24; --tarjeta-alta: #212630; --borde: #2b303b;
+    --borde-vivo: #3b4252;
     --texto: #e8eaed; --tenue: #8b93a1; --muy-tenue: #5c6472;
     --local: #60a5fa; --empate: #a1a1aa; --visita: #f472b6; --doble: #4ade80;
+    --gano: #22c55e; --perdio: #ef4444;
+    --r: 12px;
   }
   * { box-sizing: border-box; }
-  body { font-family: system-ui, -apple-system, sans-serif; max-width: 720px;
-         margin: 0 auto; padding: 16px 16px 60px; background: var(--fondo); color: var(--texto); }
+  html { -webkit-text-size-adjust: 100%; }
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 760px;
+         margin: 0 auto; padding: 16px 16px 60px; background: var(--fondo); color: var(--texto);
+         -webkit-tap-highlight-color: transparent; }
+  button { font-family: inherit; color: inherit; cursor: pointer; }
 
-  /* ---------- cabecera comun ---------- */
-  .top { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; min-height: 34px; }
-  .top h1 { font-size: 1.3rem; margin: 0; }
-  .volver { background: var(--tarjeta); border: 1px solid var(--borde); color: var(--texto);
-            border-radius: 8px; padding: 6px 12px; font-size: 0.85rem; cursor: pointer;
-            font-family: inherit; flex-shrink: 0; }
+  /* ---------- cabecera ---------- */
+  .top { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; min-height: 34px; }
+  .top h1 { font-size: 1.25rem; margin: 0; letter-spacing: -0.01em; }
+  .volver { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 8px;
+            padding: 6px 12px; font-size: 0.85rem; flex-shrink: 0; }
   .volver:hover { background: var(--tarjeta-alta); }
 
-  #barra-estado { font-size: 0.82rem; color: var(--tenue); margin-bottom: 6px; }
-  #progreso { height: 4px; background: var(--borde); border-radius: 2px;
-              overflow: hidden; margin-bottom: 20px; }
+  #barra-estado { font-size: 0.8rem; color: var(--tenue); margin-bottom: 6px; }
+  #progreso { height: 3px; background: var(--borde); border-radius: 2px;
+              overflow: hidden; margin-bottom: 18px; }
   #progreso > span { display: block; height: 100%; background: var(--doble); width: 0;
                      transition: width 0.4s; }
 
-  /* ---------- inicio: tarjetas de liga ---------- */
+  /* ---------- inicio ---------- */
   .liga-card { display: flex; align-items: center; justify-content: space-between; gap: 14px;
                width: 100%; text-align: left; background: var(--tarjeta);
-               border: 1px solid var(--borde); border-radius: 12px; padding: 18px;
-               margin-bottom: 12px; cursor: pointer; color: inherit; font-family: inherit;
-               transition: background 0.15s, border-color 0.15s; }
-  .liga-card:hover { background: var(--tarjeta-alta); border-color: #3b4252; }
-  .liga-card .nombre { font-size: 1.1rem; font-weight: 600; }
-  .liga-card .meta { font-size: 0.8rem; color: var(--tenue); margin-top: 3px; }
+               border: 1px solid var(--borde); border-radius: var(--r); padding: 16px 18px;
+               margin-bottom: 10px; transition: background .15s, border-color .15s; }
+  .liga-card:hover { background: var(--tarjeta-alta); border-color: var(--borde-vivo); }
+  .liga-card .nombre { font-size: 1.05rem; font-weight: 600; }
+  .liga-card .meta { font-size: 0.78rem; color: var(--tenue); margin-top: 3px; }
+  .liga-card .escudos { display: flex; margin-right: 4px; }
+  .liga-card .escudos img { width: 22px; height: 22px; object-fit: contain;
+                            margin-left: -7px; filter: drop-shadow(0 0 2px var(--fondo)); }
   .liga-card .flecha { color: var(--muy-tenue); font-size: 1.3rem; }
 
-  /* ---------- selector de fechas ---------- */
-  .fechas { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 10px;
-            margin-bottom: 16px; scrollbar-width: thin; }
+  /* ---------- controles ---------- */
+  .fechas { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 10px;
+            margin-bottom: 10px; scrollbar-width: thin; }
   .chip { flex-shrink: 0; background: var(--tarjeta); border: 1px solid var(--borde);
-          color: var(--tenue); border-radius: 999px; padding: 7px 14px; font-size: 0.82rem;
-          cursor: pointer; font-family: inherit; white-space: nowrap; }
+          color: var(--tenue); border-radius: 999px; padding: 7px 14px; font-size: 0.8rem;
+          white-space: nowrap; transition: background .15s; }
   .chip:hover { background: var(--tarjeta-alta); }
   .chip.activo { background: var(--local); border-color: var(--local); color: #0f1115; font-weight: 600; }
-  .chip .n { opacity: 0.65; margin-left: 5px; font-size: 0.75rem; }
+  .chip .n { opacity: 0.65; margin-left: 5px; font-size: 0.74rem; }
 
-  /* ---------- partidos ---------- */
-  .dia-cab { font-size: 0.85rem; color: var(--muy-tenue); text-transform: uppercase;
-             letter-spacing: 0.04em; padding-bottom: 6px; margin: 22px 0 10px;
+  .herramientas { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .buscador { flex: 1 1 150px; min-width: 0; background: var(--tarjeta); color: var(--texto);
+              border: 1px solid var(--borde); border-radius: 8px; padding: 8px 11px;
+              font-size: 0.85rem; font-family: inherit; }
+  .buscador::placeholder { color: var(--muy-tenue); }
+  .buscador:focus { outline: none; border-color: var(--borde-vivo); }
+  .orden { background: var(--tarjeta); color: var(--texto); border: 1px solid var(--borde);
+           border-radius: 8px; padding: 8px 11px; font-size: 0.85rem; font-family: inherit; }
+  .orden:focus { outline: none; border-color: var(--borde-vivo); }
+
+  /* ---------- lista ---------- */
+  .dia-cab { font-size: 0.76rem; color: var(--muy-tenue); text-transform: uppercase;
+             letter-spacing: 0.06em; padding-bottom: 6px; margin: 20px 0 10px;
              border-bottom: 1px solid var(--borde); }
   .dia-cab:first-child { margin-top: 0; }
 
-  .partido { border: 1px solid var(--borde); border-radius: 10px; padding: 13px;
-             margin-bottom: 10px; background: var(--tarjeta); }
-  .partido.pendiente { opacity: 0.5; }
-  .cab { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-  .equipos { font-weight: 600; font-size: 1rem; }
-  .hora { font-size: 0.8rem; color: var(--tenue); white-space: nowrap;
-          font-variant-numeric: tabular-nums; }
-  .liga { color: var(--muy-tenue); font-size: 0.75rem; margin-top: 2px; }
-  .xg { color: var(--tenue); font-size: 0.78rem; margin: 8px 0 2px;
-        font-variant-numeric: tabular-nums; }
-  .aviso { color: #fbbf24; font-size: 0.73rem; margin: 6px 0 2px; }
-  .esperando { color: var(--muy-tenue); font-size: 0.8rem; margin-top: 8px; font-style: italic; }
+  .partido { border: 1px solid var(--borde); border-radius: var(--r); margin-bottom: 9px;
+             background: var(--tarjeta); overflow: hidden; transition: border-color .15s; }
+  .partido:hover { border-color: var(--borde-vivo); }
+  .partido.abierto { border-color: var(--borde-vivo); background: var(--tarjeta-alta); }
 
-  .fila { margin: 7px 0; font-size: 0.88rem; }
+  .resumen { width: 100%; text-align: left; background: none; border: 0; padding: 13px 14px;
+             display: block; }
+
+  /* min-width:0 en toda la cadena: sin esto el nombre largo empuja la columna
+     de la hora fuera de la tarjeta y en móvil se lee "14:0" en vez de "14:00". */
+  .lados { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px;
+           align-items: start; }
+  .lados > div { min-width: 0; }
+  .equipo { display: flex; align-items: center; gap: 9px; margin: 3px 0; min-width: 0; }
+  .escudo { width: 24px; height: 24px; object-fit: contain; flex-shrink: 0; }
+  .escudo-ph { width: 24px; height: 24px; border-radius: 50%; background: var(--borde);
+               flex-shrink: 0; }
+  .nombre-eq { font-weight: 600; font-size: 0.97rem; overflow: hidden;
+               text-overflow: ellipsis; white-space: nowrap; }
+  .clasif { font-size: 0.72rem; color: var(--muy-tenue); font-variant-numeric: tabular-nums;
+            white-space: nowrap; flex-shrink: 0; }
+  .forma { display: inline-flex; gap: 2px; margin-left: 2px; vertical-align: -1px; }
+  .forma i { width: 13px; height: 13px; border-radius: 3px; font-style: normal;
+             font-size: 0.58rem; font-weight: 700; line-height: 13px; text-align: center;
+             color: #0f1115; }
+  .f-V { background: var(--gano); }
+  .f-E { background: var(--empate); }
+  .f-D { background: var(--perdio); color: #fff; }
+
+  .meta-dcha { text-align: right; font-variant-numeric: tabular-nums; }
+  .hora { font-size: 0.86rem; font-weight: 600; }
+  .jornada { font-size: 0.7rem; color: var(--muy-tenue); margin-top: 3px; }
+
+  /* barra apilada 1/X/2 */
+  .apilada { display: flex; height: 22px; border-radius: 6px; overflow: hidden;
+             margin-top: 12px; background: #262a33; gap: 2px; }
+  .apilada > span { display: flex; align-items: center; justify-content: center;
+                    font-size: 0.7rem; font-weight: 700; color: #0f1115;
+                    font-variant-numeric: tabular-nums; overflow: hidden;
+                    transition: width .35s ease; min-width: 0; }
+  /* Una sola leyenda arriba de la lista: los colores son los mismos en todas las
+     tarjetas, repetirla en cada una solo añadía ruido. */
+  .leyenda { display: flex; gap: 14px; margin: 0 0 14px 2px; flex-wrap: wrap;
+             font-size: 0.7rem; color: var(--muy-tenue); }
+  .leyenda span { display: inline-flex; align-items: center; gap: 5px; }
+  .leyenda i { width: 9px; height: 9px; border-radius: 2px; }
+
+  /* En pantallas estrechas el bloque de posición y forma le comía el sitio al
+     nombre ("Barc..."). Aquí baja a su propia línea, alineado bajo el nombre. */
+  @media (max-width: 480px) {
+    .equipo { flex-wrap: wrap; }
+    .nombre-eq { white-space: normal; }
+    .clasif { flex-basis: 100%; margin-left: 33px; margin-top: 2px; }
+  }
+
+  .esperando { color: var(--muy-tenue); font-size: 0.8rem; margin-top: 10px; font-style: italic; }
+  .skel { height: 22px; border-radius: 6px; margin-top: 12px;
+          background: linear-gradient(90deg, #262a33 25%, #2f3441 50%, #262a33 75%);
+          background-size: 200% 100%; animation: sk 1.4s infinite; }
+  @keyframes sk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+  /* ---------- detalle desplegado ---------- */
+  .detalle { padding: 0 14px 14px; border-top: 1px solid var(--borde); margin-top: 2px; }
+  .detalle-cab { font-size: 0.72rem; color: var(--muy-tenue); text-transform: uppercase;
+                 letter-spacing: 0.06em; margin: 14px 0 8px; }
+  .xg { color: var(--tenue); font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+  .xg b { color: var(--texto); }
+  .aviso { color: #fbbf24; font-size: 0.74rem; margin-top: 8px; line-height: 1.45; }
+
+  .fila { margin: 8px 0; font-size: 0.84rem; }
   .fila-cab { display: flex; justify-content: space-between; margin-bottom: 3px;
               font-variant-numeric: tabular-nums; }
   .barra { height: 6px; background: #262a33; border-radius: 3px; overflow: hidden; }
-  .barra > span { display: block; height: 100%; transition: width 0.3s; }
+  .barra > span { display: block; height: 100%; transition: width .3s; }
 
   .dobles { display: flex; gap: 7px; margin-top: 12px; }
   .doble { flex: 1; background: #14261c; border: 1px solid #22543d; border-radius: 8px;
-           padding: 6px 4px; text-align: center; }
+           padding: 7px 4px; text-align: center; }
   .doble b { display: block; color: var(--doble); font-size: 0.92rem;
              font-variant-numeric: tabular-nums; }
-  .doble span { color: #6b8578; font-size: 0.68rem; }
+  .doble span { color: #6b8578; font-size: 0.63rem; line-height: 1.3;
+                display: block; margin-top: 2px; }
 
-  .vacio { color: var(--tenue); text-align: center; margin-top: 40px; }
+  .vacio { color: var(--tenue); text-align: center; margin-top: 40px; font-size: 0.9rem; }
 </style>
 </head>
 <body>
@@ -100,8 +175,12 @@ const btnVolver = document.getElementById("btn-volver");
 const barra = document.getElementById("barra-estado");
 const progreso = document.querySelector("#progreso > span");
 
-let datos = null;      // último /api/estado
-let rutaPintada = null; // para saber cuándo hay que reconstruir el DOM
+let datos = null;         // último /api/estado
+let rutaPintada = null;   // para saber cuándo hay que reconstruir el DOM
+const abiertos = new Set();  // ids de partidos desplegados; vive fuera del DOM para
+                             // que un refresco no cierre lo que el usuario abrió
+let orden = "hora";
+let busqueda = "";
 
 // ==========================================
 // RUTA  (en el hash, así el botón atrás del navegador funciona solo)
@@ -131,6 +210,22 @@ function fechaCorta(iso) {
   const f = partesFecha(iso);
   return `${f.getDate()}/${f.getMonth() + 1}`;
 }
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+// sin acentos y en minúscula, para que "leganes" encuentre "Leganés"
+function normal(s) {
+  return String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+/** Datos de un lado del partido, con respaldo al formato viejo de data.json. */
+function lado(p, cual) {
+  const rico = cual === "local" ? p.equipo_local : p.equipo_visita;
+  if (rico) return rico;
+  return { nombre: cual === "local" ? p.local : p.visita,
+           corto: cual === "local" ? p.local : p.visita, forma: [] };
+}
 
 /** Reagrupa la respuesta por liga: [{codigo, nombre, dias:[{fecha, etiqueta, partidos}]}] */
 function agruparPorLiga(dias) {
@@ -148,9 +243,54 @@ function agruparPorLiga(dias) {
   return [...ligas.values()];
 }
 
+/** Lo claro que es un partido: la probabilidad del resultado más probable. */
+function certeza(p) {
+  if (p.pendiente) return -1;
+  return Math.max(p.prob_local, p.prob_empate, p.prob_visita);
+}
+
 // ==========================================
-// TARJETA DE PARTIDO
+// TROZOS DE TARJETA
 // ==========================================
+const LETRA_FORMA = { W: "V", D: "E", L: "D" };
+const TITULO_FORMA = { W: "Victoria", D: "Empate", L: "Derrota" };
+
+function htmlForma(forma) {
+  if (!forma || !forma.length) return "";
+  // los últimos cinco, el más reciente a la derecha
+  return `<span class="forma">` + forma.slice(-5).map(r => {
+    const l = LETRA_FORMA[r] || "·";
+    return `<i class="f-${l}" title="${TITULO_FORMA[r] || ""}">${l}</i>`;
+  }).join("") + `</span>`;
+}
+
+function htmlEquipo(e) {
+  const escudo = e.escudo
+    ? `<img class="escudo" src="${esc(e.escudo)}" alt="" loading="lazy">`
+    : `<div class="escudo-ph"></div>`;
+  const clasif = e.pos
+    ? `<span class="clasif">${e.pos}º · ${e.pts} pts ${htmlForma(e.forma)}</span>`
+    : htmlForma(e.forma);
+  return `<div class="equipo">
+      ${escudo}
+      <span class="nombre-eq">${esc(e.corto || e.nombre)}</span>
+      ${clasif}
+    </div>`;
+}
+
+function htmlApilada(p) {
+  // Los porcentajes solo se pintan dentro del segmento si caben; si no, el
+  // número quedaría cortado a la mitad y se lee peor que no ponerlo.
+  const seg = (v, color) =>
+    `<span style="width:${v}%;background:${color}">${v >= 12 ? v.toFixed(0) + "%" : ""}</span>`;
+  return `<div class="apilada" role="img"
+      aria-label="Local ${p.prob_local.toFixed(1)}%, empate ${p.prob_empate.toFixed(1)}%, visitante ${p.prob_visita.toFixed(1)}%">
+      ${seg(p.prob_local, "var(--local)")}
+      ${seg(p.prob_empate, "var(--empate)")}
+      ${seg(p.prob_visita, "var(--visita)")}
+    </div>`;
+}
+
 function filaProb(etiqueta, valor, color) {
   return `<div class="fila">
       <div class="fila-cab"><span>${etiqueta}</span><span>${valor.toFixed(1)}%</span></div>
@@ -158,33 +298,54 @@ function filaProb(etiqueta, valor, color) {
     </div>`;
 }
 
-function htmlPartido(p) {
-  const cabecera = `
-    <div class="cab">
-      <div class="equipos">${p.local} vs ${p.visita}</div>
-      <div class="hora">${p.hora}</div>
-    </div>`;
-
-  if (p.pendiente) return cabecera + `<div class="esperando">Pendiente de calcular…</div>`;
-
+function htmlDetalle(p) {
+  const L = lado(p, "local"), V = lado(p, "visita");
   // Si hay muy pocos partidos previos, la predicción está dominada por la media
   // de la liga. Mejor decirlo que fingir precisión que no existe.
   const muestra = Math.min(p.muestra_local ?? 99, p.muestra_visita ?? 99);
   const aviso = muestra < 4
-    ? `<div class="aviso">⚠ Pocos partidos previos (${muestra}); la estimación tira hacia la media de la liga.</div>`
+    ? `<div class="aviso">⚠ Solo ${muestra} partido${muestra === 1 ? "" : "s"} previo${muestra === 1 ? "" : "s"} por ese lado: la estimación tira hacia la media de la liga.</div>`
     : "";
 
-  return cabecera + `
-    <div class="xg">xG estimado: ${p.xg_local} - ${p.xg_visita}</div>
-    ${aviso}
-    ${filaProb("Victoria Local", p.prob_local, "var(--local)")}
-    ${filaProb("Empate", p.prob_empate, "var(--empate)")}
-    ${filaProb("Victoria Visita", p.prob_visita, "var(--visita)")}
-    <div class="dobles">
-      <div class="doble"><b>${p.prob_1x}%</b><span>1X</span></div>
-      <div class="doble"><b>${p.prob_x2}%</b><span>X2</span></div>
-      <div class="doble"><b>${p.prob_12}%</b><span>12</span></div>
+  return `<div class="detalle">
+      <div class="detalle-cab">Goles esperados</div>
+      <div class="xg"><b>${p.xg_local}</b> ${esc(L.corto || L.nombre)} &nbsp;·&nbsp; <b>${p.xg_visita}</b> ${esc(V.corto || V.nombre)}</div>
+      ${aviso}
+      <div class="detalle-cab">Desglose</div>
+      ${filaProb("Gana " + esc(L.corto || L.nombre), p.prob_local, "var(--local)")}
+      ${filaProb("Empate", p.prob_empate, "var(--empate)")}
+      ${filaProb("Gana " + esc(V.corto || V.nombre), p.prob_visita, "var(--visita)")}
+      <div class="detalle-cab">Doble oportunidad</div>
+      <div class="dobles">
+        <div class="doble"><b>${p.prob_1x.toFixed(1)}%</b><span>1X · gana local o empate</span></div>
+        <div class="doble"><b>${p.prob_x2.toFixed(1)}%</b><span>X2 · empate o gana visitante</span></div>
+        <div class="doble"><b>${p.prob_12.toFixed(1)}%</b><span>12 · gana cualquiera</span></div>
+      </div>
     </div>`;
+}
+
+function htmlPartido(p) {
+  const L = lado(p, "local"), V = lado(p, "visita");
+  const abierto = abiertos.has(p.id);
+
+  const cuerpo = p.pendiente
+    ? `<div class="skel"></div><div class="esperando">Pendiente de calcular…</div>`
+    : htmlApilada(p);
+
+  return `<button class="resumen" aria-expanded="${abierto}">
+      <div class="lados">
+        <div>
+          ${htmlEquipo(L)}
+          ${htmlEquipo(V)}
+        </div>
+        <div class="meta-dcha">
+          <div class="hora">${esc(p.hora)}</div>
+          ${p.jornada ? `<div class="jornada">J${p.jornada}</div>` : ""}
+        </div>
+      </div>
+      ${cuerpo}
+    </button>
+    ${abierto && !p.pendiente ? htmlDetalle(p) : ""}`;
 }
 
 // ==========================================
@@ -200,19 +361,26 @@ function pintarInicio(ligas) {
   }
 
   vista.innerHTML = ligas.map(L => {
-    const total = L.dias.reduce((s, d) => s + d.partidos.length, 0);
-    const listos = L.dias.reduce((s, d) => s + d.partidos.filter(p => !p.pendiente).length, 0);
+    const todos = L.dias.flatMap(d => d.partidos);
+    const listos = todos.filter(p => !p.pendiente).length;
     const rango = L.dias.length === 1
       ? L.dias[0].etiqueta
       : `${L.dias[0].etiqueta} — ${fechaCorta(L.dias[L.dias.length - 1].fecha)}`;
+    // un vistazo a quién juega, sin abrir la liga
+    const escudos = [...new Map(todos.flatMap(p => [lado(p, "local"), lado(p, "visita")])
+      .filter(e => e.escudo).map(e => [e.escudo, e])).values()].slice(0, 5);
     return `
-      <button class="liga-card" data-liga="${L.codigo}">
+      <button class="liga-card" data-liga="${esc(L.codigo)}">
         <div>
-          <div class="nombre">${L.nombre}</div>
-          <div class="meta">${total} partido${total === 1 ? "" : "s"} · ${rango}
-            ${listos < total ? ` · ${total - listos} sin calcular` : ""}</div>
+          <div class="nombre">${esc(L.nombre)}</div>
+          <div class="meta">${todos.length} partido${todos.length === 1 ? "" : "s"} · ${rango}${
+            listos < todos.length ? ` · ${todos.length - listos} sin calcular` : ""}</div>
         </div>
-        <div class="flecha">›</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <div class="escudos">${escudos.map(e =>
+            `<img src="${esc(e.escudo)}" alt="" loading="lazy">`).join("")}</div>
+          <div class="flecha">›</div>
+        </div>
       </button>`;
   }).join("");
 
@@ -230,7 +398,28 @@ function pintarLiga(L, fechaSel, reconstruir) {
   btnVolver.textContent = fechaSel ? "← Todas las fechas" : "← Ligas";
 
   if (reconstruir) {
-    vista.innerHTML = `<div class="fechas" id="fechas"></div><div id="lista"></div>`;
+    vista.innerHTML = `
+      <div class="fechas" id="fechas"></div>
+      <div class="herramientas">
+        <input class="buscador" id="buscador" type="search" placeholder="Buscar equipo…"
+               autocomplete="off" value="${esc(busqueda)}">
+        <select class="orden" id="orden">
+          <option value="hora">Por hora</option>
+          <option value="igualado">Más igualado</option>
+          <option value="claro">Más claro</option>
+        </select>
+      </div>
+      <div class="leyenda">
+        <span><i style="background:var(--local)"></i>1 gana local</span>
+        <span><i style="background:var(--empate)"></i>X empate</span>
+        <span><i style="background:var(--visita)"></i>2 gana visitante</span>
+      </div>
+      <div id="lista"></div>`;
+    const inp = document.getElementById("buscador");
+    inp.oninput = () => { busqueda = inp.value; render(); };
+    const sel = document.getElementById("orden");
+    sel.value = orden;
+    sel.onchange = () => { orden = sel.value; render(); };
   }
 
   // --- chips de fecha ---
@@ -252,21 +441,42 @@ function pintarLiga(L, fechaSel, reconstruir) {
     });
   }
 
-  // --- partidos ---
-  const dias = fechaSel ? L.dias.filter(d => d.fecha === fechaSel) : L.dias;
+  // --- filtro de búsqueda ---
+  const q = normal(busqueda).trim();
+  const coincide = p => !q || [lado(p, "local"), lado(p, "visita")]
+    .some(e => normal(e.nombre).includes(q) || normal(e.corto).includes(q));
+
+  let dias = (fechaSel ? L.dias.filter(d => d.fecha === fechaSel) : L.dias)
+    .map(d => ({ ...d, partidos: d.partidos.filter(coincide) }))
+    .filter(d => d.partidos.length);
+
   const lista = document.getElementById("lista");
 
   if (!dias.length) {
-    lista.innerHTML = '<div class="vacio">No hay partidos en esa fecha.</div>';
+    lista.innerHTML = `<div class="vacio">${q
+      ? "Ningún partido con ese equipo."
+      : "No hay partidos en esa fecha."}</div>`;
     return;
+  }
+
+  // Ordenar por certeza rompe la separación por días: si quieres ver el partido
+  // más igualado de la semana, no tiene sentido que siga agrupado por fecha.
+  const agrupado = orden === "hora";
+  if (!agrupado) {
+    const todos = dias.flatMap(d => d.partidos);
+    todos.sort((a, b) => orden === "igualado"
+      ? certeza(a) - certeza(b)   // los pendientes (-1) caen arriba; se filtran abajo
+      : certeza(b) - certeza(a));
+    // los pendientes no tienen número: al final, siempre
+    dias = [{ fecha: "_orden", partidos: todos.filter(p => !p.pendiente)
+                                             .concat(todos.filter(p => p.pendiente)) }];
   }
 
   const vistos = new Set();
   let pos = 0;
   dias.forEach(dia => {
-    // cabecera del día (solo cuando se ven varios días a la vez)
     const idCab = "cab-" + dia.fecha;
-    if (dias.length > 1) {
+    if (agrupado && dias.length > 1) {
       vistos.add(idCab);
       let cab = document.getElementById(idCab);
       if (!cab) {
@@ -288,11 +498,21 @@ function pintarLiga(L, fechaSel, reconstruir) {
         card.id = id;
       }
       // solo se toca el DOM si el contenido cambió de verdad: así no parpadea
-      const huella = JSON.stringify(p);
+      // ni se pierde el scroll. El estado abierto/cerrado entra en la huella
+      // para que desplegar repinte solo esta tarjeta.
+      const huella = JSON.stringify(p) + (abiertos.has(p.id) ? "|1" : "|0");
       if (card.dataset.huella !== huella) {
         card.dataset.huella = huella;
-        card.className = "partido" + (p.pendiente ? " pendiente" : "");
+        card.className = "partido" + (p.pendiente ? " pendiente" : "")
+                       + (abiertos.has(p.id) ? " abierto" : "");
         card.innerHTML = htmlPartido(p);
+        const btn = card.querySelector(".resumen");
+        if (btn && !p.pendiente) {
+          btn.onclick = () => {
+            abiertos.has(p.id) ? abiertos.delete(p.id) : abiertos.add(p.id);
+            render();
+          };
+        }
       }
       if (lista.children[pos] !== card) lista.insertBefore(card, lista.children[pos] || null);
       pos++;
@@ -328,7 +548,8 @@ function render() {
   barra.textContent = datos.estado === "sin_partidos"
     ? "Sin partidos. Última revisión: " + new Date(datos.ultima_actualizacion).toLocaleString()
     : `${texto} ${hechos}/${datos.total} calculados · `
-      + new Date(datos.ultima_actualizacion).toLocaleTimeString();
+      + new Date(datos.ultima_actualizacion)
+          .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   progreso.style.width = datos.total ? (100 * hechos / datos.total) + "%" : "0";
 
   const ligas = agruparPorLiga(datos.dias);
@@ -349,8 +570,7 @@ function render() {
 
 // El botón sube un nivel de la ruta, no usa history.back(). history.length no es
 // fiable: si alguien abre la URL directamente (un enlace compartido, un favorito)
-// el atrás se saldría de la página. Así siempre lleva a donde dice que lleva, y
-// el atrás del navegador sigue funcionando por su cuenta gracias al hash.
+// el atrás se saldría de la página.
 btnVolver.onclick = () => {
   const r = leerRuta();
   if (r.vista === "liga" && r.fecha) irA(`#/liga/${encodeURIComponent(r.liga)}`);
