@@ -87,7 +87,9 @@ DATA_DIR = os.environ.get("DATA_DIR", ".")
 CACHE_FILE = os.path.join(DATA_DIR, "cache.json")   # sumas crudas por equipo y medias de liga
 DATA_FILE = os.path.join(DATA_DIR, "data.json")     # lo que ve la página web, se va llenando poco a poco
 
-CACHE_VERSION = 2               # subir esto invalida cachés con formato viejo
+CACHE_VERSION = 3               # subir esto invalida cachés con formato viejo
+                                # (v3: priors por liga; las medias de v2 se
+                                #  calcularon con el prior español para todas)
 DIAS_VALIDEZ_EQUIPO = int(os.environ.get("DIAS_VALIDEZ_EQUIPO", "3"))
 DIAS_VALIDEZ_LIGA = 7
 PAUSA_ENTRE_REQUESTS = 6.5      # 10 requests/min en el plan free
@@ -120,8 +122,15 @@ PSEUDO_PARTIDOS = 6             # regularización: cuánto pesa la media de liga
                                 # datos propios del equipo. Con 8-10 partidos por lado, sin
                                 # esto un par de goleadas te descuadran toda la fuerza.
 K_LIGA = 50                     # mismo truco para la media de la propia liga
-PRIOR_AVG_LOCAL = 1.50          # medias históricas de LaLiga, usadas solo como ancla
+
+# Ancla de ÚLTIMO RECURSO, solo si no se puede leer la temporada anterior de la liga.
+# Antes estas dos constantes (sacadas de LaLiga) se usaban para TODAS las ligas, y
+# con K_LIGA=50 pesaban el 62% del valor a 30 partidos jugados. La Bundesliga, que
+# marca más, salía sistemáticamente estimada por debajo. Ahora cada liga se ancla
+# en su propia temporada anterior y estas constantes casi nunca se tocan.
+PRIOR_AVG_LOCAL = 1.50
 PRIOR_AVG_VISITA = 1.15
+DIAS_VALIDEZ_PRIOR = 30         # la temporada pasada ya no cambia: se cachea de sobra
 LIMITE_GOLES = 10               # rejilla de Poisson (antes 5, que perdía hasta 6.5% de masa)
 
 actualizando_ahora = False      # evita que dos actualizaciones corran a la vez
@@ -206,6 +215,66 @@ def escribir_estado(estado):
 
 
 # ==========================================
+# ANCLA POR LIGA (temporada anterior)
+# ==========================================
+def temporada_actual():
+    """Año de inicio de la temporada en curso, como lo numera football-data.org.
+
+    Las ligas europeas van de agosto a mayo, así que de julio en adelante ya
+    cuenta el año nuevo. La temporada 2026/27 es 'season=2026'.
+    """
+    a = ahora()
+    return a.year if a.month >= 7 else a.year - 1
+
+
+def obtener_prior_liga(codigo_liga, cache):
+    """Media de goles de la temporada ANTERIOR de ESTA liga.
+
+    Es lo que ancla la estimación mientras la temporada en curso tiene pocos
+    partidos. Usar la media de otra liga (que es lo que se hacía) mete un sesgo
+    del orden del 9% en ligas con ritmo goleador distinto.
+
+    Cuesta una petición por liga y se cachea un mes: la temporada pasada ya no
+    va a cambiar.
+    """
+    priors = cache.setdefault("priors", {})
+    entry = priors.get(codigo_liga)
+    if entry and esta_vigente(entry.get("actualizado"), DIAS_VALIDEZ_PRIOR):
+        return entry
+
+    respaldo = {"avg_local": PRIOR_AVG_LOCAL, "avg_visita": PRIOR_AVG_VISITA,
+                "origen": "constante de respaldo", "partidos": 0, "actualizado": None}
+
+    season = temporada_actual() - 1
+    resp = get_con_pausa(f"{BASE_URL}/competitions/{codigo_liga}/matches",
+                         {"season": season, "status": "FINISHED"})
+    if resp.status_code != 200:
+        print(f"Prior {codigo_liga}: temporada {season} no disponible "
+              f"(HTTP {resp.status_code}). Se usa la constante de respaldo.", file=sys.stderr)
+        return respaldo
+
+    gl = gv = n = 0
+    for m in resp.json().get("matches", []):
+        ft = m.get("score", {}).get("fullTime", {})
+        if ft.get("home") is None or ft.get("away") is None:
+            continue
+        gl += ft["home"]; gv += ft["away"]; n += 1
+
+    # Con media temporada o menos no vale la pena: sería un ancla tan ruidosa
+    # como el problema que intenta resolver.
+    if n < 100:
+        print(f"Prior {codigo_liga}: solo {n} partidos en {season}, insuficiente. "
+              f"Se usa la constante de respaldo.", file=sys.stderr)
+        return respaldo
+
+    entry = {"avg_local": gl / n, "avg_visita": gv / n,
+             "origen": f"temporada {season}", "partidos": n,
+             "actualizado": ahora().isoformat()}
+    priors[codigo_liga] = entry
+    return entry
+
+
+# ==========================================
 # PROMEDIO DE GOLES POR LIGA
 # ==========================================
 def obtener_promedio_liga(codigo_liga, cache):
@@ -213,11 +282,13 @@ def obtener_promedio_liga(codigo_liga, cache):
     if entry and esta_vigente(entry.get("actualizado"), DIAS_VALIDEZ_LIGA):
         return entry
 
+    prior = obtener_prior_liga(codigo_liga, cache)
+
     resp = get_con_pausa(f"{BASE_URL}/competitions/{codigo_liga}/matches", {"status": "FINISHED"})
     if resp.status_code != 200:
         print(f"Liga {codigo_liga}: HTTP {resp.status_code}, uso solo el prior.", file=sys.stderr)
-        return {"avg_local": PRIOR_AVG_LOCAL, "avg_visita": PRIOR_AVG_VISITA,
-                "partidos": 0, "actualizado": None}
+        return {"avg_local": prior["avg_local"], "avg_visita": prior["avg_visita"],
+                "partidos": 0, "prior": prior["origen"], "actualizado": None}
 
     body = resp.json()
     goles_local, goles_visita, partidos = 0, 0, 0
@@ -234,9 +305,12 @@ def obtener_promedio_liga(codigo_liga, cache):
     # de la liga. Se mezcla con el prior histórico y el prior va pesando menos
     # conforme avanza la temporada.
     promedio = {
-        "avg_local": (goles_local + K_LIGA * PRIOR_AVG_LOCAL) / (partidos + K_LIGA),
-        "avg_visita": (goles_visita + K_LIGA * PRIOR_AVG_VISITA) / (partidos + K_LIGA),
+        "avg_local": (goles_local + K_LIGA * prior["avg_local"]) / (partidos + K_LIGA),
+        "avg_visita": (goles_visita + K_LIGA * prior["avg_visita"]) / (partidos + K_LIGA),
         "partidos": partidos,
+        "prior": prior["origen"],
+        "prior_local": round(prior["avg_local"], 3),
+        "prior_visita": round(prior["avg_visita"], 3),
         "actualizado": ahora().isoformat()
     }
     cache["ligas"][codigo_liga] = promedio
@@ -657,6 +731,28 @@ def actualizar():
     # corre en un hilo aparte para responder rápido al cron y no colgar la request
     threading.Thread(target=correr_actualizacion, daemon=True).start()
     return jsonify({"mensaje": "actualización iniciada"})
+
+
+@app.route("/api/ligas")
+def api_ligas():
+    """Qué ancla y qué media está usando cada liga. Sirve para comprobar de un
+    vistazo que cada una va con sus propios números y no con los de otra."""
+    cache = cargar_cache()
+    salida = {}
+    for nombre, codigo in LIGAS.items():
+        p = cache.get("priors", {}).get(codigo)
+        m = cache.get("ligas", {}).get(codigo)
+        salida[codigo] = {
+            "nombre": nombre,
+            "ancla": (p or {}).get("origen", "sin calcular"),
+            "ancla_local": round((p or {}).get("avg_local", 0), 3) or None,
+            "ancla_visita": round((p or {}).get("avg_visita", 0), 3) or None,
+            "ancla_partidos": (p or {}).get("partidos"),
+            "media_usada_local": round((m or {}).get("avg_local", 0), 3) or None,
+            "media_usada_visita": round((m or {}).get("avg_visita", 0), 3) or None,
+            "partidos_esta_temporada": (m or {}).get("partidos"),
+        }
+    return jsonify(salida)
 
 
 @app.route("/salud")
