@@ -856,6 +856,12 @@ AUTO_ACTUALIZAR = os.environ.get(
 SEGUNDOS_KEEPALIVE = int(os.environ.get("SEGUNDOS_KEEPALIVE", "540"))   # 9 min < 15 de Render
 SEGUNDOS_TICK = int(os.environ.get("SEGUNDOS_TICK", "300"))            # cada cuánto se revisa
 
+# La validación del modelo se lanza sola la primera vez, cuando el calendario ya
+# está al día. Son 8 peticiones una sola vez, y evita que dependa de que alguien
+# se acuerde de abrir una URL. Se puede apagar con AUTO_VALIDAR=0.
+AUTO_VALIDAR = os.environ.get("AUTO_VALIDAR", "1").lower() not in ("0", "false", "no")
+MAX_INTENTOS_VALIDACION = 3
+
 _planificador_arrancado = False
 
 
@@ -882,6 +888,31 @@ def _toca_actualizar():
     return False, ""
 
 
+def _toca_validar():
+    """¿Merece la pena lanzar la validación ahora?
+
+    Solo si nunca se ha hecho (o falló pocas veces) y el calendario ya está al día:
+    llenar la web es más urgente que medir el modelo, y las dos cosas compiten por
+    las mismas 10 peticiones por minuto.
+    """
+    if not AUTO_VALIDAR:
+        return False, ""
+    import validacion
+    if validacion.validando_ahora:
+        return False, ""
+    if leer_estado().get("estado") != "listo":
+        return False, ""
+
+    r = validacion.leer_resultado()
+    estado = r.get("estado")
+    if estado == "sin_ejecutar":
+        return True, "nunca se ha ejecutado"
+    intentos = r.get("intentos", 0)
+    if estado == "error" and intentos < MAX_INTENTOS_VALIDACION:
+        return True, f"reintento {intentos + 1} de {MAX_INTENTOS_VALIDACION} tras un error"
+    return False, ""
+
+
 def _bucle_keepalive():
     """Se pide a sí misma para que Render no duerma el servicio."""
     if not URL_PROPIA:
@@ -904,6 +935,12 @@ def _bucle_actualizacion():
             if toca:
                 print(f"Planificador: actualizando ({motivo})", file=sys.stderr)
                 correr_actualizacion()
+            else:
+                tocav, motivov = _toca_validar()
+                if tocav:
+                    print(f"Planificador: validando el modelo ({motivov})", file=sys.stderr)
+                    import validacion
+                    validacion.correr_validacion()
         except Exception as e:
             # pase lo que pase, el bucle no se muere: si se muere, la web se
             # queda congelada para siempre y no hay quien la despierte

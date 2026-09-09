@@ -291,6 +291,9 @@ def correr_validacion(season=None):
         })
     except Exception as e:
         print(f"Validación: error {e}", file=sys.stderr)
-        _escribir({"estado": "error", "error": str(e)})
+        # se cuentan los intentos: si algo falla siempre, no queremos que el
+        # planificador lo reintente indefinidamente gastando cuota
+        previos = leer_resultado().get("intentos", 0)
+        _escribir({"estado": "error", "error": str(e), "intentos": previos + 1})
     finally:
         validando_ahora = False
