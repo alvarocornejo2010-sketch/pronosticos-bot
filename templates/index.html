@@ -3,118 +3,446 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pronósticos ⚽</title>
+<meta name="description" content="Pronósticos 1X2 y doble oportunidad de LaLiga, Premier, Ligue 1 y Bundesliga con un modelo Poisson de fuerzas ataque/defensa.">
+<meta name="theme-color" content="#101614">
+<meta name="color-scheme" content="dark">
+<title>Pronósticos</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23101614'/%3E%3Ccircle cx='16' cy='16' r='8.5' fill='none' stroke='%23e8c468' stroke-width='2'/%3E%3Cpath d='M16 3.5v24' stroke='%23e8c468' stroke-width='2' stroke-dasharray='3 3'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap">
 <style>
+  /* ==========================================================
+     PIZARRA — sistema visual
+     La metáfora es la pizarra del entrenador: fondo verde-slate,
+     tiza, y líneas de cal. Un solo acento (--cal) y está RESERVADO
+     al favorito del modelo: si algo va de color arena, es porque el
+     modelo lo señala. Los cuatro colores de liga son la excepción,
+     porque ahí el color ES el dato (qué competición es).
+     ========================================================== */
   :root {
-    --fondo: #0f1115; --tarjeta: #1a1d24; --tarjeta-alta: #212630; --borde: #2b303b;
-    --texto: #e8eaed; --tenue: #8b93a1; --muy-tenue: #5c6472;
-    --local: #60a5fa; --empate: #a1a1aa; --visita: #f472b6; --doble: #4ade80;
+    /* superficies: todos los grises tintados de verde, nunca mezclados con azules */
+    --pizarra: #101614;
+    --pizarra-alta: #18211d;
+    --pizarra-honda: #0b100e;
+    --linea: #26332c;
+    --linea-viva: #35473d;
+
+    /* texto */
+    --tiza: #eef2ee;
+    --tiza-media: #b7c5bc;
+    --tiza-tenue: #8b9b91;
+
+    /* acento único */
+    --cal: #e8c468;
+    --cal-honda: #6b5a2c;
+
+    /* los tres resultados se separan por LUMINANCIA, no por tres tintes
+       distintos; el que gana pasa a --cal y así destaca solo */
+    --res-1: #8fa79c;
+    --res-x: #56665e;
+    --res-2: #6f8479;
+
+    /* identidad de liga: el único sitio con varios tintes */
+    --liga-PD: #e0563c;
+    --liga-PL: #8257e5;
+    --liga-FL1: #2e8fd0;
+    --liga-BL1: #cc3f6e;
+
+    /* escala tipográfica modular, 6 pasos */
+    --t-xs: 0.75rem;
+    --t-s: 0.8125rem;
+    --t-m: 0.875rem;
+    --t-l: 1rem;
+    --t-xl: 1.125rem;
+    --t-xxl: 1.375rem;
+
+    --radio: 10px;
+    --radio-chico: 6px;
   }
+
   * { box-sizing: border-box; }
-  body { font-family: system-ui, -apple-system, sans-serif; max-width: 720px;
-         margin: 0 auto; padding: 16px 16px 60px; background: var(--fondo); color: var(--texto); }
 
-  .top { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; min-height: 34px; }
-  .top h1 { font-size: 1.3rem; margin: 0; }
-  .volver { background: var(--tarjeta); border: 1px solid var(--borde); color: var(--texto);
-            border-radius: 8px; padding: 6px 12px; font-size: 0.85rem; cursor: pointer;
-            font-family: inherit; flex-shrink: 0; }
-  .volver:hover { background: var(--tarjeta-alta); }
+  /* los display de autor le ganan al [hidden] del navegador; sin esto el
+     botón de volver se quedaba visible en la portada */
+  [hidden] { display: none !important; }
 
-  #barra-estado { font-size: 0.82rem; color: var(--tenue); margin-bottom: 6px; }
-  #progreso { height: 4px; background: var(--borde); border-radius: 2px;
-              overflow: hidden; margin-bottom: 18px; }
-  #progreso > span { display: block; height: 100%; background: var(--doble); width: 0;
-                     transition: width 0.4s; }
+  html { -webkit-text-size-adjust: 100%; }
 
-  .buscador { width: 100%; background: var(--tarjeta); border: 1px solid var(--borde);
-              color: var(--texto); border-radius: 10px; padding: 11px 13px; font-size: 0.95rem;
-              font-family: inherit; margin-bottom: 20px; }
-  .buscador::placeholder { color: var(--muy-tenue); }
-  .buscador:focus { outline: none; border-color: var(--local); }
+  body {
+    font-family: "Archivo", "Segoe UI", system-ui, sans-serif;
+    font-size: var(--t-m);
+    line-height: 1.45;
+    margin: 0;
+    background: var(--pizarra);
+    color: var(--tiza);
+    /* trama de líneas muy tenue: la pizarra no es una superficie plana */
+    background-image: repeating-linear-gradient(
+      180deg, rgba(255,255,255,0.013) 0 1px, transparent 1px 4px);
+  }
 
-  .seccion { font-size: 0.75rem; color: var(--muy-tenue); text-transform: uppercase;
-             letter-spacing: 0.07em; margin: 0 0 10px; }
-  .seccion.siguiente { margin-top: 26px; }
+  .lienzo { max-width: 680px; margin: 0 auto; padding: 0 14px 72px; }
 
-  .liga-card { display: flex; align-items: center; justify-content: space-between; gap: 14px;
-               width: 100%; text-align: left; background: var(--tarjeta);
-               border: 1px solid var(--borde); border-radius: 12px; padding: 16px;
-               cursor: pointer; color: inherit; font-family: inherit;
-               transition: background 0.15s, border-color 0.15s; }
-  .liga-card:hover { background: var(--tarjeta-alta); border-color: #3b4252; }
-  .liga-card .nombre { font-size: 1.05rem; font-weight: 600; }
-  .liga-card .meta { font-size: 0.78rem; color: var(--tenue); margin-top: 3px; }
-  .liga-card .flecha { color: var(--muy-tenue); font-size: 1.3rem; }
-  #ligas > div { margin-bottom: 10px; }
+  a { color: var(--cal); }
 
-  .tira { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 10px;
-          margin-bottom: 16px; scrollbar-width: thin; }
-  .chip { flex-shrink: 0; background: var(--tarjeta); border: 1px solid var(--borde);
-          color: var(--tenue); border-radius: 999px; padding: 7px 14px; font-size: 0.82rem;
-          cursor: pointer; font-family: inherit; white-space: nowrap; }
-  .chip:hover { background: var(--tarjeta-alta); }
-  .chip.activo { background: var(--local); border-color: var(--local); color: #0f1115; font-weight: 600; }
-  .chip .n { opacity: 0.65; margin-left: 5px; font-size: 0.75rem; }
+  /* foco visible en TODO lo enfocable: antes no había ninguno */
+  :focus-visible {
+    outline: 2px solid var(--cal);
+    outline-offset: 2px;
+    border-radius: var(--radio-chico);
+  }
 
-  .orden { display: flex; gap: 6px; margin-bottom: 14px; }
-  .orden .chip { font-size: 0.76rem; padding: 5px 11px; }
-  .orden .chip.activo { background: var(--tarjeta-alta); border-color: #4b5563;
-                        color: var(--texto); }
+  .salto {
+    position: absolute; left: -9999px;
+    background: var(--cal); color: var(--pizarra-honda);
+    padding: 8px 14px; border-radius: var(--radio-chico); font-weight: 600; z-index: 5;
+  }
+  .salto:focus { left: 14px; top: 10px; }
 
-  .grupo-cab { font-size: 0.85rem; color: var(--muy-tenue); text-transform: uppercase;
-               letter-spacing: 0.04em; padding-bottom: 6px; margin: 22px 0 10px;
-               border-bottom: 1px solid var(--borde); }
+  /* ---------- cabecera ---------- */
+  .cabecera {
+    position: sticky; top: 0; z-index: 3;
+    background: var(--pizarra);
+    border-bottom: 1px solid var(--linea);
+    padding: 12px 0 10px;
+  }
+  .cabecera .fila-titulo { display: flex; align-items: center; gap: 10px; min-height: 32px; }
 
-  .partido { border: 1px solid var(--borde); border-radius: 10px; padding: 13px;
-             margin-bottom: 10px; background: var(--tarjeta); }
-  .partido.pendiente { opacity: 0.5; }
-  .cab { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-  .equipos { font-weight: 600; font-size: 1rem; }
-  .hora { font-size: 0.8rem; color: var(--tenue); white-space: nowrap;
-          font-variant-numeric: tabular-nums; }
-  .contexto { color: var(--muy-tenue); font-size: 0.75rem; margin-top: 2px; }
-  .xg { color: var(--tenue); font-size: 0.78rem; margin: 8px 0 2px;
-        font-variant-numeric: tabular-nums; }
-  .aviso { color: #fbbf24; font-size: 0.73rem; margin: 6px 0 2px; }
-  .esperando { color: var(--muy-tenue); font-size: 0.8rem; margin-top: 8px; font-style: italic; }
+  .marca { flex-shrink: 0; display: block; }
 
-  .fila { margin: 7px 0; font-size: 0.88rem; }
-  .fila-cab { display: flex; justify-content: space-between; margin-bottom: 3px;
-              font-variant-numeric: tabular-nums; }
-  .barra { height: 6px; background: #262a33; border-radius: 3px; overflow: hidden; }
-  .barra > span { display: block; height: 100%; transition: width 0.3s; }
+  h1 {
+    font-size: var(--t-xl); font-weight: 700; letter-spacing: -0.015em;
+    margin: 0; flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
 
-  .dobles { display: flex; gap: 7px; margin-top: 12px; }
-  .doble { flex: 1; background: #14261c; border: 1px solid #22543d; border-radius: 8px;
-           padding: 6px 4px; text-align: center; }
-  .doble b { display: block; color: var(--doble); font-size: 0.92rem;
-             font-variant-numeric: tabular-nums; }
-  .doble span { color: #6b8578; font-size: 0.68rem; }
+  .volver {
+    flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px;
+    background: none; border: 1px solid var(--linea-viva); color: var(--tiza-media);
+    border-radius: 999px; padding: 5px 11px 5px 9px;
+    font: inherit; font-size: var(--t-xs); font-weight: 500; cursor: pointer;
+  }
+  .volver:hover { border-color: var(--cal-honda); color: var(--tiza); }
+  .volver:active { transform: translateY(1px); }
 
-  .vacio { color: var(--tenue); text-align: center; margin-top: 40px; }
+  /* ---------- estado del cálculo ---------- */
+  .estado { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .punto {
+    flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--tiza-tenue);
+  }
+  /* trabajando: late. pendiente: arena fija. al día: hueco y callado. */
+  .estado[data-modo="trabajando"] .punto { background: var(--cal); animation: latido 1.6s ease-in-out infinite; }
+  .estado[data-modo="atencion"] .punto { background: var(--cal); }
+  .estado[data-modo="reposo"] .punto { background: none; box-shadow: inset 0 0 0 1.5px var(--tiza-tenue); }
+  @keyframes latido { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+  #barra-estado { font-size: var(--t-xs); color: var(--tiza-tenue); }
+  #barra-estado b { color: var(--tiza-media); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  #progreso { height: 2px; background: var(--linea); border-radius: 1px; overflow: hidden; margin-top: 8px; }
+  #progreso > span { display: block; height: 100%; width: 0; background: var(--cal); }
+
+  /* ---------- controles ---------- */
+  .buscador {
+    width: 100%; background: var(--pizarra-alta); border: 1px solid var(--linea);
+    color: var(--tiza); border-radius: var(--radio); padding: 10px 13px;
+    font: inherit; font-size: var(--t-m); margin: 18px 0 14px;
+  }
+  .buscador::placeholder { color: var(--tiza-tenue); }
+  .buscador:focus-visible { border-color: var(--cal); outline-offset: 0; }
+
+  .tira { display: flex; gap: 7px; overflow-x: auto; scrollbar-width: none; padding: 2px 0 12px; }
+  .tira::-webkit-scrollbar { display: none; }
+
+  .chip {
+    flex-shrink: 0; background: none; border: 1px solid var(--linea-viva);
+    color: var(--tiza-media); border-radius: 999px; padding: 6px 12px;
+    font: inherit; font-size: var(--t-xs); font-weight: 500;
+    cursor: pointer; white-space: nowrap;
+  }
+  .chip:hover { border-color: var(--cal-honda); color: var(--tiza); }
+  .chip:active { transform: translateY(1px); }
+  .chip[aria-pressed="true"] {
+    background: var(--cal); border-color: var(--cal);
+    color: var(--pizarra-honda); font-weight: 600;
+  }
+  .chip .n { opacity: 0.6; margin-left: 5px; font-variant-numeric: tabular-nums; }
+  .chip[aria-pressed="true"] .n { opacity: 0.72; }
+
+  /* el orden modifica la lista, no navega: se distingue de los chips de día
+     bajando el contraste y cambiando la píldora por un subrayado */
+  .orden { display: flex; gap: 14px; flex-wrap: wrap; margin: 2px 0 4px; }
+  .orden .chip {
+    border: 0; border-radius: 0; padding: 4px 0 5px;
+    color: var(--tiza-tenue); border-bottom: 2px solid transparent;
+  }
+  .orden .chip:hover { color: var(--tiza-media); border-bottom-color: var(--linea-viva); }
+  .orden .chip[aria-pressed="true"] {
+    background: none; color: var(--tiza); border-bottom-color: var(--cal);
+  }
+
+  /* ---------- rótulos de sección ---------- */
+  .rotulo {
+    font-size: var(--t-s); font-weight: 600; color: var(--tiza-media);
+    margin: 24px 0 10px; letter-spacing: -0.005em;
+  }
+  .rotulo:first-child { margin-top: 14px; }
+
+  /* cabecera de día: se queda pegada bajo la cabecera al hacer scroll, así
+     siempre sabes qué día estás mirando en una lista larga */
+  .grupo-cab {
+    position: sticky; top: var(--alto-cabecera, 84px); z-index: 2;
+    display: flex; align-items: baseline; gap: 8px;
+    background: var(--pizarra);
+    font-size: var(--t-s); font-weight: 600; color: var(--tiza);
+    padding: 10px 0 7px; margin-top: 18px;
+    border-bottom: 1px solid var(--linea);
+  }
+  .grupo-cab .cuenta { font-size: var(--t-xs); font-weight: 500; color: var(--tiza-tenue); font-variant-numeric: tabular-nums; }
+
+  /* ---------- tarjeta de liga (inicio) ---------- */
+  .liga-card {
+    display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+    background: var(--pizarra-alta); border: 1px solid var(--linea);
+    border-left: 3px solid var(--tono, var(--linea-viva));
+    border-radius: var(--radio); padding: 13px 14px;
+    font: inherit; color: inherit; cursor: pointer;
+  }
+  .liga-card:hover { background: #1c2621; border-color: var(--linea-viva); }
+  .liga-card:active { transform: translateY(1px); }
+  .liga-card .sigla {
+    flex-shrink: 0; width: 34px; height: 34px; border-radius: var(--radio-chico);
+    display: grid; place-items: center;
+    background: color-mix(in srgb, var(--tono) 18%, transparent);
+    color: var(--tono); font-size: var(--t-xs); font-weight: 700; letter-spacing: -0.02em;
+  }
+  .liga-card .nombre, .liga-card .meta { display: block; }
+  .liga-card .nombre { font-size: var(--t-l); font-weight: 600; letter-spacing: -0.01em; }
+  .liga-card .meta { font-size: var(--t-xs); color: var(--tiza-tenue); margin-top: 1px; }
+  .liga-card .flecha { margin-left: auto; color: var(--tiza-tenue); font-size: var(--t-xl); }
+  #ligas > div + div { margin-top: 8px; }
+
+  /* ---------- partido ----------
+     Una fila = un partido. El detalle se despliega al tocar: 41 partidos
+     caben en dos pantallas y nada queda escondido tras un filtro. */
+  .partido {
+    border-bottom: 1px solid var(--linea);
+    border-left: 3px solid var(--tono, transparent);
+    padding-left: 10px;
+  }
+  .partido.pendiente { border-left-style: dashed; }
+
+  .fila {
+    display: grid; grid-template-columns: auto 1fr auto;
+    align-items: baseline; gap: 3px 10px;
+    width: 100%; text-align: left; background: none; border: 0;
+    color: inherit; font: inherit; cursor: pointer;
+    padding: 11px 4px 12px 2px;
+  }
+  .fila:hover .equipos { color: #fff; }
+  .fila:hover .barra { filter: brightness(1.12); }
+
+  .hora {
+    font-size: var(--t-xs); font-weight: 600; color: var(--tiza-tenue);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .hora.apilada { display: flex; flex-direction: column; line-height: 1.3; }
+  .hora.apilada span:last-child { color: var(--tiza-media); }
+
+  .equipos {
+    font-size: var(--t-m); font-weight: 600; letter-spacing: -0.01em;
+    min-width: 0; overflow-wrap: anywhere;
+  }
+  .equipos i { font-style: normal; font-weight: 400; color: var(--tiza-tenue); }
+
+  .sigla-liga {
+    display: inline-block; vertical-align: 1px; margin-right: 6px;
+    font-size: 0.6875rem; font-weight: 700; letter-spacing: 0;
+    color: var(--tono); white-space: nowrap;
+  }
+
+  /* veredicto: lo único que se lee antes que los nombres */
+  .veredicto {
+    display: flex; align-items: baseline; gap: 5px; white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .veredicto .signo {
+    display: grid; place-items: center; min-width: 19px; height: 19px;
+    border-radius: var(--radio-chico); background: var(--cal);
+    color: var(--pizarra-honda); font-size: var(--t-xs); font-weight: 700;
+  }
+  .veredicto .pct { font-size: var(--t-m); font-weight: 600; color: var(--tiza); }
+  .veredicto.mudo .signo { background: none; box-shadow: inset 0 0 0 1px var(--linea-viva); color: var(--tiza-tenue); }
+  .veredicto.mudo .pct { color: var(--tiza-tenue); font-weight: 500; font-size: var(--t-xs); }
+
+  /* barra de tres segmentos: la forma es la respuesta. El segmento del
+     favorito va en arena; los otros dos se distinguen por luminancia. */
+  .barra {
+    grid-column: 2 / -1; display: flex; gap: 2px;
+    height: 5px; margin-top: 5px;
+  }
+  .barra > span { display: block; border-radius: 1px; min-width: 2px; }
+  .barra .s1 { background: var(--res-1); }
+  .barra .sx { background: var(--res-x); }
+  .barra .s2 { background: var(--res-2); }
+  .barra .gana { background: var(--cal); }
+
+  .esperando { grid-column: 2 / -1; font-size: var(--t-xs); color: var(--tiza-tenue); margin-top: 3px; }
+
+  /* ---------- detalle desplegado ---------- */
+  .detalle { padding: 2px 2px 16px; }
+
+  .leyenda { display: grid; gap: 1px; }
+  .leyenda div {
+    display: flex; align-items: baseline; gap: 8px;
+    font-size: var(--t-s); padding: 4px 0;
+  }
+  .leyenda .marca-res {
+    flex-shrink: 0; width: 9px; height: 9px; border-radius: 2px; align-self: center;
+  }
+  .leyenda .quien { color: var(--tiza-media); min-width: 0; overflow-wrap: anywhere; }
+  .leyenda .val {
+    margin-left: auto; font-variant-numeric: tabular-nums;
+    font-weight: 600; color: var(--tiza-media);
+  }
+  .leyenda .gana .quien, .leyenda .gana .val { color: var(--tiza); }
+
+  .rotulo-doble {
+    margin: 14px 0 0; padding-top: 10px; border-top: 1px solid var(--linea);
+    font-size: var(--t-xs); color: var(--tiza-tenue);
+  }
+  /* rejilla, no flex: las tres columnas comparten líneas base aunque la glosa
+     de abajo ocupe una o dos líneas */
+  .dobles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; margin: 6px 0 0; }
+  .dobles > div { padding-right: 10px; }
+  .dobles > div + div { border-left: 1px solid var(--linea); padding-left: 10px; }
+  .dobles dt { font-size: var(--t-xs); color: var(--tiza-media); font-weight: 600; }
+  .dobles dd {
+    margin: 0; font-size: var(--t-l); font-weight: 600;
+    color: var(--tiza); font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+  }
+  .dobles .gloss { font-weight: 400; color: var(--tiza-tenue); margin-top: 1px; }
+
+  .pie-detalle {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+    margin-top: 11px; font-size: var(--t-xs); color: var(--tiza-tenue);
+  }
+  .pie-detalle .xg { font-variant-numeric: tabular-nums; }
+  .pie-detalle .xg b { color: var(--tiza-media); font-weight: 600; }
+
+  /* el aviso de poca muestra toma el tinte del acento a baja intensidad en vez
+     de meter un quinto color: es una salvedad, no un error */
+  .aviso {
+    display: flex; gap: 7px; align-items: flex-start;
+    background: rgba(232, 196, 104, 0.07);
+    border-left: 2px solid var(--cal-honda);
+    border-radius: 0 var(--radio-chico) var(--radio-chico) 0;
+    padding: 7px 10px; margin-top: 11px;
+    font-size: var(--t-xs); color: var(--tiza-media);
+  }
+  .aviso svg { flex-shrink: 0; margin-top: 2px; }
+
+  /* ---------- estados de pantalla completa ---------- */
+  .panel {
+    border: 1px solid var(--linea); border-radius: var(--radio);
+    background: var(--pizarra-alta); padding: 26px 22px; margin-top: 22px;
+    text-align: center;
+  }
+  .panel .dibujo { margin: 0 auto 16px; display: block; }
+  .panel h2 {
+    font-size: var(--t-xl); font-weight: 600; letter-spacing: -0.015em;
+    margin: 0 0 8px; text-wrap: balance;
+  }
+  .panel p { margin: 0 auto; max-width: 40ch; color: var(--tiza-tenue); font-size: var(--t-s); }
+  .panel p + p { margin-top: 9px; }
+  .panel .cuenta-atras { color: var(--tiza-media); }
+
+  /* aviso de pausa por límite de API: banda propia, no una frase suelta */
+  .banda {
+    display: flex; gap: 10px; align-items: flex-start;
+    border: 1px solid var(--cal-honda); border-radius: var(--radio);
+    background: rgba(232, 196, 104, 0.06);
+    padding: 11px 13px; margin: 16px 0 4px;
+    font-size: var(--t-s); color: var(--tiza-media);
+  }
+  .banda.mala { border-color: #6b3227; background: rgba(224, 86, 60, 0.07); }
+  .banda svg { flex-shrink: 0; margin-top: 2px; }
+  .banda b { color: var(--tiza); font-weight: 600; }
+
+  .vacio { color: var(--tiza-tenue); text-align: center; padding: 34px 0; font-size: var(--t-s); }
+  .vacio b { display: block; color: var(--tiza-media); font-size: var(--t-l); font-weight: 600; margin-bottom: 5px; }
+
+  @media (min-width: 560px) {
+    .lienzo { padding: 0 20px 72px; }
+    .equipos { font-size: var(--t-l); }
+    .fila { gap: 4px 14px; }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .volver, .chip, .liga-card, .equipos, .barra { transition: all 0.16s ease; }
+    #progreso > span { transition: width 0.45s ease; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .estado .punto { animation: none; }
+  }
 </style>
 </head>
 <body>
-  <div class="top">
-    <button class="volver" id="btn-volver" hidden>← Inicio</button>
-    <h1 id="titulo">⚽ Pronósticos</h1>
-  </div>
-  <div id="barra-estado">Cargando…</div>
-  <div id="progreso"><span></span></div>
-  <div id="vista"></div>
+<a class="salto" href="#vista">Saltar al listado</a>
+<div class="lienzo">
+  <header class="cabecera">
+    <div class="fila-titulo">
+      <svg class="marca" width="22" height="22" viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="10" fill="none" stroke="#e8c468" stroke-width="2"></circle>
+        <path d="M16 2v28" stroke="#e8c468" stroke-width="2" stroke-dasharray="3 3"></path>
+      </svg>
+      <h1 id="titulo">Pronósticos</h1>
+      <button class="volver" id="btn-volver" hidden>
+        <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M7 2L3 6l4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg>
+        <span id="volver-texto">Inicio</span>
+      </button>
+    </div>
+    <div class="estado" id="estado" data-modo="reposo">
+      <span class="punto"></span>
+      <div id="barra-estado">Cargando…</div>
+    </div>
+    <div id="progreso" hidden><span></span></div>
+  </header>
+  <div id="banda"></div>
+  <main id="vista"></main>
+</div>
 
 <script>
 const vista = document.getElementById("vista");
+const bandaEl = document.getElementById("banda");
+const cabecera = document.querySelector(".cabecera");
 const titulo = document.getElementById("titulo");
 const btnVolver = document.getElementById("btn-volver");
+const volverTexto = document.getElementById("volver-texto");
+const estado = document.getElementById("estado");
 const barra = document.getElementById("barra-estado");
+const progresoCaja = document.getElementById("progreso");
 const progreso = document.querySelector("#progreso > span");
 
 let datos = null;        // último /api/estado
 let rutaPintada = null;  // para saber cuándo hay que reconstruir el DOM
 let orden = "hora";      // criterio de ordenación
 let busqueda = "";       // texto del buscador
+const abiertos = new Set();  // partidos con el detalle desplegado
+
+// Códigos de liga -> sigla corta y tinte. El tinte es el único sitio donde se
+// usan varios colores, porque ahí el color es el dato: de un vistazo sabes de
+// qué competición es cada fila sin leer nada.
+const LIGAS = {
+  PD:  { sigla: "ESP", tono: "var(--liga-PD)" },
+  PL:  { sigla: "ENG", tono: "var(--liga-PL)" },
+  FL1: { sigla: "FRA", tono: "var(--liga-FL1)" },
+  BL1: { sigla: "ALE", tono: "var(--liga-BL1)" },
+};
+function ligaDe(cod) { return LIGAS[cod] || { sigla: (cod || "?").slice(0, 3).toUpperCase(), tono: "var(--linea-viva)" }; }
 
 // ==========================================
 // UTILIDADES
@@ -135,6 +463,8 @@ function fechaCorta(iso) {
   const p = iso.split("-");
   return Number(p[2]) + "/" + Number(p[1]);
 }
+
+function pct(v) { return Number(v).toFixed(1) + "%"; }
 
 /** Todos los partidos en una lista plana, cada uno sabiendo a qué día pertenece. */
 function aplanar(dias) {
@@ -170,6 +500,16 @@ function porDias(partidos) {
 // que el máximo de las tres probabilidades es bajo. Un 34/33/33 es lo más reñido posible.
 function favorito(p) { return Math.max(p.prob_local, p.prob_empate, p.prob_visita); }
 
+/** Cuál de los tres manda, con su etiqueta corta y quién es. */
+function veredictoDe(p) {
+  const opciones = [
+    { signo: "1", valor: p.prob_local, quien: p.local },
+    { signo: "X", valor: p.prob_empate, quien: "Empate" },
+    { signo: "2", valor: p.prob_visita, quien: p.visita },
+  ];
+  return opciones.reduce((a, b) => (b.valor > a.valor ? b : a));
+}
+
 const ORDENES = {
   hora:    { etiqueta: "Por hora",    fn: (a, b) => a.utcDate.localeCompare(b.utcDate) },
   claros:  { etiqueta: "Más claros",  fn: (a, b) => favorito(b) - favorito(a) },
@@ -187,20 +527,64 @@ function ordenar(lista) {
 // ==========================================
 // TARJETA DE PARTIDO
 // ==========================================
-function filaProb(etiqueta, valor, color) {
-  return '<div class="fila">'
-    + '<div class="fila-cab"><span>' + etiqueta + '</span><span>' + valor.toFixed(1) + '%</span></div>'
-    + '<div class="barra"><span style="width:' + valor + '%;background:' + color + '"></span></div>'
-    + '</div>';
+const ICONO_AVISO = '<svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">'
+  + '<path d="M8 1.5 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"></path>'
+  + '<path d="M8 6v3.4M8 11.6v.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path></svg>';
+
+/** Barra de tres segmentos. flex en vez de width:% porque los tres valores
+ *  vienen redondeados a dos decimales y no siempre suman 100 exacto. */
+function htmlBarra(p, ganador) {
+  const seg = (signo, clase, valor) =>
+    '<span class="' + clase + (signo === ganador ? " gana" : "")
+    + '" style="flex:' + valor + '"></span>';
+  return '<span class="barra" role="img" aria-label="Local ' + pct(p.prob_local)
+    + ', empate ' + pct(p.prob_empate) + ', visitante ' + pct(p.prob_visita) + '">'
+    + seg("1", "s1", p.prob_local)
+    + seg("X", "sx", p.prob_empate)
+    + seg("2", "s2", p.prob_visita)
+    + '</span>';
 }
 
-function htmlPartido(p, contexto) {
-  const cabecera = '<div class="cab"><div>'
-    + '<div class="equipos">' + esc(p.local) + ' vs ' + esc(p.visita) + '</div>'
-    + (contexto ? '<div class="contexto">' + esc(contexto) + '</div>' : '')
-    + '</div><div class="hora">' + esc(p.hora) + '</div></div>';
+/** "Miércoles" ocupa el doble que la columna de hora; en las listas que cruzan
+ *  días se abrevia. "Hoy" y "Mañana" ya son cortos y se dejan enteros. */
+function diaCorto(d) { return d.length > 6 ? d.slice(0, 3) + "." : d; }
 
-  if (p.pendiente) return cabecera + '<div class="esperando">Pendiente de calcular…</div>';
+function htmlFila(p, contexto, abierto) {
+  const L = ligaDe(p.liga_codigo);
+  // en cuanto la lista mezcla competiciones hace falta decir de cuál es cada fila
+  const sigla = contexto === "hora" ? "" : '<span class="sigla-liga">' + esc(L.sigla) + '</span>';
+  const cuando = contexto === "fecha"
+    ? '<span class="hora apilada"><span>' + esc(diaCorto(p.dia)) + " " + fechaCorta(p.fecha)
+      + '</span><span>' + esc(p.hora) + '</span></span>'
+    : '<span class="hora">' + esc(p.hora) + '</span>';
+
+  let derecha, bajo;
+  if (p.pendiente) {
+    derecha = '<span class="veredicto mudo"><span class="signo">·</span><span class="pct">—</span></span>';
+    bajo = '<span class="esperando">Sin calcular todavía</span>';
+  } else {
+    const v = veredictoDe(p);
+    const ganador = v.signo;
+    derecha = '<span class="veredicto"><span class="signo">' + ganador + '</span>'
+      + '<span class="pct">' + Math.round(v.valor) + '%</span></span>';
+    bajo = htmlBarra(p, ganador);
+  }
+
+  return '<button class="fila" data-id="' + esc(p.id) + '" aria-expanded="' + (abierto ? "true" : "false") + '">'
+    + cuando
+    + '<span class="equipos">' + sigla + esc(p.local) + ' <i>vs</i> ' + esc(p.visita) + '</span>'
+    + derecha + bajo
+    + '</button>'
+    + (abierto && !p.pendiente ? htmlDetalle(p) : "");
+}
+
+function htmlDetalle(p) {
+  const ganador = veredictoDe(p).signo;
+  const linea = (signo, clase, quien, valor) =>
+    '<div class="' + (signo === ganador ? "gana" : "") + '">'
+    + '<span class="marca-res" style="background:' + (signo === ganador ? "var(--cal)" : clase) + '"></span>'
+    + '<span class="quien">' + quien + '</span>'
+    + '<span class="val">' + pct(valor) + '</span></div>';
 
   // Con pocos partidos previos la predicción está dominada por la media de la liga.
   // Mejor decirlo que fingir una precisión que no existe.
@@ -208,20 +592,26 @@ function htmlPartido(p, contexto) {
   const mv = p.muestra_visita === undefined ? 99 : p.muestra_visita;
   const muestra = Math.min(ml, mv);
   const aviso = muestra < 4
-    ? '<div class="aviso">⚠ Pocos partidos previos (' + muestra
-      + '); la estimación tira hacia la media de la liga.</div>'
+    ? '<div class="aviso">' + ICONO_AVISO + '<div>Solo ' + muestra + ' partido'
+      + (muestra === 1 ? "" : "s") + ' previo' + (muestra === 1 ? "" : "s")
+      + ' en la muestra: la estimación tira hacia la media de la liga.</div></div>'
     : '';
 
-  return cabecera
-    + '<div class="xg">xG estimado: ' + p.xg_local + ' - ' + p.xg_visita + '</div>'
+  return '<div class="detalle">'
+    + '<div class="leyenda">'
+    + linea("1", "var(--res-1)", "Gana " + esc(p.local), p.prob_local)
+    + linea("X", "var(--res-x)", "Empate", p.prob_empate)
+    + linea("2", "var(--res-2)", "Gana " + esc(p.visita), p.prob_visita)
+    + '</div>'
+    + '<p class="rotulo-doble">Doble oportunidad</p>'
+    + '<dl class="dobles">'
+    + '<div><dt>1X</dt><dd>' + pct(p.prob_1x) + '</dd><dt class="gloss">local o empate</dt></div>'
+    + '<div><dt>X2</dt><dd>' + pct(p.prob_x2) + '</dd><dt class="gloss">empate o visita</dt></div>'
+    + '<div><dt>12</dt><dd>' + pct(p.prob_12) + '</dd><dt class="gloss">sin empate</dt></div>'
+    + '</dl>'
+    + '<div class="pie-detalle"><span class="xg">Goles esperados <b>'
+    + Number(p.xg_local).toFixed(2) + ' – ' + Number(p.xg_visita).toFixed(2) + '</b></span></div>'
     + aviso
-    + filaProb("Victoria Local", p.prob_local, "var(--local)")
-    + filaProb("Empate", p.prob_empate, "var(--empate)")
-    + filaProb("Victoria Visita", p.prob_visita, "var(--visita)")
-    + '<div class="dobles">'
-    + '<div class="doble"><b>' + p.prob_1x + '%</b><span>1X</span></div>'
-    + '<div class="doble"><b>' + p.prob_x2 + '%</b><span>X2</span></div>'
-    + '<div class="doble"><b>' + p.prob_12 + '%</b><span>12</span></div>'
     + '</div>';
 }
 
@@ -229,7 +619,7 @@ function htmlPartido(p, contexto) {
  * Pinta bloques dentro de un contenedor tocando el DOM lo mínimo: cada bloque tiene
  * id y huella, y si la huella no cambió no se toca. Así no parpadea ni se pierde el
  * scroll cuando entra una tanda nueva de resultados.
- * `items` es [{id, huella, clase, html}].
+ * `items` es [{id, huella, clase, tono, html}].
  */
 function pintarBloques(cont, items) {
   const vistos = new Set();
@@ -240,6 +630,7 @@ function pintarBloques(cont, items) {
     if (el.dataset.huella !== it.huella) {
       el.dataset.huella = it.huella;
       el.className = it.clase;
+      if (it.tono) el.style.setProperty("--tono", it.tono);
       el.innerHTML = it.html;
     }
     if (cont.children[i] !== el) cont.insertBefore(el, cont.children[i] || null);
@@ -247,20 +638,27 @@ function pintarBloques(cont, items) {
   [...cont.children].forEach(el => { if (!vistos.has(el.id)) el.remove(); });
 }
 
-function bloquesDePartidos(partidos, contextoDe) {
+function bloquesDePartidos(partidos, contexto) {
   return partidos.map(p => {
-    const ctx = contextoDe ? contextoDe(p) : "";
+    const abierto = abiertos.has(String(p.id));
     return {
       id: "p-" + p.id,
-      huella: JSON.stringify(p) + "|" + ctx,
+      huella: JSON.stringify(p) + "|" + contexto + "|" + abierto,
       clase: "partido" + (p.pendiente ? " pendiente" : ""),
-      html: htmlPartido(p, ctx),
+      tono: ligaDe(p.liga_codigo).tono,
+      html: htmlFila(p, contexto, abierto),
     };
   });
 }
 
-function bloqueCabecera(clave, texto) {
-  return { id: "cab-" + clave, huella: texto, clase: "grupo-cab", html: esc(texto) };
+function bloqueCabecera(clave, texto, cuenta) {
+  return {
+    id: "cab-" + clave,
+    huella: texto + "|" + cuenta,
+    clase: "grupo-cab",
+    html: '<span>' + esc(texto) + '</span><span class="cuenta">' + cuenta
+      + " partido" + (cuenta === 1 ? "" : "s") + '</span>',
+  };
 }
 
 // ==========================================
@@ -285,7 +683,7 @@ function irA(hash) { location.hash = hash; }
 // ==========================================
 function tiraDeChips(cont, opciones, activo, alPulsar) {
   const html = opciones.map(o =>
-    '<button class="chip ' + (o.valor === activo ? "activo" : "") + '" data-v="' + esc(o.valor) + '">'
+    '<button class="chip" aria-pressed="' + (o.valor === activo) + '" data-v="' + esc(o.valor) + '">'
     + esc(o.texto)
     + (o.n === undefined || o.n === null ? "" : '<span class="n">' + o.n + '</span>')
     + '</button>').join("");
@@ -306,7 +704,7 @@ function pintarOrden(cont) {
 // VISTA: INICIO
 // ==========================================
 function pintarInicio(todos, reconstruir) {
-  titulo.textContent = "⚽ Pronósticos";
+  titulo.textContent = "Pronósticos";
   btnVolver.hidden = true;
 
   if (reconstruir) {
@@ -315,8 +713,8 @@ function pintarInicio(todos, reconstruir) {
       + ' placeholder="Buscar equipo…" value="' + esc(busqueda) + '">'
       + '<div id="resultados"></div>'
       + '<div id="secciones">'
-      + '<p class="seccion">Por día</p><div class="tira" id="dias-tira"></div>'
-      + '<p class="seccion siguiente">Ligas</p><div id="ligas"></div>'
+      + '<p class="rotulo">Próximos días</p><div class="tira" id="dias-tira"></div>'
+      + '<p class="rotulo">Competiciones</p><div id="ligas"></div>'
       + '</div>';
     const input = document.getElementById("buscador");
     input.oninput = () => { busqueda = input.value; render(); };
@@ -333,16 +731,15 @@ function pintarInicio(todos, reconstruir) {
     const hallados = ordenar(todos.filter(p =>
       normalizar(p.local).indexOf(q) >= 0 || normalizar(p.visita).indexOf(q) >= 0));
     if (!hallados.length) {
-      resultados.innerHTML = '<div class="vacio">Ningún partido de "' + esc(busqueda)
-        + '" en los próximos días.</div>';
+      resultados.innerHTML = '<div class="vacio"><b>Ningún partido de "' + esc(busqueda) + '"</b>'
+        + 'Solo se buscan los partidos de los próximos días. Prueba con otra grafía del nombre.</div>';
       return;
     }
     if (!resultados.querySelector(".orden")) {
       resultados.innerHTML = '<div class="orden" id="orden-b"></div><div id="lista-b"></div>';
     }
     pintarOrden(document.getElementById("orden-b"));
-    pintarBloques(document.getElementById("lista-b"),
-      bloquesDePartidos(hallados, p => p.dia + " " + fechaCorta(p.fecha) + " · " + p.liga));
+    pintarBloques(document.getElementById("lista-b"), bloquesDePartidos(hallados, "fecha"));
     return;
   }
 
@@ -360,6 +757,7 @@ function pintarInicio(todos, reconstruir) {
 
   // --- tarjetas de liga ---
   pintarBloques(document.getElementById("ligas"), porLigas(todos).map(L => {
+    const info = ligaDe(L.codigo);
     const listos = L.partidos.filter(p => !p.pendiente).length;
     const ds = porDias(L.partidos);
     const rango = ds.length === 1 ? ds[0].etiqueta
@@ -371,15 +769,14 @@ function pintarInicio(todos, reconstruir) {
       id: "L-" + L.codigo,
       huella: L.nombre + "|" + meta,
       clase: "",
+      tono: info.tono,
       html: '<button class="liga-card" data-liga="' + esc(L.codigo) + '">'
-        + '<div><div class="nombre">' + esc(L.nombre) + '</div>'
-        + '<div class="meta">' + esc(meta) + '</div></div>'
-        + '<div class="flecha">›</div></button>',
+        + '<span class="sigla">' + esc(info.sigla) + '</span>'
+        + '<span><span class="nombre">' + esc(L.nombre) + '</span>'
+        + '<span class="meta">' + esc(meta) + '</span></span>'
+        + '<span class="flecha">›</span></button>',
     };
   }));
-  vista.querySelectorAll(".liga-card").forEach(b => {
-    b.onclick = () => irA("#/liga/" + encodeURIComponent(b.dataset.liga));
-  });
 }
 
 // ==========================================
@@ -391,7 +788,7 @@ function pintarLiga(todos, codigo, fechaSel, reconstruir) {
 
   titulo.textContent = suyos[0].liga;
   btnVolver.hidden = false;
-  btnVolver.textContent = fechaSel ? "← Todas las fechas" : "← Inicio";
+  volverTexto.textContent = fechaSel ? "Todas las fechas" : "Inicio";
 
   if (reconstruir) {
     vista.innerHTML = '<div class="tira" id="fechas"></div>'
@@ -410,19 +807,18 @@ function pintarLiga(todos, codigo, fechaSel, reconstruir) {
 
   const sel = fechaSel ? suyos.filter(p => p.fecha === fechaSel) : suyos;
   const lista = document.getElementById("lista");
-  if (!sel.length) { lista.innerHTML = '<div class="vacio">No hay partidos en esa fecha.</div>'; return; }
+  if (!sel.length) { lista.innerHTML = '<div class="vacio"><b>Nada ese día</b>Esta liga no juega en la fecha elegida.</div>'; return; }
 
   // Ordenar por probabilidad implica una lista única en ranking: agrupar por día
   // rompería precisamente el orden que se acaba de pedir.
   if (orden !== "hora" || fechaSel) {
-    const ctx = fechaSel ? null : (p => p.dia + " " + fechaCorta(p.fecha));
-    pintarBloques(lista, bloquesDePartidos(ordenar(sel), ctx));
+    pintarBloques(lista, bloquesDePartidos(ordenar(sel), fechaSel ? "hora" : "fecha"));
     return;
   }
   const bloques = [];
   porDias(sel).forEach(d => {
-    bloques.push(bloqueCabecera(d.fecha, d.etiqueta + " · " + fechaCorta(d.fecha)));
-    bloques.push.apply(bloques, bloquesDePartidos(ordenar(d.partidos), null));
+    bloques.push(bloqueCabecera(d.fecha, d.etiqueta + " · " + fechaCorta(d.fecha), d.partidos.length));
+    bloques.push.apply(bloques, bloquesDePartidos(ordenar(d.partidos), "hora"));
   });
   pintarBloques(lista, bloques);
 }
@@ -436,7 +832,7 @@ function pintarDia(todos, fecha, reconstruir) {
 
   titulo.textContent = delDia[0].dia + " " + fechaCorta(fecha);
   btnVolver.hidden = false;
-  btnVolver.textContent = "← Inicio";
+  volverTexto.textContent = "Inicio";
 
   if (reconstruir) {
     vista.innerHTML = '<div class="tira" id="fechas"></div>'
@@ -452,61 +848,142 @@ function pintarDia(todos, fecha, reconstruir) {
   pintarOrden(document.getElementById("orden"));
   const lista = document.getElementById("lista");
 
+  // Cruzando ligas la sigla va en cada fila, así que el orden por probabilidad
+  // no pierde de vista de qué competición es cada partido.
   if (orden !== "hora") {
-    pintarBloques(lista, bloquesDePartidos(ordenar(delDia), p => p.liga));
+    pintarBloques(lista, bloquesDePartidos(ordenar(delDia), "liga"));
     return;
   }
   const bloques = [];
   porLigas(delDia).forEach(L => {
-    bloques.push(bloqueCabecera(L.codigo, L.nombre));
-    bloques.push.apply(bloques, bloquesDePartidos(ordenar(L.partidos), null));
+    bloques.push(bloqueCabecera(L.codigo, L.nombre, L.partidos.length));
+    bloques.push.apply(bloques, bloquesDePartidos(ordenar(L.partidos), "hora"));
   });
   pintarBloques(lista, bloques);
+}
+
+// ==========================================
+// ESTADOS DE PANTALLA COMPLETA
+// ==========================================
+const DIBUJO_CIRCULO = '<svg class="dibujo" width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">'
+  + '<circle cx="36" cy="36" r="26" fill="none" stroke="#26332c" stroke-width="1.5"></circle>'
+  + '<circle cx="36" cy="36" r="10" fill="none" stroke="#35473d" stroke-width="1.5"></circle>'
+  + '<path d="M36 4v64" stroke="#26332c" stroke-width="1.5" stroke-dasharray="4 5"></path>'
+  + '<circle cx="36" cy="36" r="2.5" fill="#e8c468"></circle></svg>';
+
+function panel(titulo, parrafos) {
+  return '<div class="panel">' + DIBUJO_CIRCULO + '<h2>' + esc(titulo) + '</h2>'
+    + parrafos.map(t => '<p>' + t + '</p>').join("") + '</div>';
 }
 
 // ==========================================
 // RENDER
 // ==========================================
 const TEXTO_ESTADO = {
-  actualizando: "Calculando…",
-  parcial: "Pausado por el límite de la API. Sigue en la próxima actualización.",
-  listo: "Al día.",
+  actualizando: "Calculando",
+  parcial: "En pausa",
+  listo: "Al día",
   error: "Error en la última actualización",
 };
+const MODO_PUNTO = { actualizando: "trabajando", parcial: "atencion", error: "atencion", listo: "reposo" };
+
+function pintarEstado() {
+  const hechos = (datos.total || 0) - (datos.pendientes || 0);
+  const mostrarProgreso = datos.total > 0 && datos.pendientes > 0;
+
+  estado.dataset.modo = MODO_PUNTO[datos.estado] || "reposo";
+  progresoCaja.hidden = !mostrarProgreso;
+  if (mostrarProgreso) progreso.style.width = (100 * hechos / datos.total) + "%";
+
+  if (datos.estado === "sin_datos") {
+    barra.textContent = "Esperando la primera actualización";
+    estado.dataset.modo = "trabajando";
+    return;
+  }
+  const hora = datos.ultima_actualizacion
+    ? new Date(datos.ultima_actualizacion).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })
+    : "—";
+  if (datos.estado === "sin_partidos") {
+    barra.textContent = "Sin partidos en la ventana · revisado a las " + hora;
+    return;
+  }
+  barra.innerHTML = esc(TEXTO_ESTADO[datos.estado] || datos.estado)
+    + ' · <b>' + hechos + "/" + datos.total + '</b> calculados · ' + esc(hora);
+}
 
 function render() {
   if (!datos) return;
+  pintarEstado();
 
   if (datos.estado === "sin_datos") {
-    barra.textContent = "Todavía no hay datos. Esperando la primera actualización…";
+    rutaPintada = null;
+    bandaEl.innerHTML = "";
+    bandaEl.dataset.huella = "";
+    vista.innerHTML = panel("Todavía no hay datos", [
+      "El disco de Render se borra en cada despliegue, así que la caché arranca vacía y la primera pasada tiene que bajarlo todo de nuevo.",
+      '<span class="cuenta-atras">El planificador lo intenta cada 5 minutos. Esta página se actualiza sola en cuanto haya números.</span>',
+    ]);
     return;
   }
 
-  const hechos = (datos.total || 0) - (datos.pendientes || 0);
-  const texto = datos.estado === "error"
-    ? TEXTO_ESTADO.error + ": " + (datos.error || "desconocido")
-    : (TEXTO_ESTADO[datos.estado] || datos.estado);
-  barra.textContent = datos.estado === "sin_partidos"
-    ? "Sin partidos. Última revisión: " + new Date(datos.ultima_actualizacion).toLocaleString()
-    : texto + " " + hechos + "/" + datos.total + " calculados · "
-      + new Date(datos.ultima_actualizacion).toLocaleTimeString();
-  progreso.style.width = datos.total ? (100 * hechos / datos.total) + "%" : "0";
-
   if (datos.estado === "sin_partidos") {
-    vista.innerHTML = '<div class="vacio">No hay partidos programados en los próximos días.</div>';
+    rutaPintada = null;
+    bandaEl.innerHTML = "";
+    bandaEl.dataset.huella = "";
+    vista.innerHTML = panel("No hay partidos programados", [
+      "Ninguna de las cuatro ligas juega en los próximos días. Es lo normal en parones de selecciones y entre jornadas.",
+    ]);
     return;
   }
 
   const todos = aplanar(datos.dias);
   const ruta = leerRuta();
-  const clave = JSON.stringify(ruta) + "|" + orden + "|" + (busqueda ? "b" : "");
+  const clave = JSON.stringify(ruta) + "|" + orden + "|" + (busqueda ? "b" : "") + "|" + datos.estado;
   const reconstruir = clave !== rutaPintada;
   rutaPintada = clave;
+
+  // El aviso de pausa y el de error van FUERA del listado, en banda propia:
+  // enterarse de que la lista está a medias importa más que el propio orden, y
+  // así las tres vistas siguen dueñas de #vista sin pisarse con esto.
+  let banda = "";
+  if (datos.estado === "parcial") {
+    banda = '<div class="banda">' + ICONO_AVISO + '<div><b>Faltan ' + datos.pendientes
+      + ' por calcular.</b> Se agotó el presupuesto de peticiones de esta pasada; '
+      + 'la siguiente sigue por donde se quedó.</div></div>';
+  } else if (datos.estado === "error") {
+    banda = '<div class="banda mala">' + ICONO_AVISO + '<div><b>La última actualización falló.</b> '
+      + esc(datos.error || "sin detalle") + '. Los números que ves son los de la pasada anterior.</div></div>';
+  }
+  if (bandaEl.dataset.huella !== banda) { bandaEl.dataset.huella = banda; bandaEl.innerHTML = banda; }
 
   if (ruta.vista === "liga") pintarLiga(todos, ruta.liga, ruta.fecha, reconstruir);
   else if (ruta.vista === "dia") pintarDia(todos, ruta.fecha, reconstruir);
   else pintarInicio(todos, reconstruir && !busqueda);
 }
+
+// La cabecera es pegajosa y su alto cambia (barra de progreso, título largo),
+// así que las cabeceras de día se anclan a una medida real, no a un número fijo.
+function medirCabecera() {
+  document.documentElement.style.setProperty("--alto-cabecera", cabecera.offsetHeight + "px");
+}
+window.addEventListener("resize", medirCabecera);
+
+// ==========================================
+// INTERACCIÓN
+// ==========================================
+// Delegación: un único listener en el contenedor. Sobrevive a cualquier repintado,
+// que con el diffing de pintarBloques es constante.
+vista.addEventListener("click", (e) => {
+  const ligaBtn = e.target.closest(".liga-card");
+  if (ligaBtn) { irA("#/liga/" + encodeURIComponent(ligaBtn.dataset.liga)); return; }
+
+  const fila = e.target.closest(".fila");
+  if (fila) {
+    const id = fila.dataset.id;
+    if (abiertos.has(id)) abiertos.delete(id); else abiertos.add(id);
+    render();
+  }
+});
 
 // El botón sube un nivel de la ruta en vez de usar history.back(): history.length no es
 // fiable, y si alguien abre un enlace directo el atrás lo sacaría de la página. El atrás
@@ -528,10 +1005,11 @@ async function refrescar() {
     periodo = (datos.estado === "actualizando") ? 4000 : 30000;
     render();
   } catch (e) {
-    barra.textContent = "Sin conexión con el servidor.";
+    estado.dataset.modo = "atencion";
+    barra.textContent = "Sin conexión con el servidor. Reintentando…";
   }
 }
-async function bucle() { await refrescar(); setTimeout(bucle, periodo); }
+async function bucle() { await refrescar(); medirCabecera(); setTimeout(bucle, periodo); }
 bucle();
 </script>
 </body>

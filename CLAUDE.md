@@ -53,6 +53,24 @@ En local viene desactivado por defecto (solo se activa si detecta
 `pronosticos-bot` es el único servicio del workspace — un segundo servicio free
 suspendería a ambos.
 
+**La interfaz no usa Jinja2.** `templates/index.html` no tiene ni una etiqueta
+`{{ }}`: es un shell estático con el CSS y el JS en línea que se pinta entero en
+el cliente sondeando `/api/estado` (cada 4s mientras hay cálculo en curso, cada
+30s el resto del tiempo). No hay `static/`, ni build, ni dependencias de JS. Al
+tocar la web se trabaja sobre las funciones `pintar*` del `<script>`, no sobre
+bucles de plantilla. `pintarBloques` compara una "huella" por bloque y solo toca
+el DOM que cambió: sin eso la lista parpadearía y perdería el scroll en cada
+sondeo. Los nombres de equipo vienen de football-data.org, así que todo lo que
+entra pasa por `esc()`.
+
+**Navegación** (sept 2026): una fila por partido con barra de tres segmentos y
+el veredicto del modelo; el detalle (1/X/2, doble oportunidad, xG, aviso de poca
+muestra) se despliega al tocar. Con eso los ~41 partidos caben en dos pantallas
+sin esconder nada tras un filtro. Rutas por hash: `#/`, `#/liga/PD`,
+`#/liga/PD/2026-09-12`, `#/dia/2026-09-12`. Cada liga tiene tinte y sigla propios
+(ESP/ENG/FRA/ALE) y son el único sitio del diseño con varios colores, porque ahí
+el color es el dato; el acento arena está reservado al resultado favorito.
+
 **Endpoints:** `/` (web), `/api/estado`, `/api/ligas` (qué ancla y qué media usa
 cada liga), `/salud`, `/actualizar?token=...&forzar=1`,
 `/validar?token=...[&temporada=N]` (lanza el backtest) y `/api/validacion` (su
@@ -208,8 +226,6 @@ Deploy → Deploy latest commit, y esperar a "Live".
   aciertan. Guardarlos con su resultado real cerraría el círculo y acumularía
   datos propios que el plan free no vende — es lo único que puede sacar el `rho`
   del empate estadístico descrito arriba.
-- **Navegación con 41 partidos:** falta vista por día cruzando ligas, orden por
-  partido más igualado/desequilibrado, y búsqueda por equipo.
 - **`test_migracion.py` está desincronizado:** prueba `app._parsear_standings` y
   `app.USAR_PRIOR_PREVIA`, que no existen en `app.py`. Es de una migración a
   `/standings` que no está en el código actual, así que el archivo revienta con
