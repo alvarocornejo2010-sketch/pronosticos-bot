@@ -188,31 +188,35 @@ efecto se diluye solo conforme acumulan partidos.
   peor que un fallo ruidoso).
 - `backtest.py` captura `requests.RequestException` en vez de morir.
 
-## Render: por qué los `git push` no desplegaban solos
+## Render: el auto-deploy sí funciona (comprobado, sept 2026)
 
-Hecho observado (sept 2026): los 7 deploys del historial figuran en Events como
-"Manually triggered by you via Dashboard" — ningún push disparó un deploy solo.
-Pero Auto-Deploy (Settings → Deploy, no Build — Render partió el antiguo "Build &
-Deploy" en dos secciones) aparece en On Commit. Sin confirmar si ya estaba así o
-se cambió al investigar.
+Consultada la API de Render, la configuración del servicio `pronosticos-bot`
+(`srv-da749a2d0e5s73d8iuvg`) es:
 
-Si estaba en On Commit todo el tiempo, revisar en este orden:
+```
+autoDeploy: yes    autoDeployTrigger: commit    branch: main    rootDir: (vacío)
+```
 
-1. Build Filters (Settings → Build): rutas ignoradas que bloquean el deploy.
-2. Branch: que Render vigile `main` y no otra rama.
-3. Webhook de GitHub: repo desconectado o permisos revocados.
+Y en el historial de deploys, seis de los ocho últimos figuran con
+`trigger: "new_commit"`. O sea: **un push a `main` despliega solo**, normalmente
+en menos de un minuto. La nota anterior de este archivo ("los 7 deploys son
+manuales, revisar Build Filters / branch / webhook") era una lectura equivocada
+de la pestaña Events del panel: ahí los deploys manuales se leen fácil y los
+automáticos pasan desapercibidos.
+
+Lo que sí sigue siendo cierto y es la causa real de la confusión: **un push a una
+rama que no es `main` no despliega nada**. Si el trabajo está en una rama con su
+pull request abierta, Render no la mira; hay que mergear a `main` primero. El
+caso de `cc47e64` que costó tiempo encaja aquí, no en un webhook roto.
 
 Cómo comprobarlo en 5 segundos: Render → Events, comparar el hash del último
-"Deploy live" con `git log --oneline -1` en local. Si no coinciden, no hay nada
-que depurar en el código — es el deploy.
+"Deploy live" con `git log --oneline -1 main`. Si no coinciden, mira primero en
+qué rama está tu commit.
 
-Caso real que costó tiempo: se desplegó `fbfb44b` pero `cc47e64` (pantalla de
-inicio por ligas) se quedó sin desplegar. Se perdieron varios mensajes revisando
-git, caché del navegador y cabeceras HTTP antes de mirar Events — mirar Events
-primero la próxima vez.
-
-Mientras no se confirme que el auto-deploy funciona: después de cada push, Manual
-Deploy → Deploy latest commit, y esperar a "Live".
+Después de cada deploy (automático o manual) el disco arranca vacío: la web dirá
+"Todavía no hay datos" hasta la primera actualización. El planificador interno lo
+intenta cada 5 minutos; para no esperar, `/actualizar?token=...&forzar=1` con el
+valor de `UPDATE_SECRET` (Render → Environment).
 
 ## Pendiente (por orden de lo que más mueve la aguja)
 
