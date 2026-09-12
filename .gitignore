@@ -2,6 +2,8 @@
 .env
 cache.json
 data.json
+validacion.json
+validacion_cache/
 backtest_cache/
 
 # Basura estándar de Python:
