@@ -547,12 +547,29 @@ def _sigue_fresca(partido):
     return ahora() - _parsear_fecha(calculado) < timedelta(hours=HORAS_VALIDEZ_PREDICCION)
 
 
+def _escudo(equipo):
+    """URL del escudo solo si es https: va a parar a un <img src> en la web, y lo
+    que manda la API externa no se pinta sin filtrar."""
+    url = equipo.get("crest") or ""
+    return url if url.startswith("https://") else None
+
+
 def _ficha_base(match):
     """Los datos del partido que se conocen sin gastar ni una petición."""
+    local, visita = match["homeTeam"], match["awayTeam"]
     return {
         "id": match["id"],
-        "local": match["homeTeam"]["name"],
-        "visita": match["awayTeam"]["name"],
+        "local": local["name"],
+        "visita": visita["name"],
+        # nombre corto, abreviatura de tres letras y escudo: vienen ya en la misma
+        # respuesta del calendario, así que no cuestan peticiones. Con .get() porque
+        # la web funciona igual si algún equipo no los trae.
+        "local_corto": local.get("shortName"),
+        "visita_corto": visita.get("shortName"),
+        "local_sigla": local.get("tla"),
+        "visita_sigla": visita.get("tla"),
+        "local_escudo": _escudo(local),
+        "visita_escudo": _escudo(visita),
         "liga": match["competition"]["name"],
         # código estable ("PD", "PL"...) para que la web pueda agrupar por liga
         # sin depender del nombre, que puede venir escrito de formas distintas
