@@ -56,20 +56,48 @@ suspendería a ambos.
 **La interfaz no usa Jinja2.** `templates/index.html` no tiene ni una etiqueta
 `{{ }}`: es un shell estático con el CSS y el JS en línea que se pinta entero en
 el cliente sondeando `/api/estado` (cada 4s mientras hay cálculo en curso, cada
-30s el resto del tiempo). No hay `static/`, ni build, ni dependencias de JS. Al
-tocar la web se trabaja sobre las funciones `pintar*` del `<script>`, no sobre
-bucles de plantilla. `pintarBloques` compara una "huella" por bloque y solo toca
-el DOM que cambió: sin eso la lista parpadearía y perdería el scroll en cada
-sondeo. Los nombres de equipo vienen de football-data.org, así que todo lo que
-entra pasa por `esc()`.
+30s el resto del tiempo). No hay `static/`, ni build, ni dependencias de JS; de
+fuera solo llegan la fuente Archivo (Google Fonts, con fallback del sistema) y
+los escudos (URLs de football-data.org). Al tocar la web se trabaja sobre las
+funciones `pintar*` y `html*` del `<script>`, no sobre bucles de plantilla. Cada
+zona guarda una "huella" de lo último que pintó y solo toca el DOM si cambió
+(`pintarBloques` lo hace bloque a bloque en la lista central): sin eso la tabla
+parpadearía y perdería el scroll en cada sondeo. Los nombres de equipo vienen de
+football-data.org, así que todo lo que entra pasa por `esc()`.
 
-**Navegación** (sept 2026): una fila por partido con barra de tres segmentos y
-el veredicto del modelo; el detalle (1/X/2, doble oportunidad, xG, aviso de poca
-muestra) se despliega al tocar. Con eso los ~41 partidos caben en dos pantallas
-sin esconder nada tras un filtro. Rutas por hash: `#/`, `#/liga/PD`,
-`#/liga/PD/2026-09-12`, `#/dia/2026-09-12`. Cada liga tiene tinte y sigla propios
-(ESP/ENG/FRA/ALE) y son el único sitio del diseño con varios colores, porque ahí
-el color es el dato; el acento arena está reservado al resultado favorito.
+**Interfaz v3 (oct 2026): una terminal, no una lista.** El objetivo era llenar la
+pantalla en vez de dejar márgenes vacíos:
+
+- Escritorio (≥1180px): tres columnas de alto fijo. Izquierda: Competiciones
+  (con la media de goles que usa el modelo en cada liga), Calendario y "Cómo
+  leer la tabla". Centro: tira de fechas + tabla. Derecha: Mapa de la ventana
+  (una casilla por partido con la sigla del favorito y su %), Confianza del
+  favorito (histograma) y Fiabilidad medida (`/api/validacion`). Arriba,
+  buscador (`/` lo enfoca, Esc lo limpia) y cinta de próximos partidos; abajo,
+  barra de estado. Entre 880 y 1179px los dos laterales se apilan en una sola
+  columna. En móvil, una columna con pestañas fijas abajo: Partidos / Panorama /
+  Ligas y fechas.
+- La tabla responde al ancho del panel central (container query `centro`), no
+  al de la ventana: <640px compacta (equipos apilados + 1 X 2), ≥640px tabla,
+  ≥800px añade 1X/X2/12, goles esperados y muestra, ≥1150px la barra de reparto.
+  La columna Liga solo aparece en las vistas que mezclan ligas.
+- Los % de 1/X/2 se redondean por resto mayor para que sumen 100, y la doble
+  oportunidad se suma de esos mismos enteros: lo que se lee, cuadra.
+- Rutas por hash: `#/`, `#/semana`, `#/dia/2026-10-10`, `#/liga/PD`,
+  `#/liga/PD/2026-10-10`. `#/` es toda la ventana en escritorio y el primer día
+  en móvil.
+- Color: la rampa arena es secuencial y está reservada a la probabilidad
+  (celdas 1/X/2, mapa, cinta); el calendario cuenta partidos con una rampa neutra
+  aparte. Los tonos de liga pasaron el validador de paleta de la skill dataviz;
+  los anteriores no (LaLiga y Bundesliga quedaban a ΔE 10 en visión normal, el
+  mínimo es 15). Aun así la liga la identifica la sigla ESP/ENG/FRA/ALE y no el
+  color solo, y ningún texto va en color de liga.
+- Escudos y nombres cortos: `_ficha_base` añade `local_corto`, `local_sigla` y
+  `local_escudo` (y los de visita) sacados de la misma respuesta del calendario:
+  cero peticiones extra. `_escudo` solo deja pasar URLs https; si una imagen no
+  carga, la web pinta un monograma, y sin esos campos abrevia el nombre largo.
+- Logo "Casilla": tres casillas 1 X 2 con el favorito encendido. El mismo SVG va
+  en la cabecera y como favicon (data URI del `<link rel="icon">`).
 
 **Endpoints:** `/` (web), `/api/estado`, `/api/ligas` (qué ancla y qué media usa
 cada liga), `/salud`, `/actualizar?token=...&forzar=1`,
@@ -220,8 +248,6 @@ valor de `UPDATE_SECRET` (Render → Environment).
 
 ## Pendiente (por orden de lo que más mueve la aguja)
 
-- **Webhook de GitHub** (cosmético pero es la causa raíz probable de que los push
-  no desplieguen solos — ver sección Render arriba).
 - **Validar el modelo en PL, FL1 y BL1** (solo comprobado en LaLiga).
 - **Persistencia:** el disco de Render free borra `cache.json`/`data.json` en cada
   deploy. Bloquea el registro de predicciones. Variable `DATA_DIR` ya preparada
