@@ -65,7 +65,7 @@ zona guarda una "huella" de lo último que pintó y solo toca el DOM si cambió
 parpadearía y perdería el scroll en cada sondeo. Los nombres de equipo vienen de
 football-data.org, así que todo lo que entra pasa por `esc()`.
 
-**Interfaz v3 (oct 2026): una terminal, no una lista.** El objetivo era llenar la
+**Interfaz: una terminal a pantalla completa.** El objetivo es llenar la
 pantalla en vez de dejar márgenes vacíos:
 
 - Escritorio (≥1180px): tres columnas de alto fijo. Izquierda: Competiciones
@@ -88,10 +88,12 @@ pantalla en vez de dejar márgenes vacíos:
   en móvil.
 - Color: la rampa arena es secuencial y está reservada a la probabilidad
   (celdas 1/X/2, mapa, cinta); el calendario cuenta partidos con una rampa neutra
-  aparte. Los tonos de liga pasaron el validador de paleta de la skill dataviz;
-  los anteriores no (LaLiga y Bundesliga quedaban a ΔE 10 en visión normal, el
-  mínimo es 15). Aun así la liga la identifica la sigla ESP/ENG/FRA/ALE y no el
-  color solo, y ningún texto va en color de liga.
+  aparte. Los tonos de liga están validados por pares vecinos en el orden fijo
+  PD, PL, FL1, BL1 (`ORDEN_LIGAS`): cada vecino se separa al menos ΔE 15 en
+  visión normal. LaLiga (rojo) y Bundesliga (naranja) se parecen mucho (ΔE ≈ 7)
+  y solo funcionan porque nunca salen juntas: si cambia el orden o se añade una
+  liga, hay que revisar la paleta. Aun así la liga la identifica la sigla
+  ESP/ENG/FRA/ALE y no el color solo, y ningún texto va en color de liga.
 - Escudos y nombres cortos: `_ficha_base` añade `local_corto`, `local_sigla` y
   `local_escudo` (y los de visita) sacados de la misma respuesta del calendario:
   cero peticiones extra. `_escudo` solo deja pasar URLs https; si una imagen no
@@ -105,10 +107,13 @@ cada liga), `/salud`, `/actualizar?token=...&forzar=1`,
 resultado).
 
 **Efecto secundario de cada deploy:** el disco de Render free es efímero, cada
-deploy borra `cache.json` y `data.json`. Justo después la web dice "Todavía no
-hay datos" hasta la primera actualización, que paga el coste completo de API (~2
-peticiones/equipo) porque la caché está vacía. Conviene forzarla con
-`/actualizar?token=...&forzar=1` en vez de esperar al cron.
+deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
+hasta la primera actualización, que el planificador lanza sola unos 20 s
+después de arrancar y que paga el coste completo de API (~2 peticiones/equipo)
+porque la caché está vacía; las pasadas siguientes continúan cada 5 min
+mientras queden partidos pendientes. `/actualizar?token=...&forzar=1` no acelera
+esto: sirve para rehacer una pasada antes de `MIN_MINUTOS_ACTUALIZACION`
+(25 min) y para volver a bajar el calendario ignorando la caché.
 
 ## Bugs ya encontrados y corregidos (no reabrir sin motivo nuevo)
 
@@ -157,8 +162,10 @@ Modelo corregido      Brier 0.6013   LogLoss 1.0072   Acierto 49.0%
 Base "equipo medio"   Brier 0.6499   LogLoss 1.0749   Acierto 44.4%
 ```
 
-Skill score del 7.5% sobre la base. PL, FL1 y BL1 no están validadas todavía
-(correr `LIGA_BACKTEST=PL python backtest.py 2023 2024`, etc.).
+Skill score del 7.5% sobre la base. PL, FL1 y BL1 las valida la propia app
+(`validacion.py`, abajo) sobre la última temporada terminada, pero sus cifras no
+están apuntadas aquí. Para el mismo backtest de dos temporadas que LaLiga:
+`LIGA_BACKTEST=PL python backtest.py 2023 2024`, etc.
 
 `validacion.py` corre ese mismo backtest walk-forward **dentro de la app**
 (`/validar?token=...`, resultado en `/api/validacion`): importa
@@ -207,48 +214,46 @@ en la ventana de 400 días es un recién llegado — basta con cambiar el objeti
 encogimiento (`_encoger`) para esos equipos en vez de añadir un campo nuevo. El
 efecto se diluye solo conforme acumulan partidos.
 
-## Mejoras hechas a las herramientas de afinado
+## Herramientas de afinado
 
-- `afinar.py` hace test pareado de LogLoss con su error estándar (antes solo
-  decía cuál ganaba, no si la diferencia era real).
-- `afinar.py` y `backtest.py` avisan a gritos si una temporada no carga (antes
-  tragaban un 403 en silencio y reportaban 3 temporadas habiendo cargado 1 —
-  peor que un fallo ruidoso).
-- `backtest.py` captura `requests.RequestException` en vez de morir.
+- `afinar.py` compara configuraciones con un test pareado de LogLoss y su error
+  estándar: dice si una diferencia es real, no solo cuál gana.
+- `afinar.py` avisa ("AVISO: no se pudo cargar …") si una temporada no carga.
+  `backtest.py` solo imprime el error HTTP de esa temporada, y su resumen sigue
+  listando todas las temporadas pedidas: si una falla, mira cuántos partidos
+  cargó antes de fiarte del resultado.
+- `backtest.py` captura `requests.RequestException`: sin conexión, esa temporada
+  vuelve vacía en vez de tumbar el script.
 
-## Render: el auto-deploy sí funciona (comprobado, sept 2026)
+## Render: cómo se despliega
 
-Consultada la API de Render, la configuración del servicio `pronosticos-bot`
-(`srv-da749a2d0e5s73d8iuvg`) es:
+Configuración del servicio `pronosticos-bot` (`srv-da749a2d0e5s73d8iuvg`),
+consultada en la API de Render (sept 2026):
 
 ```
 autoDeploy: yes    autoDeployTrigger: commit    branch: main    rootDir: (vacío)
 ```
 
-Y en el historial de deploys, seis de los ocho últimos figuran con
-`trigger: "new_commit"`. O sea: **un push a `main` despliega solo**, normalmente
-en menos de un minuto. La nota anterior de este archivo ("los 7 deploys son
-manuales, revisar Build Filters / branch / webhook") era una lectura equivocada
-de la pestaña Events del panel: ahí los deploys manuales se leen fácil y los
-automáticos pasan desapercibidos.
-
-Lo que sí sigue siendo cierto y es la causa real de la confusión: **un push a una
-rama que no es `main` no despliega nada**. Si el trabajo está en una rama con su
-pull request abierta, Render no la mira; hay que mergear a `main` primero. El
-caso de `cc47e64` que costó tiempo encaja aquí, no en un webhook roto.
+**Un push a `main` despliega solo**, normalmente en menos de un minuto.
+**Un push a cualquier otra rama no despliega nada**: si el trabajo está en una
+rama con su pull request abierta, hay que mergear a `main` primero. La pestaña
+Events del panel no sirve para saber si el auto-deploy funciona: ahí los
+deploys manuales se leen fácil y los automáticos pasan desapercibidos.
 
 Cómo comprobarlo en 5 segundos: Render → Events, comparar el hash del último
 "Deploy live" con `git log --oneline -1 main`. Si no coinciden, mira primero en
 qué rama está tu commit.
 
-Después de cada deploy (automático o manual) el disco arranca vacío: la web dirá
-"Todavía no hay datos" hasta la primera actualización. El planificador interno lo
-intenta cada 5 minutos; para no esperar, `/actualizar?token=...&forzar=1` con el
-valor de `UPDATE_SECRET` (Render → Environment).
+Después de cada deploy el disco arranca vacío y la web se llena sola en unos
+minutos (ver "Efecto secundario de cada deploy"). Para rehacer una pasada a
+mano: `/actualizar?token=...&forzar=1` con el valor de `UPDATE_SECRET` (Render →
+Environment).
 
 ## Pendiente (por orden de lo que más mueve la aguja)
 
-- **Validar el modelo en PL, FL1 y BL1** (solo comprobado en LaLiga).
+- **Apuntar la validación de PL, FL1 y BL1:** la app ya las mide
+  (`/api/validacion`), pero sus cifras no están en este archivo y solo LaLiga
+  tiene el backtest de dos temporadas.
 - **Persistencia:** el disco de Render free borra `cache.json`/`data.json` en cada
   deploy. Bloquea el registro de predicciones. Variable `DATA_DIR` ya preparada
   para cuando se resuelva (¿disco persistente de pago? ¿DB externa gratuita?).
