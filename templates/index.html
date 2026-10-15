@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="description" content="Pronósticos 1X2 y doble oportunidad de LaLiga, Premier League, Ligue 1 y Bundesliga con un modelo Poisson de fuerzas ataque/defensa.">
+<meta name="description" content="Pronósticos 1X2 y doble oportunidad de LaLiga, Premier League, Ligue 1, Bundesliga, Serie A, Eredivisie, Primeira Liga y Championship con un modelo Poisson de fuerzas ataque/defensa.">
 <meta name="theme-color" content="#0d1210">
 <meta name="color-scheme" content="dark">
 <title>Pronósticos</title>
@@ -25,8 +25,9 @@
      Color con trabajo asignado, nunca decorativo:
        - arena (--cal) = probabilidad. Escala secuencial de 8 tramos,
          monótona en luminosidad y validada; nada más usa ese tono.
-       - 4 tintes de liga, validados para pares adyacentes en orden fijo
-         (LaLiga, Premier, Ligue 1, Bundesliga). Ninguna combinación de 4
+       - 8 tintes de liga, validados para pares adyacentes en orden fijo
+         (LaLiga, Premier, Ligue 1, Bundesliga, Serie A, Eredivisie,
+         Primeira Liga, Championship). Ninguna combinación de 4
          pasa cuando cualquier liga puede quedar junto a cualquier otra,
          así que la identidad de liga va SIEMPRE en texto (ESP, ENG...) y
          el tinte solo acompaña en listas de orden fijo.
@@ -52,6 +53,10 @@
     --liga-PL: #9085e9;
     --liga-FL1: #199e70;
     --liga-BL1: #d95926;
+    --liga-SA: #3987e5;
+    --liga-DED: #c98500;
+    --liga-PPL: #d55181;
+    --liga-ELC: #008300;
 
     --critico: #d03b3b;
 
@@ -670,7 +675,7 @@ const abiertos = new Set();
 const escudosRotos = new Set();
 
 // Identidad de liga: la SIGLA es el canal principal. El tinte acompaña solo en
-// listas de orden fijo (carril de ligas, cabeceras de grupo): con cuatro ligas
+// listas de orden fijo (carril de ligas, cabeceras de grupo): ya con cuatro ligas
 // ninguna paleta pasa la prueba de todos-los-pares, así que donde cualquier liga
 // puede quedar junto a cualquier otra (tabla ordenada, mapa) no se usa color.
 const LIGAS = {
@@ -678,6 +683,10 @@ const LIGAS = {
   PL:  { sigla: "ENG", tono: "var(--liga-PL)" },
   FL1: { sigla: "FRA", tono: "var(--liga-FL1)" },
   BL1: { sigla: "ALE", tono: "var(--liga-BL1)" },
+  SA:  { sigla: "ITA", tono: "var(--liga-SA)" },
+  DED: { sigla: "NED", tono: "var(--liga-DED)" },
+  PPL: { sigla: "POR", tono: "var(--liga-PPL)" },
+  ELC: { sigla: "EN2", tono: "var(--liga-ELC)" },
 };
 const ORDEN_LIGAS = Object.keys(LIGAS);
 function ligaDe(cod) {
@@ -1356,7 +1365,7 @@ function estadoVacio() {
         + '<ul class="pasos"><li><b>Ahora</b><span>El planificador interno lanza la actualización sola, sin esperar al siguiente turno.</span></li>'
         + '<li><b>Cada pasada</b><span>Calcula hasta agotar 40 peticiones a la API y deja el resto para la siguiente.</span></li>'
         + '<li><b>Esta página</b><span>Se actualiza sola: los partidos aparecen en cuanto haya números.</span></li></ul>'
-      : '<p>Ninguna de las cuatro ligas juega en la ventana consultada. Es lo normal en parones de selecciones.</p>')
+      : '<p>Ninguna de las ligas juega en la ventana consultada. Es lo normal en parones de selecciones.</p>')
     + '</div>';
 }
 

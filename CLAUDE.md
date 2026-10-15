@@ -22,8 +22,10 @@ con un modelo Poisson de fuerzas ataque/defensa.
 - Flask + gunicorn (`gunicorn app:app`), scipy para el modelo Poisson.
 - Datos: football-data.org, plan free (10 peticiones/minuto, sin acceso a
   temporadas 2021/2022 — devuelven HTTP 403).
-- Ligas activas: PD, PL, FL1, BL1. Champions deliberadamente fuera (razón
-  abajo). SA y DED entrarían en el plan free si se quisiera sumar.
+- Ligas activas: PD, PL, FL1, BL1, SA, DED, PPL, ELC: todas las ligas del plan
+  free. Lo que queda en él son torneos (Champions, Mundial, Eurocopa), fuera
+  por la razón de abajo. Europa League y Conference League no están en el plan
+  free.
 
 ## Arquitectura
 
@@ -88,12 +90,15 @@ pantalla en vez de dejar márgenes vacíos:
   en móvil.
 - Color: la rampa arena es secuencial y está reservada a la probabilidad
   (celdas 1/X/2, mapa, cinta); el calendario cuenta partidos con una rampa neutra
-  aparte. Los tonos de liga están validados por pares vecinos en el orden fijo
-  PD, PL, FL1, BL1 (`ORDEN_LIGAS`): cada vecino se separa al menos ΔE 15 en
-  visión normal. LaLiga (rojo) y Bundesliga (naranja) se parecen mucho (ΔE ≈ 7)
-  y solo funcionan porque nunca salen juntas: si cambia el orden o se añade una
-  liga, hay que revisar la paleta. Aun así la liga la identifica la sigla
-  ESP/ENG/FRA/ALE y no el color solo, y ningún texto va en color de liga.
+  aparte. Los tonos de liga son los 8 de la paleta oscura de referencia del
+  skill dataviz, validados por pares vecinos en el orden fijo PD, PL, FL1, BL1,
+  SA, DED, PPL, ELC (`ORDEN_LIGAS`): cada vecino se separa al menos ΔE 19 en
+  visión normal y 8.7 con daltonismo. Pares que no son vecinos se parecen mucho
+  (LaLiga rojo y Bundesliga naranja, ΔE ≈ 7; Bundesliga y Eredivisie ámbar,
+  ΔE ≈ 11) y solo funcionan porque nunca salen juntos: si cambia el orden o se
+  añade una liga, hay que volver a validar la paleta. Aun así la liga la
+  identifica la sigla (ESP, ENG, FRA, ALE, ITA, NED, POR, EN2) y no el color
+  solo, y ningún texto va en color de liga.
 - Escudos y nombres cortos: `_ficha_base` añade `local_corto`, `local_sigla` y
   `local_escudo` (y los de visita) sacados de la misma respuesta del calendario:
   cero peticiones extra. `_escudo` solo deja pasar URLs https; si una imagen no
@@ -111,7 +116,9 @@ deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
 hasta la primera actualización, que el planificador lanza sola unos 20 s
 después de arrancar y que paga el coste completo de API (~2 peticiones/equipo)
 porque la caché está vacía; las pasadas siguientes continúan cada 5 min
-mientras queden partidos pendientes. `/actualizar?token=...&forzar=1` no acelera
+mientras queden partidos pendientes. Con 8 ligas una semana normal son unas
+180 peticiones: unas 5 pasadas de 40, y la ventana tarda del orden de 45 min
+en llenarse entera (los partidos más cercanos salen primero). `/actualizar?token=...&forzar=1` no acelera
 esto: sirve para rehacer una pasada antes de `MIN_MINUTOS_ACTUALIZACION`
 (25 min) y para volver a bajar el calendario ignorando la caché.
 
@@ -151,7 +158,10 @@ En liga hay ~19 partidos en casa y ~19 fuera; en Champions, 4 y 4. Y la "media d
 la liga" en Champions no significa nada: mezcla al Bayern con el campeón de
 Kazajistán, así que dividir entre esa media no mide fuerza relativa. Hacerlo bien
 exige tomar las stats de cada equipo de su liga doméstica y normalizarlas entre
-ligas — proyecto aparte, no trivial.
+ligas — proyecto aparte, no trivial. Las 8 ligas activas son la base que ese
+proyecto necesitaría (de ellas sale la mayoría de equipos de la Champions),
+pero falta la parte difícil: comparar ligas entre sí.
+Europa League y Conference League ni siquiera están en el plan free.
 
 ## Validación
 
@@ -162,7 +172,7 @@ Modelo corregido      Brier 0.6013   LogLoss 1.0072   Acierto 49.0%
 Base "equipo medio"   Brier 0.6499   LogLoss 1.0749   Acierto 44.4%
 ```
 
-Skill score del 7.5% sobre la base. PL, FL1 y BL1 las valida la propia app
+Skill score del 7.5% sobre la base. Las otras siete ligas las valida la propia app
 (`validacion.py`, abajo) sobre la última temporada terminada, pero sus cifras no
 están apuntadas aquí. Para el mismo backtest de dos temporadas que LaLiga:
 `LIGA_BACKTEST=PL python backtest.py 2023 2024`, etc.
@@ -251,9 +261,10 @@ Environment).
 
 ## Pendiente (por orden de lo que más mueve la aguja)
 
-- **Apuntar la validación de PL, FL1 y BL1:** la app ya las mide
+- **Apuntar la validación de las otras siete ligas:** la app ya las mide
   (`/api/validacion`), pero sus cifras no están en este archivo y solo LaLiga
-  tiene el backtest de dos temporadas.
+  tiene el backtest de dos temporadas. SA, DED, PPL y ELC (añadidas en oct
+  2026) no se han medido nunca fuera de la app.
 - **Persistencia:** el disco de Render free borra `cache.json`/`data.json` en cada
   deploy. Bloquea el registro de predicciones. Variable `DATA_DIR` ya preparada
   para cuando se resuelva (¿disco persistente de pago? ¿DB externa gratuita?).
