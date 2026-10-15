@@ -39,7 +39,13 @@ LIGAS = {
     "Premier League": "PL",
     "Ligue 1": "FL1",
     "Bundesliga": "BL1",
-    # Serie A ("SA") y Eredivisie ("DED") también entran en el plan free si las quieres.
+    "Serie A": "SA",
+    "Eredivisie": "DED",
+    "Primeira Liga": "PPL",
+    "Championship": "ELC",
+    # Con estas ocho ya están todas las LIGAS del plan free. Lo que queda en él son
+    # torneos: Mundial ("WC"), Eurocopa ("EC") y Champions (abajo). Europa League
+    # y Conference League no están en el plan free.
 
     # "Champions League": "CL",  <- NO la actives sin cambiar el modelo antes.
     #
