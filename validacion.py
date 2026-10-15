@@ -11,6 +11,10 @@ Método: para cada liga se bajan dos temporadas. La anterior sirve de ancla y de
 historial inicial; la última se recorre partido a partido prediciendo cada uno
 SOLO con lo ocurrido antes. Es la misma situación que en producción.
 
+Además del 1X2 mide dos mercados de goles, más de 2.5 y ambos marcan, con la
+misma función que publica la web (`mercados_de_goles`) y contra la misma base
+"equipo medio". No cuesta ni una petición más: salen de los mismos resultados.
+
 Se dispara con /validar?token=... y el resultado queda en /api/validacion.
 Cuesta 2 peticiones por liga, una sola vez: las temporadas terminadas no cambian.
 """
@@ -139,19 +143,71 @@ class _Acumulador:
                 "n": self.n}
 
     def calibracion(self, minimo=25):
-        filas = []
-        for b in sorted(self.bins):
-            suma, ac, n = self.bins[b]
-            if n < minimo:
-                continue
-            pred, real = 100 * suma / n, 100 * ac / n
-            se = 100 * math.sqrt(max(pred / 100 * (1 - pred / 100), 1e-9) / n)
-            filas.append({"rango": f"{b*10}-{b*10+10}%", "casos": n,
-                          "predicho": round(pred, 1), "real": round(real, 1),
-                          "desvio": round(real - pred, 1),
-                          "se": round(se, 1),
-                          "significativo": bool(abs(real - pred) > 2 * se)})
-        return filas
+        return _calibracion(self.bins, minimo)
+
+
+class _Binario:
+    """Lo mismo que _Acumulador para un mercado de sí o no (más de 2.5, ambos
+    marcan). Guarda además la media predicha y la frecuencia real: si el modelo
+    se equivoca de forma sistemática en un mercado, ahí se ve antes que en el Brier."""
+
+    def __init__(self):
+        self.b = []; self.l = []; self.aciertos = 0; self.n = 0
+        self.suma_p = 0.0; self.si = 0
+        self.bins = defaultdict(lambda: [0.0, 0, 0])
+
+    def add(self, p, y):
+        self.b.append((p - y) ** 2)
+        self.l.append(-math.log(max(p if y else 1 - p, 1e-15)))
+        self.aciertos += ((p >= 0.5) == bool(y))
+        self.n += 1; self.suma_p += p; self.si += y
+        b = self.bins[min(int(p * 10), 9)]
+        b[0] += p; b[1] += y; b[2] += 1
+
+    def resumen(self):
+        if not self.n:
+            return None
+        return {"brier": round(sum(self.b) / self.n, 4),
+                "logloss": round(sum(self.l) / self.n, 4),
+                "acierto": round(100 * self.aciertos / self.n, 1),
+                "predicho": round(100 * self.suma_p / self.n, 1),
+                "real": round(100 * self.si / self.n, 1),
+                "n": self.n}
+
+    def calibracion(self, minimo=25):
+        return _calibracion(self.bins, minimo)
+
+
+def _calibracion(bins, minimo):
+    filas = []
+    for b in sorted(bins):
+        suma, ac, n = bins[b]
+        if n < minimo:
+            continue
+        pred, real = 100 * suma / n, 100 * ac / n
+        se = 100 * math.sqrt(max(pred / 100 * (1 - pred / 100), 1e-9) / n)
+        filas.append({"rango": f"{b*10}-{b*10+10}%", "casos": n,
+                      "predicho": round(pred, 1), "real": round(real, 1),
+                      "desvio": round(real - pred, 1),
+                      "se": round(se, 1),
+                      "significativo": bool(abs(real - pred) > 2 * se)})
+    return filas
+
+
+# Mercados de goles que se validan además del 1X2: clave de mercados_de_goles y
+# qué cuenta como "sí" con el marcador real.
+MERCADOS = {
+    "mas_25": ("prob_mas_25", lambda m: m["gl"] + m["gv"] > 2.5),
+    "ambos":  ("prob_ambos",  lambda m: m["gl"] > 0 and m["gv"] > 0),
+}
+
+
+def _resumen_mercado(modelo, base):
+    m_res, b_res = modelo.resumen(), base.resumen()
+    skill = round(100 * (1 - m_res["brier"] / b_res["brier"]), 1)
+    return {"modelo": m_res, "base_equipo_medio": b_res, "skill_score": skill,
+            "aporta_valor": bool(skill > 0 and m_res["logloss"] < b_res["logloss"]),
+            "calibracion": modelo.calibracion()}
 
 
 # ==========================================
@@ -183,6 +239,7 @@ def validar_liga(codigo_liga, nombre, season):
     base_liga = _Acumulador()
     base_frec = _Acumulador()
     conteo = [0, 0, 0]
+    mercados = {k: (_Binario(), _Binario()) for k in MERCADOS}
 
     for m in ultima:
         y = _resultado(m)
@@ -197,6 +254,14 @@ def validar_liga(codigo_liga, nombre, season):
         # --- base 1: dos equipos medios, ignora quién juega ---
         pb = app.calcular_poisson(round(media["avg_local"], 2), round(media["avg_visita"], 2))
         base_liga.add([pb["prob_local"] / 100, pb["prob_empate"] / 100, pb["prob_visita"] / 100], y)
+
+        # --- mercados de goles: los mismos números que publica la web ---
+        gm = app.mercados_de_goles(xl, xv, media)
+        gb = app.mercados_de_goles(media["avg_local"], media["avg_visita"], media)
+        for k, (clave, ocurre) in MERCADOS.items():
+            si = 1 if ocurre(m) else 0
+            mercados[k][0].add(gm[clave] / 100, si)
+            mercados[k][1].add(gb[clave] / 100, si)
 
         # --- base 2: la frecuencia observada hasta ahora ---
         t = sum(conteo)
@@ -225,6 +290,7 @@ def validar_liga(codigo_liga, nombre, season):
                          "X": round(100 * conteo[1] / t, 1),
                          "2": round(100 * conteo[2] / t, 1)},
         "calibracion": modelo.calibracion(),
+        "mercados": {k: _resumen_mercado(mod, base) for k, (mod, base) in mercados.items()},
     }
 
 
@@ -286,6 +352,9 @@ def correr_validacion(season=None):
                 "aporta_valor": r["aporta_valor"],
                 "brier": r["modelo"]["brier"],
                 "brier_base": r["base_equipo_medio"]["brier"],
+                "mercados": {k: {"skill_score": v["skill_score"],
+                                 "aporta_valor": v["aporta_valor"]}
+                             for k, v in r["mercados"].items()},
             } for r in ok},
             "ligas": resultados,
         })

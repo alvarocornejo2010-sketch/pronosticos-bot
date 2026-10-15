@@ -6,14 +6,15 @@ proyecto.
 
 ## Qué es
 
-App Flask en Render que predice resultados de fútbol (1/X/2 y doble oportunidad)
-con un modelo Poisson de fuerzas ataque/defensa.
+App Flask en Render que predice resultados de fútbol (1/X/2, doble oportunidad y
+mercados de goles: más/menos, ambos marcan, porterías a cero y marcadores) con un
+modelo Poisson de fuerzas ataque/defensa.
 
 - Repo: `pronosticos-bot`
 - Carpeta local: `C:\Users\Alvaro\Desktop\webapp`
 - URL producción: https://pronosticos-bot.onrender.com
 - Ficheros clave: `app.py`, `templates/index.html`, `validacion.py`, `backtest.py`,
-  `afinar.py`, `diagnostico.py`
+  `afinar.py`, `afinar_goles.py`, `diagnostico.py`
 
 ## Stack
 
@@ -81,10 +82,16 @@ pantalla en vez de dejar márgenes vacíos:
   Ligas y fechas.
 - La tabla responde al ancho del panel central (container query `centro`), no
   al de la ventana: <640px compacta (equipos apilados + 1 X 2), ≥640px tabla,
-  ≥800px añade 1X/X2/12, goles esperados y muestra, ≥1150px la barra de reparto.
+  ≥800px añade 1X/X2/12, goles esperados y muestra, ≥960px más de 2.5 y ambos
+  marcan, ≥1150px la barra de reparto. Al abrir un partido sale el detalle, con
+  los mercados de goles (histograma de goles totales, más/menos 1.5-3.5, ambos
+  marcan, porterías a cero, tres marcadores) y una nota con lo que mide su liga.
+  El panel Fiabilidad tiene un selector 1X2 / +2.5 / Ambos.
   La columna Liga solo aparece en las vistas que mezclan ligas.
 - Los % de 1/X/2 se redondean por resto mayor para que sumen 100, y la doble
-  oportunidad se suma de esos mismos enteros: lo que se lee, cuadra.
+  oportunidad se suma de esos mismos enteros: lo que se lee, cuadra. Igual el
+  histograma de goles; "menos de" y "ambos marcan: no" se restan del número ya
+  redondeado.
 - Rutas por hash: `#/`, `#/semana`, `#/dia/2026-10-10`, `#/liga/PD`,
   `#/liga/PD/2026-10-10`. `#/` es toda la ventana en escritorio y el primer día
   en móvil.
@@ -179,10 +186,39 @@ están apuntadas aquí. Para el mismo backtest de dos temporadas que LaLiga:
 
 `validacion.py` corre ese mismo backtest walk-forward **dentro de la app**
 (`/validar?token=...`, resultado en `/api/validacion`): importa
-`calcular_xg_partido` y `calcular_poisson` de `app` en vez de reimplementarlos,
-para no validar una copia desincronizada del modelo desplegado. Cuesta 2
+`calcular_xg_partido`, `calcular_poisson` y `mercados_de_goles` de `app` en vez de
+reimplementarlos, para no validar una copia desincronizada del modelo desplegado.
+Además del 1X2 mide más de 2.5 y ambos marcan (`mercados` en el resultado) contra
+la misma base "equipo medio". Cuesta 2
 peticiones por liga y solo la primera vez — las temporadas terminadas no cambian,
 así que quedan cacheadas en disco.
+
+## Mercados de goles — `ENCOGER_GOLES = 0.3` (oct 2026)
+
+Más/menos, ambos marcan, porterías a cero y marcadores salen de
+`mercados_de_goles`, no de `calcular_poisson`. El 1X2 no cambió ni en el código.
+La función usa los goles esperados acercados a la media de la liga, en escala
+logarítmica: `media · (xg/media)^0.3`.
+
+Por qué: con los goles esperados tal cual, el modelo exagera las diferencias de
+goles entre partidos. Donde daba 27% de "más de 2.5" pasó un 42%, y donde daba
+74% pasó un 62%. El orden lo acierta, la magnitud no. Así perdía contra la base
+"equipo medio": skill −1.3% en más de 2.5 y −1.0% en ambos marcan.
+
+Medido con `afinar_goles.py` sobre 3.484 partidos reales (LaLiga, Premier,
+Bundesliga, Serie A y Ligue 1; temporadas 2023 y 2024, ancla 2022):
+
+- Elegido con 2023 sale α=0.2. Juzgado con 2024 gana a la base en más de 2.5
+  (−3.7 errores estándar) y en ambos marcan (−2.3 se).
+- Elegido con 2024 sale α=0.5. Juzgado con 2023 empata con la base.
+- Cualquier α entre 0.2 y 0.4 gana a la base en las dos temporadas. α=1 (sin
+  encoger) pierde en 2023 por +2.4 se. 0.3 es el centro de esa franja, no un
+  óptimo demostrado.
+
+Aun con 0.3 la ganancia es pequeña: skill de +0.2% a +1.2%, frente al ~7.5% del
+1X2. Con solo goles marcados y encajados, el total de goles de un partido apenas
+se predice mejor que con la media de su liga. La web lo dice en el detalle de cada
+partido y en el panel Fiabilidad. No vender estos números como el 1X2.
 
 ## Afinado del modelo — dos decisiones cerradas (sept 2026)
 
@@ -234,6 +270,9 @@ efecto se diluye solo conforme acumulan partidos.
   cargó antes de fiarte del resultado.
 - `backtest.py` captura `requests.RequestException`: sin conexión, esa temporada
   vuelve vacía en vez de tumbar el script.
+- `afinar_goles.py` mide `ENCOGER_GOLES` con el mismo método de train/test y test
+  pareado. No necesita token: baja resultados de openfootball (ver "Más
+  temporadas de datos" abajo) y los cachea en `openfootball_cache/`.
 
 ## Render: cómo se despliega
 
@@ -277,17 +316,24 @@ Environment).
   `/standings` que no está en el código actual, así que el archivo revienta con
   `AttributeError` si se corre. O se completa la migración o se borra el test;
   tal como está no prueba nada.
-- **Más temporadas de datos:** bloqueado por el plan free de football-data.org. Es
-  lo único que convertiría el "empate estadístico" del afinado en una respuesta
-  real.
+- **Más temporadas de datos: ya hay fuente gratis.** El plan free de
+  football-data.org no da temporadas viejas, pero `openfootball/football.json` en
+  GitHub sí: resultados de LaLiga, Premier, Bundesliga, Serie A y Ligue 1,
+  comprobados de 2022/23 a 2024/25 (oct 2026), sin token. Algunas vienen
+  incompletas: LaLiga y Serie A 2024/25 traen 370 de 380 partidos. Con ellos el
+  backtest de LaLiga 2023+2024 da skill +7.9% y +6.9%, en línea con el 7.5% de
+  arriba. Es lo que hace falta para reabrir el "empate estadístico" de
+  `PSEUDO_PARTIDOS`/`rho` y el prior de ascendidos, con 5 ligas en vez de una.
+  No se ha hecho todavía.
 - **xG real** (tier de pago): el techo de un modelo basado solo en goles
   marcados/encajados ronda un skill score del 9-10%; el actual ya está en 7.5%.
 
 ## Convenciones para seguir trabajando aquí
 
 - No reabrir el debate de `PSEUDO_PARTIDOS`/`rho` ni el prior de ascendidos sin
-  datos nuevos (más temporadas) — ya se demostró que con los datos actuales
-  cualquier conclusión es ruido. Ver "Afinado del modelo" arriba.
+  datos nuevos (más temporadas) — ya se demostró que con los datos de LaLiga
+  cualquier conclusión es ruido. Ver "Afinado del modelo" arriba. Los datos de
+  openfootball son justo esos datos nuevos: reabrirlo con ellos sí tiene sentido.
 - Cualquier cambio al modelo debe pasar por `backtest.py` sobre LaLiga 2023+2024
   como mínimo, y usar el test pareado de `afinar.py` para saber si una diferencia
   es real o ruido antes de adoptarla.

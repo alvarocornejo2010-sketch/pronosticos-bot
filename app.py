@@ -8,6 +8,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import numpy as np
 import requests
 from flask import Flask, jsonify, render_template, request
 from scipy.stats import poisson
@@ -144,6 +145,18 @@ PRIOR_AVG_LOCAL = 1.50
 PRIOR_AVG_VISITA = 1.15
 DIAS_VALIDEZ_PRIOR = 30         # la temporada pasada ya no cambia: se cachea de sobra
 LIMITE_GOLES = 10               # rejilla de Poisson (antes 5, que perdía hasta 6.5% de masa)
+
+# Cuánto de la diferencia con la media de liga se conserva en los goles esperados
+# al calcular los mercados de GOLES (más/menos, ambos marcan, porterías a cero,
+# marcadores). El 1X2 no lo usa. Con los goles esperados tal cual, el modelo
+# exagera las diferencias entre partidos: donde daba 27% de "más de 2.5" pasaba
+# un 42%, y donde daba 74% pasaba un 62%. Así perdía contra la simple media de la
+# liga. Medido sobre 3.484 partidos reales (5 ligas, 2023 y 2024, datos de
+# openfootball): ajustando en una temporada y probando en la otra, cualquier
+# valor entre 0.2 y 0.4 gana a la media de liga en las dos y el valor 1 (sin
+# encoger) pierde. 0.3 es el centro de esa franja, no un óptimo demostrado.
+# Detalle en CLAUDE.md ("Mercados de goles").
+ENCOGER_GOLES = 0.3
 
 actualizando_ahora = False      # evita que dos actualizaciones corran a la vez
 
@@ -445,6 +458,45 @@ def calcular_poisson(gla, gvi, limite=LIMITE_GOLES):
     }
 
 
+def mercados_de_goles(xg_local, xg_visita, promedio_liga, limite=LIMITE_GOLES):
+    """Más/menos, ambos marcan, porterías a cero y marcadores más probables.
+
+    Salen todos de una misma rejilla de marcadores, así que no se contradicen
+    entre sí. Esa rejilla usa los goles esperados acercados a la media de la
+    liga (ENCOGER_GOLES), en escala logarítmica porque el modelo es
+    multiplicativo (ataque x defensa x media). Con dos equipos medios no cambia
+    nada, así que la base "equipo medio" de la validación es la misma de siempre.
+    """
+    avg_l, avg_v = promedio_liga["avg_local"], promedio_liga["avg_visita"]
+    gla = avg_l * (xg_local / avg_l) ** ENCOGER_GOLES
+    gvi = avg_v * (xg_visita / avg_v) ** ENCOGER_GOLES
+
+    goles = np.arange(limite + 1)
+    rejilla = np.outer(poisson.pmf(goles, gla), poisson.pmf(goles, gvi))
+    rejilla /= rejilla.sum()    # misma normalización que calcular_poisson
+    total = np.add.outer(goles, goles)
+    reparto = [rejilla[total == k].sum() for k in range(5)] + [rejilla[total >= 5].sum()]
+    mejores = np.argsort(rejilla, axis=None)[::-1][:3]
+
+    pc = lambda v: round(float(v) * 100, 2)    # float(): np.float64 no va al JSON
+    return {
+        "goles_total": round(float(gla + gvi), 2),
+        # "menos de" es el complemento: la web lo calcula como 100 - esto
+        "prob_mas_15": pc(rejilla[total > 1.5].sum()),
+        "prob_mas_25": pc(rejilla[total > 2.5].sum()),
+        "prob_mas_35": pc(rejilla[total > 3.5].sum()),
+        "prob_ambos": pc(rejilla[1:, 1:].sum()),
+        # portería a cero del local = el visitante no marca, y al revés
+        "prob_cero_local": pc(rejilla[:, 0].sum()),
+        "prob_cero_visita": pc(rejilla[0, :].sum()),
+        # goles totales del partido: 0, 1, 2, 3, 4 y 5 o más
+        "goles_reparto": [pc(v) for v in reparto],
+        # los tres marcadores más probables: [goles local, goles visitante, %]
+        "marcadores": [[int(i // (limite + 1)), int(i % (limite + 1)), pc(rejilla.flat[i])]
+                       for i in mejores],
+    }
+
+
 # ==========================================
 # BUSCAR EL PRIMER DÍA CON PARTIDOS (hoy, luego mañana, etc.)
 # ==========================================
@@ -688,6 +740,7 @@ def correr_actualizacion(forzar=False):
             stats_visita = obtener_stats_equipo(visita_id, codigo_liga, cache)
             xg_local, xg_visita = calcular_xg_partido(stats_local, stats_visita, promedio_liga)
             probs = calcular_poisson(xg_local, xg_visita)
+            goles = mercados_de_goles(xg_local, xg_visita, promedio_liga)
 
             calculadas[match["id"]] = dict(
                 _ficha_base(match),
@@ -698,7 +751,7 @@ def correr_actualizacion(forzar=False):
                 muestra_visita=stats_visita["n_visita"],
                 calculado=ahora().isoformat(),
                 pendiente=False,
-                **probs
+                **probs, **goles
             )
 
             # se escribe el progreso DESPUÉS de cada partido -> la web los va

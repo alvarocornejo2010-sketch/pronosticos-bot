@@ -47,6 +47,7 @@
     --oscura: #0d1210;
 
     --cal: #e8c468;
+    --cal-2: #8b7a46;   /* arena apagado: barras de probabilidad que no son la más alta */
 
     /* paleta de liga: validada con el script de dataviz, orden adyacente */
     --liga-PD: #e66767;
@@ -360,7 +361,7 @@
   .c-1 { grid-area: p1; }
   .c-x { grid-area: px; }
   .c-2 { grid-area: p2; }
-  .c-d, .c-xg, .c-m, .c-rep { display: none; }
+  .c-d, .c-xg, .c-g, .c-m, .c-rep { display: none; }
 
   .c-eq { display: flex; align-items: center; gap: 8px; min-width: 0; padding-right: 8px; }
   .partido.pendiente .c-eq .nom { color: var(--tinta-3); }
@@ -412,10 +413,17 @@
     .c-d { color: var(--tinta-2); }
     .c-m.poca { display: flex; justify-content: center; align-items: center; gap: 4px; color: var(--tinta); }
   }
+  @container centro (min-width: 960px) {
+    .cab-tabla, .fila {
+      grid-template-columns: 3.5rem var(--col-liga) minmax(0, 1fr) minmax(0, 1fr) 3.125rem 3.125rem 3.125rem
+                             2.875rem 2.875rem 2.875rem 5.25rem 2.875rem 2.875rem 4rem;
+    }
+    .c-g { display: grid; place-items: center; font-size: var(--t-12); color: var(--tinta-2); font-variant-numeric: tabular-nums; }
+  }
   @container centro (min-width: 1150px) {
     .cab-tabla, .fila {
       grid-template-columns: 3.5rem var(--col-liga) minmax(0, 1fr) minmax(0, 1fr) 3.125rem 3.125rem 3.125rem
-                             2.875rem 2.875rem 2.875rem 5.25rem 4rem 11.875rem;
+                             2.875rem 2.875rem 2.875rem 5.25rem 2.875rem 2.875rem 4rem 11.875rem;
     }
     .c-rep { display: flex; align-items: center; gap: 2px; height: 8px; padding-left: 12px; }
     .c-rep i { display: block; height: 8px; min-width: 2px; }
@@ -432,6 +440,22 @@
   .aviso { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; font-size: var(--t-12); color: var(--tinta-2); }
   .aviso svg { flex-shrink: 0; margin-top: 1px; }
   @container centro (min-width: 640px) { .detalle { padding-left: 112px; } }
+  .detalle .ou { border-collapse: collapse; font-size: var(--t-12); font-variant-numeric: tabular-nums; }
+  .detalle .ou th { font-weight: 600; color: var(--tinta-3); text-align: right; padding: 0 0 2px 14px; }
+  .detalle .ou th:first-child, .detalle .ou td:first-child { text-align: left; padding-left: 0; }
+  .detalle .ou td { text-align: right; padding: 1px 0 1px 14px; color: var(--tinta); }
+  .detalle .ou td:first-child { color: var(--tinta-3); }
+  /* goles totales del partido: una barra por resultado, la más probable en arena pleno */
+  .goles-graf { display: flex; align-items: flex-end; gap: 2px; margin-top: 4px; }
+  .goles-graf .gb { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 1.625rem; }
+  .goles-graf .gb i { display: block; width: 100%; border-radius: 3px 3px 0 0; background: var(--cal-2); }
+  .goles-graf .gb.max i { background: var(--cal); }
+  .goles-graf .v { font-size: var(--t-11); color: var(--tinta-2); font-variant-numeric: tabular-nums; }
+  .goles-graf .gb.max .v { color: var(--tinta); font-weight: 650; }
+  .goles-graf .k { width: 100%; padding-top: 2px; border-top: 1px solid var(--linea-viva);
+                   text-align: center; font-size: var(--t-11); color: var(--tinta-3); }
+  .detalle .nw { white-space: nowrap; }
+  .detalle .nota-goles { margin: 12px 0 0; max-width: 72ch; font-size: var(--t-12); color: var(--tinta-3); }
 
   .vacio { padding: 36px 18px; max-width: 560px; }
   .vacio h2 { font-size: var(--t-20); font-weight: 650; font-stretch: 90%; margin: 0 0 10px; letter-spacing: -0.01em; }
@@ -483,6 +507,7 @@
   .fiab-cab { display: grid; grid-template-columns: 34px minmax(0, 1fr) 46px 40px; gap: 0 9px;
               font-size: var(--t-11); color: var(--tinta-3); padding-bottom: 4px; border-bottom: 1px solid var(--linea); }
   .fiab-cab span:nth-child(3), .fiab-cab span:nth-child(4) { text-align: right; }
+  .m-fiab .segmentos { margin: 0 0 10px; width: max-content; max-width: 100%; }
 
   /* mapa de la ventana: una columna por día, una baldosa por partido */
   .mapa { display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; gap: 2px; }
@@ -616,7 +641,7 @@
       <span>Hora</span><span class="c-liga">Liga</span><span>Local</span><span>Visitante</span>
       <span class="der">1</span><span class="der">X</span><span class="der">2</span>
       <span class="der c-d">1X</span><span class="der c-d">X2</span><span class="der c-d">12</span>
-      <span class="der c-xg">Goles esp.</span><span class="der c-m">Muestra</span><span class="c-rep" style="padding-left:12px">Reparto</span>
+      <span class="der c-xg">Goles esp.</span><span class="der c-g">+2.5</span><span class="der c-g">Ambos</span><span class="der c-m">Muestra</span><span class="c-rep" style="padding-left:12px">Reparto</span>
     </div>
     <main class="vista" id="vista" tabindex="-1"></main>
   </section>
@@ -670,6 +695,7 @@ let validacion = null;   // /api/validacion: puede no haberse ejecutado nunca
 let infoLigas = null;    // /api/ligas: medias de goles que usa el modelo
 let rutaPintada = null;
 let orden = "hora";
+let mercadoFiab = "1x2";   // qué mercado enseña el panel de fiabilidad
 let busqueda = "";
 const abiertos = new Set();
 const escudosRotos = new Set();
@@ -796,16 +822,21 @@ function htmlEscudo(url, nombre) {
 // ==========================================
 function favorito(p) { return Math.max(p.prob_local, p.prob_empate, p.prob_visita); }
 
-/** Los tres enteros que se enseñan, sumando 100 exacto. Redondear cada uno por su
+/** Los enteros que se enseñan, sumando 100 exacto. Redondear cada uno por su
  *  cuenta da un 54+24+23 = 101 que canta a la vista. Reparto por resto mayor. */
-function reparto(p) {
-  const bruto = [p.prob_local, p.prob_empate, p.prob_visita];
+function enterosQueSuman(bruto) {
   const enteros = bruto.map(Math.floor);
   let faltan = 100 - enteros.reduce((a, b) => a + b, 0);
   const porResto = bruto.map((v, i) => ({ i: i, resto: v - Math.floor(v) })).sort((a, b) => b.resto - a.resto);
   for (let k = 0; k < porResto.length && faltan > 0; k++, faltan--) enteros[porResto[k].i]++;
-  return { l: enteros[0], x: enteros[1], v: enteros[2] };
+  return enteros;
 }
+function reparto(p) {
+  const e = enterosQueSuman([p.prob_local, p.prob_empate, p.prob_visita]);
+  return { l: e[0], x: e[1], v: e[2] };
+}
+/** Los mercados de goles llegaron después: una predicción guardada antes no los trae. */
+function conGoles(p) { return p.prob_mas_25 !== undefined && p.prob_ambos !== undefined; }
 
 function veredictoDe(p) {
   const o = [{ signo: "1", valor: p.prob_local }, { signo: "X", valor: p.prob_empate }, { signo: "2", valor: p.prob_visita }];
@@ -869,10 +900,13 @@ function htmlFila(p, ctx, abierto) {
       + '<span class="c-p c-2' + (g === "2" ? " gana" : "") + '" style="' + estiloTramo(r.v) + '">' + r.v + '</span>'
       + '<span class="c-d">' + (r.l + r.x) + '</span><span class="c-d">' + (r.x + r.v) + '</span><span class="c-d">' + (r.l + r.v) + '</span>'
       + '<span class="c-xg">' + f2(p.xg_local) + "–" + f2(p.xg_visita) + '</span>'
+      + '<span class="c-g">' + (conGoles(p) ? Math.round(p.prob_mas_25) : "—") + '</span>'
+      + '<span class="c-g">' + (conGoles(p) ? Math.round(p.prob_ambos) : "—") + '</span>'
       + '<span class="c-m' + (m.min < 4 ? " poca" : "") + '">' + (m.min < 4 ? ICONO_AVISO : "") + (m.min >= 99 ? "—" : m.min) + '</span>'
       + '<span class="c-rep" aria-hidden="true">' + ancho(r.l) + ancho(r.x) + ancho(r.v) + '</span>';
     etiqueta = cortoDe(p, "local") + " contra " + cortoDe(p, "visita") + ", " + p.hora + ". Local " + r.l
-      + " %, empate " + r.x + " %, visitante " + r.v + " %.";
+      + " %, empate " + r.x + " %, visitante " + r.v + " %."
+      + (conGoles(p) ? " Más de 2.5 goles " + Math.round(p.prob_mas_25) + " %, ambos marcan " + Math.round(p.prob_ambos) + " %." : "");
   }
 
   return '<button class="fila" data-id="' + esc(p.id) + '" aria-expanded="' + (abierto ? "true" : "false")
@@ -895,7 +929,60 @@ function htmlDetalle(p) {
     + dato("Doble oportunidad", "1X " + pct(p.prob_1x) + ", X2 " + pct(p.prob_x2) + ", 12 " + pct(p.prob_12))
     + dato("Goles esperados", f2(p.xg_local) + " – " + f2(p.xg_visita))
     + dato("Muestra", m.l + " en casa del local, " + m.v + " fuera del visitante")
-    + '</dl>' + aviso + '</div>';
+    + (conGoles(p) ? htmlDetalleGoles(p, dato) : "")
+    + '</dl>' + aviso + (conGoles(p) ? htmlNotaGoles(p) : "") + '</div>';
+}
+
+function htmlDetalleGoles(p, dato) {
+  // "menos de" es el complemento de "más de", restado del número ya redondeado
+  // para que cada fila sume 100.0 a la vista
+  const uno = v => Math.round(v * 10) / 10;
+  const ou = '<table class="ou"><tr><th>Goles</th><th>Más</th><th>Menos</th></tr>'
+    + [["1.5", p.prob_mas_15], ["2.5", p.prob_mas_25], ["3.5", p.prob_mas_35]].map(l =>
+        '<tr><td>' + l[0] + '</td><td>' + pct(uno(l[1])) + '</td><td>' + pct(100 - uno(l[1])) + '</td></tr>').join("")
+    + '</table>';
+  const ambos = uno(p.prob_ambos);
+  const marcadores = (p.marcadores || []).map(m => '<span class="nw">' + m[0] + "-" + m[1] + " (" + pct(m[2]) + ")</span>").join(", ");
+  return dato("Goles en el partido", f2(p.goles_total) + " esperados" + htmlGraficoGoles(p))
+    + dato("Más / menos", ou)
+    + dato("Ambos marcan", "sí " + pct(ambos) + ", no " + pct(100 - ambos))
+    + dato("Portería a cero", esc(cortoDe(p, "local")) + " " + pct(p.prob_cero_local)
+           + ", " + esc(cortoDe(p, "visita")) + " " + pct(p.prob_cero_visita))
+    + (marcadores ? dato("Marcadores más probables", marcadores) : "");
+}
+
+/** Goles totales del partido, 0 a 5+: un histograma de seis barras con su valor
+ *  encima. Son seis números y el valor ES el dato, así que van todos rotulados. */
+function htmlGraficoGoles(p) {
+  const rep = p.goles_reparto || [];
+  if (rep.length !== 6) return "";
+  const e = enterosQueSuman(rep);
+  const max = Math.max(...rep);
+  const etiquetas = ["0", "1", "2", "3", "4", "5+"];
+  const alto = 46;
+  const texto = etiquetas.map((k, i) => k + (k === "1" ? " gol " : " goles ") + e[i] + " %").join(", ");
+  return '<div class="goles-graf" role="img" aria-label="' + esc("Goles en el partido: " + texto) + '">'
+    + rep.map((v, i) => '<div class="gb' + (v === max ? " max" : "") + '"><span class="v">' + e[i] + '</span>'
+      + '<i style="height:' + Math.max(2, Math.round(v / max * alto)) + 'px"></i>'
+      + '<span class="k">' + etiquetas[i] + '</span></div>').join("")
+    + '</div>';
+}
+
+/** Lo que hay que saber de estos números, con la medida de su liga si ya existe. */
+function htmlNotaGoles(p) {
+  let medida = "";
+  const det = validacion && validacion.estado === "listo" ? (validacion.ligas || {})[p.liga_codigo] : null;
+  const mk = det && det.mercados;
+  if (mk && mk.mas_25 && mk.ambos) {
+    const sk = v => (v > 0 ? "+" : "") + v;
+    medida = " Medido en " + esc(p.liga) + " (temporada " + esc(det.temporada_evaluada) + "): skill "
+      + sk(mk.mas_25.skill_score) + " en más de 2.5 y " + sk(mk.ambos.skill_score)
+      + " en ambos marcan, frente a " + sk(det.skill_score) + " en el 1X2.";
+  }
+  return '<p class="nota-goles">Más/menos, ambos marcan, porterías a cero y marcadores usan los goles esperados'
+    + ' acercados a la media de la liga: con solo resultados, el modelo exagera las diferencias de goles entre'
+    + ' partidos. Medidos así quedan cerca de la media de la liga: tómalos como orientación, con menos peso que el 1X2.'
+    + medida + '</p>';
 }
 
 /**
@@ -1099,6 +1186,28 @@ function pintarOrden() {
 // ==========================================
 // PANEL DE LIGAS
 // ==========================================
+const MERCADOS_FIAB = {
+  "1x2":  { etiqueta: "1X2",   nombre: "1X2" },
+  mas_25: { etiqueta: "+2.5",  nombre: "más de 2.5 goles" },
+  ambos:  { etiqueta: "Ambos", nombre: "ambos marcan" },
+};
+
+/** Skill y acierto de una liga en el mercado elegido, o null si no se midió. */
+function medidaFiab(c, mercado) {
+  const det = (validacion.ligas || {})[c] || {};
+  if (mercado === "1x2") {
+    const r = (validacion.resumen || {})[c];
+    if (!r) return null;
+    return { skill: r.skill_score, acierto: det.modelo ? det.modelo.acierto : undefined,
+             tip: (det.liga || c) + ", 1X2" + (det.partidos ? "\n" + det.partidos + " partidos" : "") };
+  }
+  const mk = (det.mercados || {})[mercado];
+  if (!mk) return null;
+  return { skill: mk.skill_score, acierto: mk.modelo.acierto,
+           tip: (det.liga || c) + ", " + MERCADOS_FIAB[mercado].nombre + "\nPredicho de media " + Math.round(mk.modelo.predicho)
+             + " %, pasó en el " + Math.round(mk.modelo.real) + " %\n" + mk.modelo.n + " partidos" };
+}
+
 function htmlFiabilidad() {
   if (!validacion || validacion.estado !== "listo") {
     return '<section class="modulo m-fiab"><h2>Fiabilidad medida</h2><p class="placeholder">'
@@ -1107,23 +1216,34 @@ function htmlFiabilidad() {
   const res = validacion.resumen || {};
   const codigos = ORDEN_LIGAS.filter(c => res[c]).concat(Object.keys(res).filter(c => ORDEN_LIGAS.indexOf(c) < 0));
   if (!codigos.length) return "";
-  const tope = Math.max(10, ...codigos.map(c => Math.abs(res[c].skill_score)));
-  return '<section class="modulo m-fiab"><h2>Fiabilidad medida <span class="meta">temporada ' + esc(validacion.temporada || "") + '</span></h2>'
+  const selector = '<div class="segmentos" role="group" aria-label="Mercado medido">'
+    + Object.keys(MERCADOS_FIAB).map(k => '<button data-mercado="' + k + '" aria-pressed="' + (mercadoFiab === k) + '">'
+      + esc(MERCADOS_FIAB[k].etiqueta) + '</button>').join("") + '</div>';
+  const medidas = codigos.map(c => ({ c: c, m: medidaFiab(c, mercadoFiab) })).filter(x => x.m);
+  const cab = '<section class="modulo m-fiab"><h2>Fiabilidad medida <span class="meta">temporada ' + esc(validacion.temporada || "") + '</span></h2>' + selector;
+  if (!medidas.length) {
+    return cab + '<p class="placeholder">Esta validación no midió ' + esc(MERCADOS_FIAB[mercadoFiab].nombre)
+      + '. Se mide en la próxima validación.</p></section>';
+  }
+  const tope = Math.max(10, ...medidas.map(x => Math.abs(x.m.skill)));
+  return cab
     + '<div class="fiab-cab"><span></span><span>Mejora</span><span>Skill</span><span>Acierto</span></div>'
-    + codigos.map(c => {
-        const r = res[c];
-        const det = (validacion.ligas || {})[c] || {};
-        const acierto = det.modelo && det.modelo.acierto !== undefined ? Math.round(det.modelo.acierto) + " %" : "—";
-        const ancho = Math.abs(r.skill_score) / tope * 50;
-        const barra = r.skill_score >= 0
+    + medidas.map(x => {
+        const m = x.m;
+        const acierto = m.acierto !== undefined ? Math.round(m.acierto) + " %" : "—";
+        const ancho = Math.abs(m.skill) / tope * 50;
+        const barra = m.skill >= 0
           ? '<i style="left:50%;width:' + ancho + '%"></i>'
           : '<i class="neg" style="left:' + (50 - ancho) + '%;width:' + ancho + '%"></i>';
-        return '<div class="fiab"><span class="sig">' + esc(ligaDe(c).sigla) + '</span>'
-          + '<span class="eje" title="' + esc(det.liga || c) + '">' + barra + '</span>'
-          + '<span class="val">' + (r.skill_score > 0 ? "+" : "") + r.skill_score + '</span>'
+        return '<div class="fiab"><span class="sig">' + esc(ligaDe(x.c).sigla) + '</span>'
+          + '<span class="eje" role="img" data-tip="' + esc(m.tip) + '" aria-label="' + esc(m.tip.replace(/\n/g, ". ")) + '">' + barra + '</span>'
+          + '<span class="val">' + (m.skill > 0 ? "+" : "") + m.skill + '</span>'
           + '<span class="acierto">' + acierto + '</span></div>';
       }).join("")
-    + '<p class="nota">Skill score: cuánto Brier le quita el modelo a la base "equipo medio". 0 es no aportar nada.</p></section>';
+    + '<p class="nota">' + (mercadoFiab === "1x2"
+        ? 'Skill score: cuánto Brier le quita el modelo a la base "equipo medio". 0 es no aportar nada.'
+        : 'Skill score frente a la base "equipo medio" en este mercado. Con solo resultados, los mercados de goles'
+          + ' apenas se separan de la media de la liga: un skill cercano a 0 es lo esperable.') + '</p></section>';
 }
 
 function pintarLigasPane(todos, ruta) {
@@ -1222,6 +1342,8 @@ function htmlLeyenda() {
     + '<dl class="leyenda-tabla">'
     + fila("1 X 2", "Local, empate, visitante")
     + fila("1X X2 12", "Doble oportunidad")
+    + fila("+2.5", "Más de 2.5 goles: 3 o más en el partido")
+    + fila("Ambos", "Marcan los dos equipos")
     + fila(ICONO_AVISO + " 2", "Muestra corta: menos de 4 partidos previos")
     + fila("—", "Sin calcular todavía")
     + '</dl></section>';
@@ -1456,6 +1578,9 @@ document.addEventListener("click", (e) => {
 
   const ord = t.closest("[data-orden]");
   if (ord) { orden = ord.dataset.orden; rutaPintada = null; render(); return; }
+
+  const merc = t.closest("[data-mercado]");
+  if (merc) { mercadoFiab = merc.dataset.mercado; render(); return; }
 
   if (t.closest("#limpiar")) { limpiarBusqueda(); rutaPintada = null; render(); inputBuscar.focus(); return; }
 

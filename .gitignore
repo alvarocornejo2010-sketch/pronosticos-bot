@@ -5,6 +5,7 @@ data.json
 validacion.json
 validacion_cache/
 backtest_cache/
+openfootball_cache/
 
 # Basura estándar de Python:
 __pycache__/
