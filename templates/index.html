@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="description" content="Pronósticos 1X2 y doble oportunidad de LaLiga, Premier League, Ligue 1, Bundesliga, Serie A, Eredivisie, Primeira Liga, Championship y Brasileirão con un modelo Poisson de fuerzas ataque/defensa.">
+<meta name="description" content="Pronósticos 1X2 y doble oportunidad de la Champions League, LaLiga, Premier League, Ligue 1, Bundesliga, Serie A, Eredivisie, Primeira Liga, Championship y Brasileirão con un modelo Poisson de fuerzas ataque/defensa.">
 <meta name="theme-color" content="#0b130f">
 <meta name="color-scheme" content="dark">
 <title>Pronósticos</title>
@@ -132,6 +132,9 @@
   .insignia.grande { width: 2.75rem; height: 2.75rem; border-radius: var(--r-control); font-size: var(--t-14); }
   .insignia.redonda { min-width: 0; width: 2rem; height: 2rem; padding: 0; border-radius: 50%; font-size: 0.6875rem; }
   .insignia.todas { background: var(--panel-hondo); color: var(--tinta-2); box-shadow: inset 0 0 0 1px var(--linea-viva); }
+  /* la Champions: torneo, insignia de contorno en la tinta del texto */
+  .insignia.copa { background: none; box-shadow: inset 0 0 0 1.5px currentColor; }
+  .tira-ligas button[aria-current="true"] .insignia.copa { color: var(--oscura); }
 
   /* ================================================================
      ESQUELETO
@@ -311,8 +314,8 @@
   .dia-celda .forma i { display: block; flex: 0 0 3px; border-radius: 1.5px 1.5px 0 0; }
   .dia-celda.toda { width: 7.25rem; }
   @container centro (min-width: 720px) {
-    .dia-celda { flex: 1 1 0; width: auto; min-width: 6.25rem; }
-    .dia-celda.toda { flex-grow: 1.1; min-width: 7.25rem; }
+    .dia-celda { flex: 1 1 0; width: auto; min-width: 6.25rem; max-width: 10rem; }
+    .dia-celda.toda { flex-grow: 1.1; min-width: 7.25rem; max-width: 11rem; }
   }
 
   .herramientas {
@@ -773,8 +776,10 @@ const escudosRotos = new Set();
 // insignia; el tono acompaña. Ninguna paleta de cuatro o más colores pasa la
 // prueba de todos-los-pares, así que donde cualquier liga puede quedar junto a
 // cualquier otra (tabla ordenada, próximos) es la sigla la que distingue.
-// "tinta": la que contrasta con el tono (todas >= 4.8:1).
+// "tinta": la que contrasta con el tono (todas >= 4.8:1). La Champions va primera
+// y con insignia de contorno: es un torneo, no una liga, y no gasta un tono.
 const LIGAS = {
+  CL:  { sigla: "UCL", tono: "none",            tinta: "var(--tinta)", copa: true },
   PD:  { sigla: "ESP", tono: "var(--liga-PD)",  tinta: "var(--oscura)" },
   PL:  { sigla: "ENG", tono: "var(--liga-PL)",  tinta: "var(--oscura)" },
   FL1: { sigla: "FRA", tono: "var(--liga-FL1)", tinta: "var(--oscura)" },
@@ -791,8 +796,8 @@ function ligaDe(cod) {
 }
 function htmlInsignia(cod, clase) {
   const L = ligaDe(cod);
-  return '<span class="insignia' + (clase ? " " + clase : "") + '" style="--tono:' + L.tono + ";--tono-t:" + L.tinta + '">'
-    + esc(L.sigla) + '</span>';
+  return '<span class="insignia' + (L.copa ? " copa" : "") + (clase ? " " + clase : "") + '" style="--tono:' + L.tono
+    + ";--tono-t:" + L.tinta + '">' + esc(L.sigla) + '</span>';
 }
 
 // Escala secuencial de probabilidad: un solo tono ámbar, 8 tramos con
@@ -1002,15 +1007,51 @@ function htmlDetalle(p) {
       + ' previo' + (m.min === 1 ? "" : "s") + ' en la muestra: la estimación tira hacia la media de la liga.</span></p>'
     : "";
   const dato = (t, v) => '<div><dt>' + t + '</dt><dd>' + v + '</dd></div>';
+  const ch = p.champions;
+  const muestraTxt = ch
+    ? "en su liga: " + m.l + " en casa del local, " + m.v + " fuera del visitante"
+    : m.l + " en casa del local, " + m.v + " fuera del visitante";
   return '<div class="detalle"><dl>'
     + dato("Partido", esc(p.local) + " – " + esc(p.visita))
     + dato("Competición", esc(p.liga) + ", " + esc(p.dia) + " " + fechaLarga(p.fecha) + ", " + esc(p.hora))
     + dato("1 X 2", "local " + pct(p.prob_local) + ", empate " + pct(p.prob_empate) + ", visitante " + pct(p.prob_visita))
     + dato("Doble oportunidad", "1X " + pct(p.prob_1x) + ", X2 " + pct(p.prob_x2) + ", 12 " + pct(p.prob_12))
     + dato("Goles esperados", f2(p.xg_local) + " – " + f2(p.xg_visita))
-    + dato("Muestra", m.l + " en casa del local, " + m.v + " fuera del visitante")
+    + dato("Muestra", muestraTxt)
+    + (ch ? dato("Nivel de liga", htmlNivelChampions(p)) : "")
     + (conGoles(p) ? htmlDetalleGoles(p, dato) : "")
-    + '</dl>' + aviso + (conGoles(p) ? htmlNotaGoles(p) : "") + '</div>';
+    + '</dl>' + (ch ? htmlAvisoChampions(p, m) : aviso) + (ch ? htmlNotaChampions() : "")
+    + (conGoles(p) ? htmlNotaGoles(p) : "") + '</div>';
+}
+
+/** De qué liga sale cada equipo de la Champions y con qué nivel. */
+function htmlNivelChampions(p) {
+  const uno = (lado) => {
+    const c = p.champions[lado] || {};
+    return '<span class="nw">' + esc(cortoDe(p, lado)) + ": " + (c.liga ? esc(c.nombre_liga) : "otra liga")
+      + " ×" + Number(c.factor).toFixed(2) + '</span>';
+  };
+  return uno("local") + ", " + uno("visita");
+}
+
+function htmlAvisoChampions(p, m) {
+  const sinLiga = ["local", "visita"].filter(l => !(p.champions[l] || {}).liga);
+  if (sinLiga.length) {
+    const nombres = sinLiga.map(l => cortoDe(p, l)).join(" y ");
+    const factor = Number(p.champions[sinLiga[0]].factor).toFixed(2);
+    return '<p class="aviso">' + ICONO_AVISO + '<span>' + esc(nombres) + (sinLiga.length > 1 ? " juegan" : " juega")
+      + ' en una liga que no está en el plan: sin datos de su liga, cuenta como un equipo medio de nivel ×' + factor + '.</span></p>';
+  }
+  return m.min < 4
+    ? '<p class="aviso">' + ICONO_AVISO + '<span>Solo ' + m.min + ' partido' + (m.min === 1 ? "" : "s")
+      + ' previo' + (m.min === 1 ? "" : "s") + ' en su liga: la estimación tira hacia la media de esa liga.</span></p>'
+    : "";
+}
+
+function htmlNotaChampions() {
+  return '<p class="nota-goles">En la Champions cada equipo se mide en su liga nacional (sus últimos partidos, '
+    + 'atenuados a la mitad) y se ajusta por el nivel de esa liga, medido con los cruces de la Champions 2024/25. '
+    + 'Así acertó un 7 % mejor que no saber nada, con una sola temporada de datos: tómalo como una base.</p>';
 }
 
 function htmlDetalleGoles(p, dato) {
@@ -1350,7 +1391,7 @@ function pintarLigasPane(todos, ruta) {
   const html = '<section class="modulo m-ligas"><h2>Ligas <span class="meta">' + todos.length + ' partidos</span></h2><div class="ligas">'
     + '<button class="liga-fila" data-liga="" aria-current="' + (activa === "") + '">'
     + '<span class="insignia grande todas">' + ICONO_TODAS + '</span><span class="nom">Todas las ligas</span>'
-    + '<span class="stats">' + ligas.length + ' ligas esta semana</span>'
+    + '<span class="stats">' + ligas.length + (ligas.length === 1 ? " competición" : " competiciones") + ' esta semana</span>'
     + '<span class="n">' + todos.length + '</span></button>'
     + filas + '</div></section>' + htmlFiabilidad();
   if (paneLigas.dataset.huella === html) return;

@@ -24,9 +24,10 @@ modelo Poisson de fuerzas ataque/defensa.
 - Datos: football-data.org, plan free (10 peticiones/minuto, sin acceso a
   temporadas 2021/2022 — devuelven HTTP 403).
 - Ligas activas: PD, PL, FL1, BL1, SA, DED, PPL, ELC, BSA: todas las ligas del
-  plan free. Lo que queda en él son torneos (Champions, Mundial, Eurocopa), fuera
-  por la razón de abajo. Europa League y Conference League no están en el plan
-  free.
+  plan free. Torneo: la Champions (CL, en `TORNEOS`), que se predice con un
+  modelo propio (ver "Champions: cómo se predice"). Mundial y Eurocopa no se
+  ponen: son de selecciones y no hay con qué medirlas. Europa League y
+  Conference League no están en el plan free.
 - El Brasileirão (BSA) va de enero a diciembre: su temporada es el año natural
   (`LIGAS_ANO_NATURAL`). `temporada_actual(codigo)` lo tiene en cuenta para el
   prior; sin eso, entre enero y junio se anclaría en la temporada de hace dos
@@ -123,8 +124,9 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
   (arena oliva) no pasaba ese validador: dos tramos casi iguales, el más bajo a
   1.15:1 del fondo y 53° de tono. El blanco marca lo seleccionado (día, liga,
   orden).
-- Ligas: insignia con la sigla dentro (ESP, ENG, FRA, ALE, ITA, NED, POR, EN2,
-  BRA) y el tono de la liga de fondo; tinta oscura o blanca según el tono, todas
+- Ligas: la Champions va primera, con una insignia de contorno (UCL): es un
+  torneo y no gasta un tono. Las ligas llevan insignia con la sigla dentro (ESP,
+  ENG, FRA, ALE, ITA, NED, POR, EN2, BRA) y el tono de la liga de fondo; tinta oscura o blanca según el tono, todas
   ≥ 4.8:1. Como la sigla va siempre dentro, las insignias pueden ir mezcladas
   (tabla, próximos, más claros). Los tonos son los 8 de la paleta oscura de
   referencia del skill dataviz, validados por pares vecinos en el orden fijo
@@ -153,9 +155,11 @@ deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
 hasta la primera actualización, que el planificador lanza sola unos 20 s
 después de arrancar y que paga el coste completo de API (~2 peticiones/equipo)
 porque la caché está vacía; las pasadas siguientes continúan cada 5 min
-mientras queden partidos pendientes. Con 9 ligas una semana normal son unas
-200 peticiones: 5 o 6 pasadas de 40, y la ventana tarda del orden de 50 min
-en llenarse entera (los partidos más cercanos salen primero).
+mientras queden partidos pendientes. Con 9 ligas y la Champions una semana
+normal son unas 220 peticiones (la Champions suma unas 25: su calendario, su
+media y la liga de los equipos que no salen en ningún calendario de liga): 5 o
+6 pasadas de 40, y la ventana tarda del orden de 55 min en llenarse entera (los
+partidos más cercanos salen primero).
 `/actualizar?token=...&forzar=1` no acelera
 esto: sirve para rehacer una pasada antes de `MIN_MINUTOS_ACTUALIZACION`
 (25 min) y para volver a bajar el calendario ignorando la caché.
@@ -189,17 +193,47 @@ esto: sirve para rehacer una pasada antes de `MIN_MINUTOS_ACTUALIZACION`
    y normalizado. Añadidas dobles oportunidad X2 y 12. `Cache-Control: no-store`
    para que un deploy no deje al navegador con la interfaz vieja.
 
-## Por qué la Champions se queda fuera
+## Champions: cómo se predice (oct 2026)
 
-El modelo mide la fuerza de un equipo con sus partidos en esa misma competición.
-En liga hay ~19 partidos en casa y ~19 fuera; en Champions, 4 y 4. Y la "media de
-la liga" en Champions no significa nada: mezcla al Bayern con el campeón de
-Kazajistán, así que dividir entre esa media no mide fuerza relativa. Hacerlo bien
-exige tomar las stats de cada equipo de su liga doméstica y normalizarlas entre
-ligas — proyecto aparte, no trivial. Las 9 ligas activas son la base que ese
-proyecto necesitaría (de ellas sale la mayoría de equipos de la Champions),
-pero falta la parte difícil: comparar ligas entre sí.
-Europa League y Conference League ni siquiera están en el plan free.
+El modelo de liga no sirve para la Champions: mide a cada equipo con sus
+partidos en la misma competición, y en la Champions son 4 en casa y 4 fuera
+contra rivales de niveles muy distintos; su "media de liga" mezcla al Bayern con
+el campeón de Kazajistán. Por eso la Champions va en `TORNEOS` y no en `LIGAS`,
+con su propio cálculo:
+
+- Cada equipo se mide en SU liga nacional (`fuerzas_champions`): los mismos
+  `obtener_stats_equipo` y `obtener_promedio_liga` que sus partidos de liga, así
+  que casi siempre salen de la caché. Su ataque y su defensa relativos a la
+  media de su liga se elevan a `EXPONENTE_FUERZA_CHAMPIONS` (0.5): los grandes
+  arrasan en su liga y su fuerza nacional tomada tal cual exagera.
+- Se ajusta por el nivel de su liga (`FACTOR_LIGA`): PL 1.33, PD 1.16, FL1 1.13,
+  SA 1.10, BL1 1.03, PPL 0.93, DED 0.91, y 0.72 para un equipo de una liga fuera
+  del plan (`FACTOR_OTRA_LIGA`), que cuenta como un equipo medio de ese nivel.
+- Goles esperados (`calcular_xg_champions`): media de la Champions ×
+  `ESCALA_CHAMPIONS` × ataque propio × defensa rival × nivel propio / nivel
+  rival. Luego, el mismo `calcular_poisson` y `mercados_de_goles` que en liga.
+- De qué liga es cada equipo (`liga_domestica`): primero, gratis, en los
+  calendarios de liga ya descargados; si no sale, una petición a `/teams/{id}`
+  (`runningCompetitions`). Se guarda 30 días en la caché (`liga_equipo`).
+- Los cruces de eliminatoria aún sin decidir (equipo sin id) no se pintan.
+
+Medido con `afinar_champions.py` sobre la Champions 2024/25 (188 partidos con
+resultado, datos de openfootball; 10 de los 36 equipos venían de ligas fuera del
+plan), con validación cruzada de 5 bloques. Skill del 1X2 frente a "equipo
+medio":
+
+```
+solo liga nacional                 +3.6%  (-1.1 se)
+solo nivel de liga                 +6.6%  (-1.7 se)
+liga nacional + nivel              +5.9%  (-1.3 se)
+liga nacional atenuada + nivel     +7.1%  (-1.7 se)   <- el de la app
+```
+
+El exponente sale entre 0.44 y 0.59 en los cinco bloques. Es UNA temporada: ninguna
+mejora llega a 2 errores estándar, así que es una base, no una conclusión. La
+fórmula de producción reproduce la del estudio (Brier 0.5367 frente a 0.5369 en
+la muestra). La Champions no entra en la validación de la app (`validacion.py`
+recorre solo `LIGAS`): la web explica el cálculo en el detalle de cada partido.
 
 ## Validación
 
@@ -337,6 +371,10 @@ efecto se diluye solo conforme acumulan partidos.
 - `afinar_goles.py` mide `ENCOGER_GOLES` con el mismo método de train/test y test
   pareado. No necesita token: baja resultados de openfootball (ver "Más
   temporadas de datos" abajo) y los cachea en `openfootball_cache/`.
+- `afinar_champions.py` estima `FACTOR_LIGA`, `FACTOR_OTRA_LIGA`,
+  `EXPONENTE_FUERZA_CHAMPIONS` y `ESCALA_CHAMPIONS` con la Champions 2024/25 y
+  las ligas nacionales de openfootball, y compara modelos con validación
+  cruzada. Tampoco necesita token.
 
 ## Render: cómo se despliega
 
@@ -363,6 +401,13 @@ mano: `/actualizar?token=...&forzar=1` con el valor de `UPDATE_SECRET` (Render �
 Environment).
 
 ## Pendiente (por orden de lo que más mueve la aguja)
+
+- **Champions con más datos:** los niveles de liga salen de una sola temporada
+  (openfootball solo tiene la 2024/25). Con la 2025/26 o más, reajustar con
+  `afinar_champions.py`. Mejoras pensadas: contar también los partidos de
+  Champions y copas de cada equipo (no solo su liga), medir a los equipos de
+  ligas fuera del plan con sus propios partidos, y meter la Champions en la
+  validación de la app.
 
 - **Championship (y seguramente Brasileirão) casi no aportan:** sus
   pronósticos valen lo que la media de la liga (tabla en "Validación"). La web
