@@ -295,6 +295,21 @@ def main():
             for ruta, _, _ in graves_reales:
                 grupos[_sin_indices(ruta)] = grupos.get(_sin_indices(ruta), 0) + 1
             print("       por campo:", dict(sorted(grupos.items(), key=lambda x: -x[1])[:6]))
+
+    # La web lleva las mismas cabeceras en los dos sitios: las de app.py y las de
+    # public/_headers (Cloudflare). Una CSP distinta rompería la web solo en uno.
+    reglas = {}
+    with open(os.path.join(AQUI, "public", "_headers"), encoding="utf-8") as f:
+        lineas = f.read().splitlines()
+    for linea in lineas:
+        if linea.startswith("  ") and ":" in linea:
+            nombre, valor = linea.strip().split(":", 1)
+            reglas[nombre] = valor.strip()
+    ok = (reglas.get("Content-Security-Policy") == app.CSP_WEB
+          and reglas.get("Strict-Transport-Security") == "max-age=31536000"
+          and reglas.get("Cache-Control") == "no-store, must-revalidate")
+    fallos += not ok
+    print(f"{'OK  ' if ok else 'MAL '} cabeceras   public/_headers {'=' if ok else '!='} app.py")
     print("\nParidad: " + ("todo igual." if not fallos else f"{fallos} partes con diferencias."))
     return 1 if fallos else 0
 

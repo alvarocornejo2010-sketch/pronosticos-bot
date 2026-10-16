@@ -21,9 +21,11 @@ Poisson de fuerzas ataque/defensa. Corre en dos sitios con la misma lógica:
 - URL en Render: https://pronosticos-bot.onrender.com
 - URL en Cloudflare: `https://pronosticos-bot.<subdominio>.workers.dev` (el
   subdominio es el de la cuenta: Workers & Pages → el Worker → Settings → Domains)
-- Ficheros clave: `app.py`, `public/index.html`, `validacion.py`, `worker/`,
-  `wrangler.jsonc`, `test_paridad.py`, `backtest.py`, `afinar.py`,
-  `afinar_goles.py`, `diagnostico.py`
+- Ficheros clave: `app.py`, `public/index.html`, `public/app.js`,
+  `validacion.py`, `worker/`, `wrangler.jsonc`, `test_paridad.py`,
+  `backtest.py`, `afinar.py`, `afinar_goles.py`, `diagnostico.py`
+- **El repo es público**: todo lo que se sube (y su historial) lo ve cualquiera.
+  Ver "Seguridad".
 
 ## Stack
 
@@ -84,13 +86,17 @@ suspendería a ambos.
 **La interfaz no usa Jinja2.** `public/index.html` (antes `templates/`) no tiene
 ni una etiqueta `{{ }}`: Flask la sirve como plantilla (`template_folder=
 "public"`) y Cloudflare como archivo estático, con sus cabeceras en
-`public/_headers`. Es un shell estático con el CSS y el JS en línea que se pinta entero en
+`public/_headers`. Es un shell estático con el CSS en línea y el JS en
+`public/app.js` (Flask lo sirve en `/app.js`), que se pinta entero en
 el cliente sondeando `/api/estado` (cada 4s mientras hay cálculo en curso, cada
 30s el resto del tiempo). No hay `static/`, ni build, ni dependencias de JS; de
 fuera solo llegan las fuentes Saira y Figtree (Google Fonts, con fallback del
 sistema) y los escudos (URLs de football-data.org). Al tocar la web se trabaja
-sobre las funciones `pintar*` y `html*` del `<script>`, no sobre bucles de
-plantilla. Ojo al probar en local: fuera del modo debug, Flask guarda la
+sobre las funciones `pintar*` y `html*` de `app.js`, no sobre bucles de
+plantilla. **Nada de JavaScript en `index.html`** (ni `<script>` en línea ni
+`onclick=`): la CSP (`script-src 'self'`) lo bloquearía y la web se quedaría en
+blanco. Para cargar algo de otro dominio hay que añadirlo a la CSP en los dos
+sitios (ver "Seguridad"). Ojo al probar en local: fuera del modo debug, Flask guarda la
 plantilla compilada y no ve los cambios de `index.html` hasta reiniciar. Cada
 zona guarda una "huella" de lo último que pintó y solo toca el DOM si cambió
 (`pintarBloques` lo hace bloque a bloque en la lista central): sin eso la tabla
@@ -258,6 +264,61 @@ dev` y lanzar el cron a mano con
 `curl "http://localhost:8787/cdn-cgi/local/scheduled?cron=*+*+*+*+*"`. Con
 `API_BASE` en `.dev.vars` se apunta a una API falsa y con
 `PAUSA_ENTRE_REQUESTS=0` no espera entre peticiones.
+
+## Seguridad (revisada en oct 2026)
+
+**El repo es público.** Revisados el árbol y los 36 commits de todas las ramas
+(y las descripciones de las PRs): no hay ni una clave. Lo único que parece un
+secreto son valores de ejemplo (`tu_token`, `*_dummy_secret`) y dos
+identificadores que no dan acceso a nada sin una clave: el id de la base D1
+(`wrangler.jsonc`; Cloudflare lo pone ahí a propósito) y el del servicio de
+Render. Los commits de fusión hechos desde la web de GitHub llevan el email de
+la cuenta; para que los siguientes no lo lleven: GitHub → Settings → Emails →
+"Keep my email addresses private".
+
+**Los dos secretos** y dónde viven (nunca en el repo):
+- `FOOTBALL_DATA_TOKEN`: la clave de la API. Render → Environment y Cloudflare
+  → Settings → Variables and Secrets (tipo Secret). Viaja en la cabecera
+  `X-Auth-Token`, nunca en la URL, y no se escribe en ningún log.
+- `UPDATE_SECRET` (12 caracteres o más): protege `/actualizar` y `/validar`. Se
+  compara en tiempo constante (`hmac.compare_digest` en bytes en Python;
+  SHA-256 + `timingSafeEqual` en el Worker). Va en la URL (`?token=`), así que
+  queda en el historial del navegador y en los logs de Render y Cloudflare, que
+  solo ve el dueño de la cuenta: no pegar esa URL en ningún sitio público. Si
+  se filtra, se cambia en los dos paneles y listo (no hay nada más atado a él).
+- En local van en `.env` / `.dev.vars`, que `.gitignore` deja fuera
+  (`.dev.vars.example` sí se sube: solo lleva ejemplos).
+
+**Cabeceras** (las mismas en `app.py` y `public/_headers`; `test_paridad.py`
+comprueba que coinciden): `nosniff`, `X-Frame-Options: DENY`, `no-referrer`,
+`no-store`, HSTS de un año y una **CSP** que solo deja cargar el JS de la propia
+web (`script-src 'self'`, nada en línea), las fuentes de Google y los escudos de
+`crests.football-data.org`; un escudo de otro dominio se bloquea y la web pinta
+el monograma. Probado en Chromium en los dos sitios: la web pinta igual, sin
+violaciones, y un `<img onerror=...>` inyectado a mano no se ejecuta. Las
+respuestas JSON llevan `default-src 'none'`.
+
+**Lo demás, revisado y bien:** todo lo que llega de la API pasa por `esc()`
+antes del DOM (también los textos de error); las consultas a D1 van todas con
+parámetros (`?1`), sin pegar texto; el JSON que se monta a mano en el Worker
+sale siempre de `JSON.stringify`; los escudos solo pasan si son `https://`;
+`REDIRIGIR_A` antepone un origen fijo, así que no sirve para redirigir a otro
+sitio; un error 500 del Worker no enseña el detalle (va a los logs). En
+`wrangler.jsonc`, `preview_urls: false`: sin eso cada versión subida tendría
+una URL pública propia, con la base y los secretos de producción, para siempre.
+
+**Dependencias** (oct 2026, `pip-audit` y `npm audit` a cero): Flask 3.1.3 y
+requests 2.33.1 (los avisos de 3.1.0 y 2.32.3 no afectaban a esta app: no usa
+sesiones ni `.netrc`), wrangler 4.149.0 (la 4.146 arrastraba un `sharp`
+vulnerable, solo en local). Para repasarlo: `pip install pip-audit && pip-audit
+-r requirements.txt` y `npm audit`.
+
+**Riesgo que queda:** las rutas públicas solo leen, pero cada petición al
+Worker cuenta para las 100.000 diarias del plan gratis. Alguien que las
+machacara a propósito dejaría `/api/estado` sin servicio hasta la medianoche
+UTC (la web en sí, que es estática, seguiría cargando). En `workers.dev` no hay
+reglas de WAF; con un dominio propio en Cloudflare sí habría una regla de
+límite de peticiones gratis.
 
 ## Bugs ya encontrados y corregidos (no reabrir sin motivo nuevo)
 

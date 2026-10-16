@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import numpy as np
 import requests
-from flask import Flask, jsonify, redirect, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request, send_from_directory
 from scipy.stats import poisson
 
 # La web vive en public/: el mismo archivo lo sirve el Worker de Cloudflare
@@ -907,6 +907,20 @@ def redirigir_a_cloudflare():
         return redirect(REDIRIGIR_A + request.path + ("?" + consulta if consulta else ""), code=302)
 
 
+# Lo que la web puede cargar (Content-Security-Policy). El JavaScript va en
+# public/app.js y no en línea, así que basta script-src 'self': si un nombre de
+# equipo con <script> o un onerror= se colara por un fallo de escapado, el
+# navegador no lo ejecutaría. Las mismas cabeceras van en public/_headers para
+# Cloudflare (test_paridad.py comprueba que coinciden).
+CSP_WEB = ("default-src 'none'; script-src 'self'; "
+           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+           "font-src https://fonts.gstatic.com; "
+           "img-src 'self' data: https://crests.football-data.org; "
+           "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+# El JSON no carga nada.
+CSP_API = "default-src 'none'; frame-ancestors 'none'"
+
+
 @app.after_request
 def agregar_headers_seguridad(response):
     # Básicos y sin costo: evitan que el navegador "adivine" tipos de contenido
@@ -914,6 +928,9 @@ def agregar_headers_seguridad(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = CSP_WEB if response.mimetype == "text/html" else CSP_API
+    # Solo por HTTPS (Render ya redirige el HTTP; esto evita hasta el primer salto).
+    response.headers["Strict-Transport-Security"] = "max-age=31536000"
     # Esto es un panel en vivo: cachear el HTML solo consigue que después de un
     # deploy sigas viendo la interfaz anterior hasta que hagas Ctrl+F5. Y el JSON
     # de /api/estado cambia cada pocos segundos, así que cachearlo es peor aún.
@@ -926,6 +943,20 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/app.js")
+def app_js():
+    return send_from_directory(app.template_folder, "app.js", mimetype="text/javascript")
+
+
+def token_valido():
+    """El ?token= de /actualizar y /validar contra UPDATE_SECRET.
+
+    hmac.compare_digest en vez de == : compara en tiempo constante, así nadie
+    puede adivinar el token midiendo milisegundos de respuesta. En bytes: con
+    str, un carácter no ASCII en el token hacía saltar un error 500."""
+    return hmac.compare_digest(request.args.get("token", "").encode(), UPDATE_SECRET.encode())
+
+
 @app.route("/api/estado")
 def api_estado():
     return jsonify(leer_estado())
@@ -934,10 +965,7 @@ def api_estado():
 @app.route("/actualizar")
 def actualizar():
     """cron-job.org le pega a esta ruta cada cierto tiempo."""
-    token_recibido = request.args.get("token", "")
-    # hmac.compare_digest en vez de == : compara en tiempo constante,
-    # así nadie puede adivinar el token midiendo milisegundos de respuesta.
-    if not hmac.compare_digest(token_recibido, UPDATE_SECRET):
+    if not token_valido():
         return jsonify({"error": "token inválido"}), 403
 
     if actualizando_ahora:
@@ -986,7 +1014,7 @@ def validar():
     Cuesta 2 peticiones por liga y solo la primera vez: las temporadas terminadas
     no cambian, así que quedan cacheadas en disco.
     """
-    if not hmac.compare_digest(request.args.get("token", ""), UPDATE_SECRET):
+    if not token_valido():
         return jsonify({"error": "token inválido"}), 403
 
     import validacion

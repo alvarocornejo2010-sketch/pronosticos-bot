@@ -17,14 +17,16 @@ import { SIN_EJECUTAR } from "./validacion.js";
 import { tick, tocaActualizar } from "./planificador.js";
 import { Reloj } from "./tiempo.js";
 
-// Las mismas cabeceras que pone app.py. Los archivos estáticos llevan las suyas
-// en public/_headers. no-store: el JSON cambia cada pocos segundos, y la web
-// tiene que verse nueva justo después de un despliegue.
+// Las mismas cabeceras que pone app.py a sus respuestas JSON (la web y app.js
+// llevan las suyas en public/_headers). no-store: el JSON cambia cada pocos
+// segundos, y la web tiene que verse nueva justo después de un despliegue.
 const CABECERAS = {
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",
   "Referrer-Policy": "no-referrer",
   "Cache-Control": "no-store, must-revalidate",
+  "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+  "Strict-Transport-Security": "max-age=31536000",
 };
 
 const respuesta = (texto, status = 200) => new Response(texto, {
@@ -143,8 +145,9 @@ export default {
     try {
       return await ruta(new Almacen(env.DB));
     } catch (e) {
+      // El detalle va a los logs, no a la respuesta: puede llevar SQL o rutas internas.
       console.error(`${url.pathname}: ${(e && e.stack) || e}`);
-      return json({ error: "error interno", detalle: String((e && e.message) || e) }, 500);
+      return json({ error: "error interno" }, 500);
     }
   },
 

@@ -1,7 +1,12 @@
-# Las mismas cabeceras que pone app.py a la web. no-store: después de un
-# despliegue el navegador tiene que ver la interfaz nueva sin Ctrl+F5.
+# Las mismas cabeceras que pone app.py a la web (CSP_WEB en app.py; test_paridad.py
+# comprueba que coinciden). no-store: después de un despliegue el navegador tiene
+# que ver la interfaz nueva sin Ctrl+F5, y index.html y app.js tienen que ir a la par.
+# La CSP solo deja cargar el JS de la propia web (app.js, nada en línea), las
+# fuentes de Google Fonts y los escudos de football-data.org.
 /*
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: no-referrer
   Cache-Control: no-store, must-revalidate
+  Strict-Transport-Security: max-age=31536000
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://crests.football-data.org; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'

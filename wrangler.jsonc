@@ -5,6 +5,11 @@
   // Tiene que llamarse igual que el Worker en el panel de Cloudflare.
   "name": "pronosticos-bot",
   "main": "worker/index.js",
+  // La web, en https://pronosticos-bot.<subdominio>.workers.dev. Sin URLs de
+  // versión: cada versión subida tendría la suya, pública y con la base y los
+  // secretos de producción, y una versión vieja seguiría respondiendo para siempre.
+  "workers_dev": true,
+  "preview_urls": false,
   "compatibility_date": "2026-09-30",
   // La web (public/index.html) la sirve Cloudflare directamente, sin gastar
   // CPU del Worker. public/_headers le pone las mismas cabeceras que app.py.
