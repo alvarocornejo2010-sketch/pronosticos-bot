@@ -7,7 +7,8 @@ ESCALA_CHAMPIONS y K_HISTORIAL_CHAMPIONS).
 El modelo de liga mide a un equipo con sus partidos en la misma competición.
 En la Champions eso solo no sirve: 4 partidos en casa y 4 fuera por temporada,
 contra rivales de niveles muy distintos. Aquí cada equipo se mide en su liga
-nacional (sus últimos partidos, relativos a la media de esa liga), se ajusta
+nacional (sus fuerzas de liga, las mismas que usa la app: ajustar_fuerzas con
+su temporada anterior y lo jugado de la actual), se ajusta
 por el nivel de la liga (dominar la Eredivisie no es dominar la Premier; ese
 nivel solo se ve donde se cruzan ligas, en la propia Champions) y se corrige
 con su historial en la Champions: lo que marcó y encajó en sus partidos de esta
@@ -16,19 +17,19 @@ contra esos rivales (historial_champions en app.py).
 
 Datos: openfootball, sin token. La Champions 2022/23 a 2025/26 (628 partidos)
 del repositorio champions-league, en formato de texto, y las ligas nacionales
-2021/22 a 2025/26 de football.json. Los equipos de ligas que no están en el
-plan (Bélgica, Austria, Escocia...) cuentan como un equipo medio de "otra liga".
-Usa historial_champions, multiplicadores_historial, calcular_xg_champions,
-_encoger, calcular_poisson y las constantes de app.py, no una copia.
+2021/22 a 2025/26 de football.json, con los nombres casados entre temporadas
+(afinar_liga.cargar). Los equipos de ligas que no están en el plan (Bélgica,
+Austria, Escocia...) cuentan como un equipo medio de "otra liga". Usa
+ajustar_fuerzas, fuerza_equipo, historial_champions, multiplicadores_historial,
+calcular_xg_champions, calcular_poisson y las constantes de app.py, no una copia.
 
 Compara, con validación cruzada de 5 bloques y dejando fuera una temporada
 entera cada vez (cada partido se predice con un ajuste que no lo ha visto):
   - base: equipo medio (solo la media de goles de la Champions)
   - solo nivel de liga: todos los equipos de una liga iguales
   - liga nacional atenuada + nivel: la fuerza nacional elevada a un exponente
-    < 1, porque los grandes arrasan en su liga y tomada tal cual exagera. Es el
-    modelo que usó la app hasta octubre de 2026.
-  - + historial en la Champions: el de ahora.
+    < 1, porque los grandes arrasan en su liga y tomada tal cual exagera.
+  - + historial en la Champions: el de la app.
 
 Lo esperado del historial usa los niveles y la escala que tiene app.py: si el
 ajuste los cambia mucho, se ponen en app.py y se corre otra vez (con los de
@@ -39,15 +40,14 @@ Uso:
 
 Descarga ~30 ficheros la primera vez y los guarda en openfootball_cache/.
 """
-import json
 import math
 import os
 import random
 import re
 import sys
 import unicodedata
-from collections import defaultdict, deque
-from datetime import date, timedelta
+from collections import defaultdict
+from datetime import date
 
 import numpy as np
 import requests
@@ -58,12 +58,12 @@ os.environ.setdefault("FOOTBALL_DATA_TOKEN", "sin_uso_en_este_script")
 os.environ.setdefault("UPDATE_SECRET", "afinar_champions_dummy_secret")
 
 import app  # noqa: E402
+import afinar_liga  # noqa: E402
 
-URL_LIGA = "https://raw.githubusercontent.com/openfootball/football.json/master/{t}/{l}.json"
 URL_CL = "https://raw.githubusercontent.com/openfootball/champions-league/master/{t}/cl.txt"
 CACHE = "openfootball_cache"
 TEMPORADAS_CL = ["2022-23", "2023-24", "2024-25", "2025-26"]
-TEMPORADAS_LIGA = ["2021-22", "2022-23", "2023-24", "2024-25", "2025-26"]
+TEMPORADAS_LIGA = [2021, 2022, 2023, 2024, 2025]
 FICHERO_LIGA = {"PL": "en.1", "PD": "es.1", "SA": "it.1", "BL1": "de.1", "FL1": "fr.1", "DED": "nl.1", "PPL": "pt.1"}
 # país del sufijo "(ENG)" de openfootball -> liga del plan. Mónaco juega la Ligue 1.
 LIGA_DE_PAIS = {"ENG": "PL", "ESP": "PD", "ITA": "SA", "GER": "BL1", "FRA": "FL1", "MCO": "FL1", "NED": "DED", "POR": "PPL"}
@@ -85,16 +85,6 @@ def _descargar(url, ruta):
             f.write(resp.text)
     with open(ruta, encoding="utf-8") as f:
         return f.read()
-
-
-def cargar_liga(t, l):
-    return json.loads(_descargar(URL_LIGA.format(t=t, l=l), os.path.join(CACHE, f"{t}_{l}.json")))["matches"]
-
-
-def marcador(m):
-    sc = m.get("score")
-    ft = sc if isinstance(sc, list) else (sc or {}).get("ft")
-    return ft if ft and len(ft) == 2 else None
 
 
 MESES = {m: i for i, m in enumerate(["Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -161,18 +151,22 @@ def temporada_de(d):
 
 
 class Liga:
-    """Lo que la app sabría de una liga en cada momento: los últimos partidos de
-    cada equipo dentro de VENTANA_DIAS y la media de la temporada en curso,
-    anclada en la anterior con K_LIGA, igual que obtener_promedio_liga."""
+    """Lo que la app sabría de una liga en cada momento: sus partidos de la
+    temporada anterior y lo jugado de la actual, con los que se ajustan las
+    fuerzas (ajustar_fuerzas, como obtener_fuerzas_liga), y la media de la
+    temporada en curso anclada en la anterior con K_LIGA, igual que
+    obtener_promedio_liga."""
 
     def __init__(self):
-        self.equipos = defaultdict(lambda: deque(maxlen=app.MAX_PARTIDOS_EQUIPO * 3))
+        self.partidos = defaultdict(list)                # temporada -> [[día, local, visita, gl, gv]]
         self.totales = defaultdict(lambda: [0, 0, 0])   # temporada -> goles local, visita, partidos
+        self.memo = {}                                   # día -> fuerzas de ese día
+        self.ultimas = {}                                # temporada -> últimas fuerzas (arranque)
 
     def registrar(self, m):
-        self.equipos[m["local"]].append((m["fecha"], True, m["gl"], m["gv"]))
-        self.equipos[m["visita"]].append((m["fecha"], False, m["gv"], m["gl"]))
-        t = self.totales[temporada_de(m["fecha"])]
+        s = temporada_de(m["fecha"])
+        self.partidos[s].append([(m["fecha"] - date(1970, 1, 1)).days, m["local"], m["visita"], m["gl"], m["gv"]])
+        t = self.totales[s]
         t[0] += m["gl"]; t[1] += m["gv"]; t[2] += 1
 
     def media(self, d):
@@ -185,41 +179,29 @@ class Liga:
         return {"avg_local": (actual[0] + k * ancla[0]) / (actual[2] + k),
                 "avg_visita": (actual[1] + k * ancla[1]) / (actual[2] + k)}
 
-    def stats(self, equipo, d):
-        desde = d - timedelta(days=app.VENTANA_DIAS)
-        ult = [x for x in self.equipos[equipo] if x[0] >= desde][-app.MAX_PARTIDOS_EQUIPO:]
-        s = {"gf_local": 0, "gc_local": 0, "n_local": 0, "gf_visita": 0, "gc_visita": 0, "n_visita": 0}
-        for _, en_casa, gf, gc in ult:
-            lado = "local" if en_casa else "visita"
-            s["gf_" + lado] += gf; s["gc_" + lado] += gc; s["n_" + lado] += 1
-        return s
-
-
-def fuerza(liga, s, media, en_casa):
-    """Ataque y defensa relativos a la media de su liga, sin atenuar: lo mismo
-    que fuerzas_champions en app.py antes del exponente."""
-    avg_l, avg_v = media["avg_local"], media["avg_visita"]
-    if en_casa:
-        return (app._encoger(s["gf_local"], s["n_local"], avg_l) / avg_l,
-                app._encoger(s["gc_local"], s["n_local"], avg_v) / avg_v)
-    return (app._encoger(s["gf_visita"], s["n_visita"], avg_v) / avg_v,
-            app._encoger(s["gc_visita"], s["n_visita"], avg_l) / avg_l)
+    def fuerzas(self, d):
+        """Las fuerzas con lo jugado antes del día d (los partidos de liga de ese
+        día se registran después de predecir los de Champions)."""
+        if d not in self.memo:
+            s = temporada_de(d)
+            previa = self.partidos[s - 1] if len(self.partidos[s - 1]) >= 100 else []
+            antes = self.ultimas.get(s)
+            fz = app.ajustar_fuerzas(previa, self.partidos[s], self.media(d),
+                                     inicio=antes["equipos"] if antes else None)
+            self.memo[d] = self.ultimas[s] = fz
+        return self.memo[d]
 
 
 def preparar():
     ligas = {c: Liga() for c in FICHERO_LIGA}
     nombres_liga = defaultdict(set)
     eventos = []
-    for c, l in FICHERO_LIGA.items():
+    for c in FICHERO_LIGA:
         for t in TEMPORADAS_LIGA:
-            for m in cargar_liga(t, l):
-                ft = marcador(m)
-                if not ft or "atchday" not in str(m.get("round")):
-                    continue        # sin resultado o playoff: no es liga
-                d = date.fromisoformat(m["date"])
-                nombres_liga[c].update((m["team1"], m["team2"]))
-                eventos.append((d, 1, c, {"fecha": d, "local": m["team1"], "visita": m["team2"],
-                                          "gl": ft[0], "gv": ft[1]}))
+            for m in afinar_liga.cargar(c, t):
+                d = date.fromisoformat(m["fecha"][:10])
+                nombres_liga[c].update((m["local"], m["visita"]))
+                eventos.append((d, 1, c, dict(m, fecha=d)))
     cl = {t: cargar_cl(t) for t in TEMPORADAS_CL}
 
     # un nombre por equipo en las cuatro temporadas: el de su liga si es de una
@@ -285,11 +267,12 @@ def preparar():
                  "priors": {"CL": {"avg_local": ancla[0], "avg_visita": ancla[1], "historial": historial[s - 1]}}
                  if hay_previa else {}}
         fila = {"fecha": d, "temporada": s, "gl": m["gl"], "gv": m["gv"], "mu_l": mu[0], "mu_v": mu[1]}
-        for lado, campo, en_casa in (("l", "local", True), ("v", "visita", False)):
+        for lado, campo in (("l", "local"), ("v", "visita")):
             equipo = m[campo]
             liga = liga_de[equipo]
             if liga:
-                a, df = fuerza(liga, ligas[liga].stats(equipo, d), ligas[liga].media(d), en_casa)
+                f = app.fuerza_equipo(ligas[liga].fuerzas(d), equipo)
+                a, df = f["ataque"], f["defensa"]
             else:
                 a, df = 1.0, 1.0
             factor = app.FACTOR_LIGA.get(liga, app.FACTOR_OTRA_LIGA)

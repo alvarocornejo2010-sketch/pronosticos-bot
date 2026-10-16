@@ -265,13 +265,13 @@ function htmlDetalle(p) {
   const m = muestraDe(p);
   const aviso = m.min < 4
     ? '<p class="aviso">' + ICONO_AVISO + '<span>Solo ' + m.min + ' partido' + (m.min === 1 ? "" : "s")
-      + ' previo' + (m.min === 1 ? "" : "s") + ' en la muestra: la estimación tira hacia la media de la liga.</span></p>'
+      + ' de liga en la muestra: la estimación tira hacia un equipo medio (o, si acaba de subir, hacia lo'
+      + ' habitual de un ascendido).</span></p>'
     : "";
   const dato = (t, v) => '<div><dt>' + t + '</dt><dd>' + v + '</dd></div>';
   const ch = p.champions;
-  const muestraTxt = ch
-    ? "en su liga: " + m.l + " en casa del local, " + m.v + " fuera del visitante"
-    : m.l + " en casa del local, " + m.v + " fuera del visitante";
+  const muestraTxt = (ch ? "en su liga: " : "") + m.l + " partidos del local y " + m.v
+    + " del visitante, de esta temporada y la anterior";
   return '<div class="detalle"><dl>'
     + dato("Partido", esc(p.local) + " – " + esc(p.visita))
     + dato("Competición", esc(p.liga) + ", " + esc(p.dia) + " " + fechaLarga(p.fecha) + ", " + esc(p.hora))
@@ -330,11 +330,11 @@ function htmlAvisoChampions(p, m) {
 }
 
 function htmlNotaChampions() {
-  return '<p class="nota-goles">En la Champions cada equipo se mide en su liga nacional (sus últimos partidos, '
-    + 'atenuados), se ajusta por el nivel de esa liga y se corrige con sus partidos de Champions de esta temporada y '
+  return '<p class="nota-goles">En la Champions cada equipo se mide en su liga nacional (su fuerza de liga, '
+    + 'atenuada), se ajusta por el nivel de esa liga y se corrige con sus partidos de Champions de esta temporada y '
     + 'la anterior: lo que marcó y encajó frente a lo esperado de un equipo de su liga contra esos mismos rivales. '
-    + 'Medido con cuatro Champions (2022/23 a 2025/26, 628 partidos): acierta un 12 % mejor que no saber nada, y el '
-    + 'historial suma 2 puntos a lo que daba la liga sola.</p>';
+    + 'Medido con cuatro Champions (2022/23 a 2025/26, 628 partidos): acierta un 13 % mejor que no saber nada, y el '
+    + 'historial suma casi 1 punto a lo que daba la liga sola.</p>';
 }
 
 function htmlDetalleGoles(p, dato) {

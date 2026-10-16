@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="description" content="Pronósticos 1X2 y doble oportunidad de la Champions League, LaLiga, Premier League, Ligue 1, Bundesliga, Serie A, Eredivisie, Primeira Liga, Championship y Brasileirão con un modelo Poisson de fuerzas ataque/defensa.">
+<meta name="description" content="Pronósticos 1X2 y doble oportunidad de la Champions League, LaLiga, Premier League, Ligue 1, Bundesliga, Serie A, Eredivisie, Primeira Liga, Championship y Brasileirão con un modelo Poisson de fuerzas de ataque y defensa ajustadas por rival.">
 <meta name="theme-color" content="#0b130f">
 <meta name="color-scheme" content="dark">
 <title>Pronósticos</title>
@@ -714,7 +714,7 @@
       <span>Hora</span><span class="c-liga">Liga</span><span>Local</span><span>Visitante</span>
       <span class="der" data-tip="Gana el local">1</span><span class="der" data-tip="Empate">X</span><span class="der" data-tip="Gana el visitante">2</span>
       <span class="der c-d" data-tip="Doble oportunidad: gana el local o empate">1X</span><span class="der c-d" data-tip="Doble oportunidad: empate o gana el visitante">X2</span><span class="der c-d" data-tip="Doble oportunidad: gana cualquiera de los dos, sin empate">12</span>
-      <span class="der c-xg" data-tip="Goles que el modelo espera de cada equipo">Goles esp.</span><span class="der c-g" data-tip="Más de 2.5 goles: 3 o más en el partido">+2.5</span><span class="der c-g" data-tip="Marcan los dos equipos">Ambos</span><span class="der c-m" data-tip="Partidos previos del equipo con menos historial. Con menos de 4, el número tira hacia la media de la liga">Muestra</span><span class="c-rep" data-tip="El 1 X 2 en una barra">Reparto</span>
+      <span class="der c-xg" data-tip="Goles que el modelo espera de cada equipo">Goles esp.</span><span class="der c-g" data-tip="Más de 2.5 goles: 3 o más en el partido">+2.5</span><span class="der c-g" data-tip="Marcan los dos equipos">Ambos</span><span class="der c-m" data-tip="Partidos de liga (esta temporada y la anterior) del equipo con menos. Con menos de 4, el número tira hacia un equipo medio">Muestra</span><span class="c-rep" data-tip="El 1 X 2 en una barra">Reparto</span>
     </div>
     <main class="vista" id="vista" tabindex="-1"></main>
   </section>

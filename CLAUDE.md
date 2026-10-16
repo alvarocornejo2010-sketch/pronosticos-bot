@@ -8,13 +8,14 @@ proyecto.
 
 Web que predice resultados de fútbol (1/X/2, doble oportunidad y mercados de
 goles: más/menos, ambos marcan, porterías a cero y marcadores) con un modelo
-Poisson de fuerzas ataque/defensa. Corre en dos sitios con la misma lógica:
+Poisson de fuerzas de ataque y defensa ajustadas por rival (ver "El modelo").
+Corre en dos sitios con la misma lógica:
 
 - **Cloudflare Workers** (`worker/`, oct 2026): adonde se muda. JavaScript, base
   D1 y un cron por minuto. Ver "Cloudflare: cómo funciona".
 - **Render** (`app.py`, Flask): la versión de siempre. Sigue siendo la
-  referencia del modelo (la usan `backtest.py`, `afinar*.py` y `validacion.py`
-  offline) y sigue desplegándose desde `main` hasta que se apague.
+  referencia del modelo (la usan `afinar_liga.py`, `afinar_champions.py` y
+  `validacion.py` offline) y sigue desplegándose desde `main` hasta que se apague.
 
 - Repo: `pronosticos-bot`
 - Carpeta local: `C:\Users\Alvaro\Desktop\webapp`
@@ -23,7 +24,7 @@ Poisson de fuerzas ataque/defensa. Corre en dos sitios con la misma lógica:
   subdominio es el de la cuenta: Workers & Pages → el Worker → Settings → Domains)
 - Ficheros clave: `app.py`, `public/index.html`, `public/app.js`,
   `validacion.py`, `worker/`, `wrangler.jsonc`, `test_paridad.py`,
-  `backtest.py`, `afinar.py`, `afinar_goles.py`, `diagnostico.py`
+  `afinar_liga.py`, `afinar_champions.py`, `diagnostico.py`
 - **El repo es público**: todo lo que se sube (y su historial) lo ve cualquiera.
   Ver "Seguridad".
 
@@ -75,7 +76,7 @@ importar el módulo:
   las mismas 10 peticiones/minuto.
 
 En local viene desactivado por defecto (solo se activa si detecta
-`RENDER_EXTERNAL_URL`), para que `backtest.py`/`afinar.py` puedan importar
+`RENDER_EXTERNAL_URL`), para que `afinar_liga.py`/`afinar_champions.py` puedan importar
 `app.py` sin gastar cuota de la API.
 
 **Coste:** el plan free da ~750h de instancia/mes por workspace (el mes tiene
@@ -181,13 +182,12 @@ resultado).
 **Efecto secundario de cada deploy:** el disco de Render free es efímero, cada
 deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
 hasta la primera actualización, que el planificador lanza sola unos 20 s
-después de arrancar y que paga el coste completo de API (~2 peticiones/equipo)
-porque la caché está vacía; las pasadas siguientes continúan cada 5 min
-mientras queden partidos pendientes. Con 9 ligas y la Champions una semana
-normal son unas 220 peticiones (la Champions suma unas 25: su calendario, su
-media y la liga de los equipos que no salen en ningún calendario de liga): 5 o
-6 pasadas de 40, y la ventana tarda del orden de 55 min en llenarse entera (los
-partidos más cercanos salen primero).
+después de arrancar y que paga el coste completo de API porque la caché está
+vacía. Desde oct 2026 eso son unas 45 peticiones: por liga, su calendario, la
+temporada anterior y lo jugado de esta (de ahí salen las fuerzas de todos sus
+equipos), y para la Champions lo mismo más la liga de los equipos que no salen
+en ningún calendario. Dos pasadas de 40: la web se llena en unos 10 minutos
+(antes eran ~220 peticiones, dos por equipo, y ~55 minutos).
 `/actualizar?token=...&forzar=1` no acelera
 esto: sirve para rehacer una pasada antes de `MIN_MINUTOS_ACTUALIZACION`
 (25 min) y para volver a bajar el calendario ignorando la caché.
@@ -217,12 +217,19 @@ incluidos), `actualizacion.js` (la pasada), `validacion.js`, `planificador.js`
 JSON de la API cuesta ~7 ms por MB, así que en vez de una pasada de 40
 peticiones cada 5 min hay una cada minuto con: como mucho 6 peticiones
 (`PRESUPUESTO_REQUESTS`), separadas 6.5 s también entre pasadas (la hora de la
-última va en D1), 350 KB de JSON (`MAX_BYTES_PASADA`), una sola respuesta
-grande (una temporada entera, ~400 KB) y al principio de la pasada, y 40
-partidos calculados (`MAX_CALCULOS_PASADA`). Lo que no cabe queda pendiente y el
+última va en D1), 350 KB de JSON (`MAX_BYTES_PASADA`), 40 partidos calculados
+(`MAX_CALCULOS_PASADA`) y **una sola tarea pesada**: o una respuesta grande (una
+temporada entera, ~400 KB) o un ajuste de fuerzas de una liga (`ajustarFuerzas`:
+~4 ms en un isolate recién creado, que aún no ha compilado nada, y ~0.2 ms ya
+compilado), nunca las dos (`api.pesada`). Lo que no cabe queda pendiente y el
 estado sigue en `actualizando` (no hay `parcial`: el siguiente minuto continúa).
-Medido dentro de `workerd` (el runtime de Cloudflare, en local, D1 incluido):
-3 a 9 ms por pasada, ~5 ms lo normal. Llenar la semana entera: ~40 pasadas.
+Medido dentro de `workerd` (el runtime de Cloudflare, en local, D1 incluido, que
+solo con atender `/salud` ya gasta ~3 ms): 3.5 ms de media por pasada y 7.6 como
+mucho; una pasada en un isolate recién creado que rehace las fuerzas de la
+Championship y recalcula sus partidos, 3.7 ms. Llenar la semana entera desde
+vacío: ~31 pasadas (por liga, una para cada temporada y otra para el ajuste).
+Cloudflare tolera que un isolate se pase del límite de vez en cuando, no
+siempre.
 
 **Para que quepa, casi no se lee JSON.** El calendario va en la tabla
 `partidos`, cada partido con su ficha (nombres, hora, escudos) ya en JSON; las
@@ -231,7 +238,9 @@ solo JOIN y se monta pegando textos. La caché de la API (`cache`, por
 secciones como `cache.json`) se lee fila a fila solo cuando se usa.
 
 **Tablas de D1** (se crean solas si faltan, `ESQUEMA` en `almacen.js`):
-`cache`, `partidos`, `predicciones` (la última publicada de cada partido; no se
+`cache` (secciones `ligas`, `priors`, `partidos_liga` con los partidos de cada
+liga de las dos temporadas, compactos, `fuerzas`, `calendario` y
+`liga_equipo`), `partidos`, `predicciones` (la última publicada de cada partido; no se
 borra al empezar el partido: es el registro de lo que dijo la web),
 `documentos` (`estado` que sirve `/api/estado`, `resumen`, `validacion`,
 pedidos, temporadas terminadas compactas) y `candado` (que dos pasadas no se
@@ -243,10 +252,13 @@ octavo, y recupera el ritmo de uno en uno cuando vuelven a terminar bien. El
 candado caduca a los 5 min.
 
 **La validación va por pasos de un minuto**, solo con la web `listo`: bajar
-una temporada, bajar la otra, y recorrer la liga de 25 en 25 partidos
-(`PARTIDOS_POR_PASO`) guardando por dónde iba. Unas 2 h y media la primera vez;
-las temporadas quedan en D1. Como D1 no se borra, se repite sola cuando termina
-una temporada nueva.
+una temporada, bajar la otra, y recorrer la liga de 15 en 15 partidos
+(`PARTIDOS_POR_PASO`) guardando por dónde iba (con las fuerzas del último día,
+de las que arranca el ajuste siguiente). Cada día con partidos es un ajuste de
+fuerzas, así que un paso cuesta más que con el modelo de antes (que iba de 25
+en 25): 1 a 4 ms en caliente. Unas 4 horas la primera vez; las temporadas
+quedan en D1. Como D1 no se borra, se repite sola cuando termina una temporada
+nueva.
 
 **Cambios respecto a `app.py`** (ninguno toca el modelo):
 - un 429 de la API no se calcula a ciegas: el partido espera al minuto
@@ -320,6 +332,90 @@ UTC (la web en sí, que es estática, seguiría cargando). En `workers.dev` no h
 reglas de WAF; con un dominio propio en Cloudflare sí habría una regla de
 límite de peticiones gratis.
 
+## El modelo (oct 2026)
+
+**Fuerzas ajustadas por rival** (`ajustar_fuerzas`, `obtener_fuerzas_liga`). Cada
+equipo tiene un ataque y una defensa (1 = equipo medio de su liga), sacados de
+TODOS sus partidos de liga de la temporada anterior y lo jugado de esta, en
+casa y fuera. Los goles esperados de un partido son media de la liga (en casa o
+fuera, `obtener_promedio_liga`, como siempre) × ataque propio × defensa del
+rival, y cada fuerza se elige para que cuadre con lo que pasó:
+
+```
+ataque = (goles marcados + k·a0) / (goles que habría marcado un equipo medio
+          contra esas mismas defensas + k)
+```
+
+y lo mismo con la defensa. Como cada una depende de las de los rivales, se
+repite hasta que no cambian (unas 13 vueltas). Cada partido pesa
+`FACTOR_DIARIO`^días (0.998: a los 347 días, la mitad), y `k`
+(`PSEUDO_GOLES_ATAQUE` 6, `PSEUDO_GOLES_DEFENSA` 8, en goles esperados) encoge
+hacia `a0`: 1, o `ATAQUE_RECIEN_LLEGADO` (0.8) para un equipo que no estaba en
+la liga la temporada anterior (un ascendido). Encima, el 1X2 lleva la corrección
+de Dixon-Coles de los marcadores bajos (`RHO_EMPATES` = -0.05) y los mercados de
+goles encogen con `ENCOGER_GOLES` = 0.5.
+
+Las listas de partidos salen de lo que ya se bajaba para las medias de liga:
+`obtener_prior_liga` (la temporada anterior, una petición al mes) y
+`obtener_promedio_liga` (lo jugado de esta, cada `HORAS_VALIDEZ_LIGA` = 12 h)
+guardan los partidos compactos (`partidos_compactos`: día, local, visita,
+goles) en `partidos_liga`. Ya no hay una petición por equipo
+(`/teams/{id}/matches`): llenar la semana cuesta ~45 peticiones en vez de ~220,
+y la fuerza se actualiza cada 12 h en vez de cada 3 días.
+
+**El de antes** (hasta oct 2026), para comparar: los últimos 20 partidos de
+cada equipo en 400 días, en casa y fuera por separado (el ataque en casa salía
+solo de sus ~10 partidos en casa), encogidos hacia la media de la liga con 6
+partidos de pseudo-cuenta, y sin mirar contra quién fueron. Sigue en
+`afinar_liga.py` (`recorrer_anterior`) como referencia.
+
+**Medido con `afinar_liga.py`**: resultados de openfootball de 8 ligas (las cinco
+grandes desde 2010/11-2014/15, Países Bajos y Portugal desde 2018/19, la
+Championship con huecos) más el Brasileirão (2020 y 2026), 102 temporadas y
+35.586 partidos, cada uno predicho solo con lo jugado en días anteriores, como
+`validacion.py`. Los parámetros se eligieron mirando solo las temporadas hasta
+2020/21 (20.133 partidos) y se juzgan en las de 2021/22 a 2025/26 (14.706), que
+no se usaron para elegir nada. Skill del 1X2 frente a "equipo medio":
+
+```
+                          partidos   antes    ahora   diferencia de Brier
+ajuste (hasta 2020/21)     20.133    +5.1%    +8.2%   -0.0198 ± 0.0011 (-18.1 se)
+prueba (2021/22-2025/26)   14.706    +6.1%    +8.8%   -0.0175 ± 0.0013 (-13.4 se)
+2026/27 hasta octubre         747    +4.2%    +7.2%   -0.0204 ± 0.0058  (-3.5 se)
+```
+
+Mejor en las 9 ligas y en las 16 temporadas por separado. Lo que más pesa:
+medir a cada equipo con todos sus partidos (casa y fuera juntos, el doble de
+datos) y frente al rival que tuvo. El ascendido y el peso por antigüedad suman
+menos, pero se ven (el ascendido, 0.0003 de Brier en el ajuste). LogLoss: de
+1.0199 a 0.9942 en la prueba. Empates: 25.2% predichos frente a 25.4% reales (sin
+la corrección, 24.1%).
+
+Probado y descartado (diferencias de ±0.0003 o peor en el ajuste): pesar menos
+la temporada anterior aparte del peso por días, la media de liga pesada como
+los partidos, normalizar las fuerzas a media 1, recortar goleadas a 4 o 5
+goles, K_LIGA 20 o 200, y acercar los goles esperados del 1X2 a la media (beta
+1.05: -0.0001). Un prior propio para los que bajan de la Premier a la
+Championship sí ayuda allí (-0.0013 de Brier en la Championship, -2 se en
+prueba) pero solo sirve para Inglaterra: ver "Pendiente".
+
+Ojo con openfootball: cambió la forma de escribir los nombres en 2020/21 (las
+cinco grandes y la Championship: "Arsenal" a "Arsenal FC") y en 2023/24
+(Francia, Países Bajos y Portugal: "PSV Eindhoven" a "PSV"). Sin casarlos
+(`mapa_nombres`), media liga contaba como recién ascendida esas temporadas; el
+modelo de antes también lo sufría en la tabla de "Validación" de antes de oct
+2026 (por eso la Ligue 1 2023/24 salía en +2.3%). Y los 0-0 de 2025/26 en
+adelante vienen como `[0, 0]` en vez de `{"ft": [0, 0]}`.
+
+**Mismos números en el Worker**: `ajustarFuerzas` en `worker/modelo.js` hace las
+mismas operaciones en el mismo orden (el peso de cada día se multiplica día a
+día en vez de con `exp`, para que salga el mismo double), y `test_paridad.py` lo
+comprueba sin tolerancia en 300 ligas al azar. Las vueltas del ajuste usan el
+peso total de cada cruce (i en casa contra j), así cuestan 24×24 y no lo que
+tenga la lista. `TOLERANCIA_FUERZAS` = 1e-4: con 1e-6 hacían falta el doble de
+vueltas y los goles esperados (con dos decimales) salían iguales salvo algún
+0.01 suelto en el borde de un redondeo.
+
 ## Bugs ya encontrados y corregidos (no reabrir sin motivo nuevo)
 
 1. **Normalizador equivocado en `calcular_xg_partido`** (crítico). La defensa del
@@ -348,6 +444,10 @@ límite de peticiones gratis.
 7. **Poisson truncado en 5 goles** perdía hasta 6.5% de masa → límite subido a 10
    y normalizado. Añadidas dobles oportunidad X2 y 12. `Cache-Control: no-store`
    para que un deploy no deje al navegador con la interfaz vieja.
+8. **La validación no medía la media de liga de producción** (oct 2026).
+   `validacion.py` metía la temporada anterior entera en la media de liga
+   (380 partidos más los de esta más K_LIGA de ancla), y producción usa solo
+   los de esta más K_LIGA. Ahora las dos hacen lo de producción.
 
 ## Champions: cómo se predice (oct 2026)
 
@@ -357,28 +457,28 @@ contra rivales de niveles muy distintos; su "media de liga" mezcla al Bayern con
 el campeón de Kazajistán. Por eso la Champions va en `TORNEOS` y no en `LIGAS`,
 con su propio cálculo, que junta tres cosas:
 
-- **Su liga nacional** (`fuerzas_champions`): los mismos `obtener_stats_equipo`
-  y `obtener_promedio_liga` que sus partidos de liga, así que casi siempre
-  salen de la caché. Su ataque y su defensa relativos a la media de su liga se
-  elevan a `EXPONENTE_FUERZA_CHAMPIONS` (0.39): los grandes arrasan en su liga
-  y su fuerza nacional tomada tal cual exagera.
-- **El nivel de su liga** (`FACTOR_LIGA`): PL 1.28, FL1 1.12, PD 1.09, BL1 1.06,
-  SA 1.03, PPL 1.00, DED 0.83, y 0.76 para un equipo de una liga fuera del plan
+- **Su liga nacional** (`fuerzas_champions`): sus fuerzas de liga, las mismas
+  de sus partidos de liga (`obtener_fuerzas_liga`), sin una sola petición más.
+  Se elevan a `EXPONENTE_FUERZA_CHAMPIONS` (0.82): los grandes arrasan en su
+  liga y su fuerza nacional tomada tal cual exagera. Con las fuerzas de antes
+  (sin ajustar por rival ni encoger) el exponente salía 0.39.
+- **El nivel de su liga** (`FACTOR_LIGA`): PL 1.25, FL1 1.08, PD 1.06, BL1 1.06,
+  SA 1.01, PPL 0.86, DED 0.73, y 0.87 para un equipo de una liga fuera del plan
   (`FACTOR_OTRA_LIGA`), que cuenta como un equipo medio de ese nivel.
 - **Su historial en la Champions** (`historial_champions`): lo que marcó y
   encajó en sus partidos de Champions de esta temporada y la anterior, frente a
   lo esperado de un equipo de su nivel de liga contra esos mismos rivales
   (media de la Champions × escala × nivel propio / nivel del rival). Se encoge
-  hacia 1 con `K_HISTORIAL_CHAMPIONS` (31 goles de pseudo-cuenta,
-  `multiplicadores_historial`): con 16 partidos de Champions un equipo pesa casi
-  a medias entre su historial y su liga, y sin partidos queda como estaba. Las
-  dos temporadas pesan igual (medido: la anterior aporta tanto como la actual).
+  hacia 1 con `K_HISTORIAL_CHAMPIONS` (54 goles de pseudo-cuenta,
+  `multiplicadores_historial`): con 16 partidos de Champions su historial pesa
+  algo menos de un tercio, y sin partidos queda como estaba. Las dos temporadas
+  pesan igual (medido: la anterior aporta tanto como la actual).
   Los partidos salen de lo que ya se baja para la media (`historial` en la
   entrada de la Champions de `ligas` y de `priors`); solo cuesta alguna
   petición la liga de un rival de la temporada pasada que no esté en caché
   (`liga_domestica`, guardada 30 días): unas pocas al mes.
 - Goles esperados (`calcular_xg_champions`): media de la Champions ×
-  `ESCALA_CHAMPIONS` (0.96, 0.97) × ataque propio × defensa rival × nivel propio
+  `ESCALA_CHAMPIONS` (0.90, 0.89) × ataque propio × defensa rival × nivel propio
   / nivel rival × historial de ataque propio × historial de defensa rival.
   Luego, el mismo `calcular_poisson` y `mercados_de_goles` que en liga.
 - Los goles de la Champions se cuentan a los 90 minutos (`goles_90`): con
@@ -397,27 +497,32 @@ frente a "equipo medio", dejando fuera una temporada entera cada vez (con 5
 bloques al azar sale casi igual):
 
 ```
-solo nivel de liga                 +7.4%  (-3.8 se)
-liga nacional atenuada + nivel    +10.2%  (-5.0 se)   <- la app hasta oct 2026
-+ historial en la Champions       +12.3%  (-6.0 se)   <- la de ahora
-historial frente a la de antes: -0.0134 ± 0.0037 de Brier (-3.6 se)
+                                   fuerza de liga     fuerza de liga
+                                   de antes           de ahora (oct 2026)
+solo nivel de liga                  +7.4%              +7.4%  (-3.8 se)
+liga nacional atenuada + nivel     +10.2%             +12.3%  (-5.8 se)
++ historial en la Champions        +12.3%             +13.1%  (-6.2 se)   <- la app
 ```
 
-El historial gana en las cuatro temporadas por separado (+1.3 a +3.4 puntos de
-skill), y los parámetros salen estables: exponente entre 0.30 y 0.46, K entre
-26 y 36 en los nueve ajustes. En un estudio previo con los mismos partidos se
-probaron otras dos formas de medir el historial: frente a la media de la
-Champions sin mirar a los rivales (+11.3%) y frente a lo que decía el modelo
-completo (+11.5%); la elegida (+12.0% en ese estudio) les ganaba por unos 2 se.
-La fórmula de producción reproduce la del estudio (Brier 0.5392 frente a
-0.5391 en la muestra). Lo esperado del historial usa los niveles y la escala de
-`app.py`, así que se ajustan dando vueltas hasta que no se mueven (la escala
-tarda unas cuantas; los niveles, ninguna).
+Con la fuerza de liga nueva, mejor medida, la liga sola ya da casi lo que
+daban liga e historial juntos, y el historial aporta menos (-0.0049 ± 0.0024 de
+Brier, -2.1 se; antes -3.6 se). Se queda: gana en las cuatro temporadas. Los
+parámetros salen estables: exponente entre 0.74 y 0.90, K entre 44 y 78 en los
+nueve ajustes. En un estudio previo con los mismos partidos (y la fuerza de
+antes) se probaron otras dos formas de medir el historial: frente a la media de
+la Champions sin mirar a los rivales y frente a lo que decía el modelo
+completo; la elegida les ganaba por unos 2 se. La fórmula de producción
+reproduce la del estudio (Brier 0.5343 frente a 0.5344 en la muestra). Lo
+esperado del historial usa los niveles y la escala de `app.py`, así que se
+ajustan dando vueltas hasta que no se mueven (con la fuerza nueva, tres
+vueltas: la escala bajó de 0.92 a 0.90 y K subió de 46 a 54).
 
 Ojo con los datos: la Champions 2022/23 de openfootball usa nombres cortos
 ("Real Madrid", "Inter", "Sporting CP") y las demás temporadas y las ligas, los
 largos. Sin casarlos (`casar` y `ALIAS` en `afinar_champions.py`), 8 grandes de
 2022/23 contaban como "otra liga" y el historial parecía mejor de lo que es.
+Las ligas se leen con `afinar_liga.cargar`, que casa además los nombres de una
+temporada a otra (ver "El modelo").
 
 La Champions no entra en la validación de la app (`validacion.py` recorre solo
 `LIGAS`): la web explica el cálculo en el detalle de cada partido, con lo que
@@ -425,60 +530,49 @@ dice el historial de cada equipo.
 
 ## Validación
 
-Backtest sobre LaLiga 2023+2024 (720 partidos evaluados):
+**Por liga** (`afinar_liga.py`, temporadas de prueba 2021/22 a 2026/27, cada
+partido solo con lo de antes): skill del 1X2 frente a la base "equipo medio",
+el modelo de antes y el de ahora, y el test pareado de Brier entre los dos en
+errores estándar (se):
 
 ```
-Modelo corregido      Brier 0.6013   LogLoss 1.0072   Acierto 49.0%
-Base "equipo medio"   Brier 0.6499   LogLoss 1.0749   Acierto 44.4%
+Liga            partidos   antes     ahora
+LaLiga            1.959    +5.9%     +8.7%   (-5.1 se)
+Premier           1.950    +7.1%     +9.7%   (-4.1 se)
+Bundesliga        1.566    +4.5%     +8.0%   (-5.4 se)
+Serie A           1.940    +7.5%    +10.5%   (-5.7 se)
+Ligue 1           1.722    +5.2%     +7.5%   (-3.9 se)
+Eredivisie        1.592    +9.5%    +12.6%   (-4.8 se)
+Primeira Liga     1.592   +12.0%    +15.6%   (-6.6 se)
+Championship      2.855    +0.7%     +2.5%   (-4.0 se)
+Brasileirão         277    +1.1%     +3.5%   (-1.7 se)   (2026 hasta octubre)
 ```
 
-Skill score del 7.5% sobre la base. Para el mismo backtest de dos temporadas que
-LaLiga en otra liga: `LIGA_BACKTEST=PL python backtest.py 2023 2024`, etc.
-
-**Las nueve ligas, medidas igual (oct 2026).** Resultados de openfootball (ver
-"Más temporadas de datos"), recorridos con `validacion.validar_liga`: ancla e
-historial en la temporada anterior, y cada partido predicho solo con lo de antes.
-Skill del 1X2 frente a la base "equipo medio", con el test pareado de Brier en
-errores estándar (se), y la desviación típica de puntos por partido entre
-equipos, que mide lo igualada que está la liga (más baja = más igualada):
-
-```
-Liga            2023/24              2024/25              Igualdad
-LaLiga           +7.9  (-5.2 se)      +6.9  (-3.7 se)     0.52 / 0.45
-Premier         +10.1  (-5.1 se)      +7.9  (-4.0 se)     0.52 / 0.48
-Ligue 1          +2.3  (-1.4 se)      +8.0  (-3.7 se)     0.40 / 0.46
-Bundesliga       +8.6  (-4.1 se)      +3.1  (-1.4 se)     0.54 / 0.44
-Serie A          +7.4  (-4.1 se)      +7.4  (-4.1 se)     0.48 / 0.49
-Eredivisie      +10.7  (-4.5 se)      +8.2  (-3.6 se)     0.58 / 0.49
-Primeira Liga    +9.4  (-4.5 se)     +11.2  (-5.5 se)     0.56 / 0.52
-Championship     -0.2  (+0.1 se)      +1.8  (-1.4 se)     0.35 / 0.33
-Brasileirão      2025, 2ª mitad (190 partidos): +1.7 (-0.6 se)    0.38
-```
-
-- **La Championship no mejora a la base.** No es por los equipos que cambian
-  cada año: en los 1.042 partidos en que los dos equipos tenían historial en la
-  liga, el skill es +0.7% (−0.7 se). Es la liga más igualada de las nueve, y el
-  skill va en la misma dirección que la igualdad: las más desiguales
-  (Eredivisie, Primeira) son las más previsibles.
+- **La Championship y el Brasileirão siguen siendo los que menos aportan.** Son
+  las ligas más igualadas (desviación típica de puntos por partido entre
+  equipos ~0.35, frente a 0.45-0.58 de las demás), y el skill va en la misma
+  dirección que la igualdad: las más desiguales (Eredivisie, Primeira) son las
+  más previsibles. La Championship ya gana a la base (+2.5%, antes +0.7%).
 - **El Brasileirão no se puede medir bien con estos datos:** openfootball solo
-  tiene 2025 (falta 2024), así que se ancla en la primera mitad y se puntúa la
-  segunda. Es la segunda liga más igualada; lo esperable es un skill bajo,
-  como en la Championship. La validación de la app (`/api/validacion`) lo mide
-  con la temporada completa y la anterior de football-data.
+  tiene 2019, 2020, 2025 y 2026. La validación de la app (`/api/validacion`) lo
+  mide con la temporada completa y la anterior de football-data.
 - En la Championship se quitan los playoffs de ascenso: no son liga, y
   openfootball los escribe de tres formas distintas según la temporada (solo
   vale `round` con "Matchday").
 
 `validacion.py` corre ese mismo backtest walk-forward **dentro de la app**
 (`/validar?token=...`, resultado en `/api/validacion`): importa
-`calcular_xg_partido`, `calcular_poisson` y `mercados_de_goles` de `app` en vez de
-reimplementarlos, para no validar una copia desincronizada del modelo desplegado.
+`ajustar_fuerzas`, `calcular_xg_partido`, `calcular_poisson` y
+`mercados_de_goles` de `app` en vez de reimplementarlos, para no validar una
+copia desincronizada del modelo desplegado. Recorre la temporada día a día: las
+fuerzas de cada día se ajustan con lo jugado en días anteriores, arrancando de
+las del día anterior (solo acelera la convergencia).
 Además del 1X2 mide más de 2.5 y ambos marcan (`mercados` en el resultado) contra
 la misma base "equipo medio". Cuesta 2
 peticiones por liga y solo la primera vez — las temporadas terminadas no cambian,
 así que quedan cacheadas en disco.
 
-## Mercados de goles — `ENCOGER_GOLES = 0.3` (oct 2026)
+## Mercados de goles — `ENCOGER_GOLES = 0.5` (oct 2026)
 
 Más/menos, ambos marcan, porterías a cero y marcadores salen de
 `mercados_de_goles`, no de `calcular_poisson`. El 1X2 no cambió ni en el código.
@@ -490,25 +584,38 @@ goles entre partidos. Donde daba 27% de "más de 2.5" pasó un 42%, y donde daba
 74% pasó un 62%. El orden lo acierta, la magnitud no. Así perdía contra la base
 "equipo medio": skill −1.3% en más de 2.5 y −1.0% en ambos marcan.
 
-Medido con `afinar_goles.py` sobre 3.484 partidos reales (LaLiga, Premier,
-Bundesliga, Serie A y Ligue 1; temporadas 2023 y 2024, ancla 2022):
+Primera medida (con el modelo de antes y `afinar_goles.py`, ya retirado): 3.484
+partidos de cinco ligas, 2023 y 2024; cualquier α entre 0.2 y 0.4 ganaba a la
+base en las dos temporadas y se puso 0.3.
 
-- Elegido con 2023 sale α=0.2. Juzgado con 2024 gana a la base en más de 2.5
-  (−3.7 errores estándar) y en ambos marcan (−2.3 se).
-- Elegido con 2024 sale α=0.5. Juzgado con 2023 empata con la base.
-- Cualquier α entre 0.2 y 0.4 gana a la base en las dos temporadas. α=1 (sin
-  encoger) pierde en 2023 por +2.4 se. 0.3 es el centro de esa franja, no un
-  óptimo demostrado.
+Con las fuerzas ajustadas por rival los goles esperados son mejores y conviene
+encoger menos. Medido con `afinar_liga.py afinar` (ajuste | prueba, skill frente
+a la base "equipo medio"):
 
-Aun con 0.3 la ganancia es pequeña: skill de +0.2% a +1.2%, frente al ~7.5% del
-1X2. En Eredivisie, Primeira, Championship y Brasileirão (medidas después, sin
-reajustar α) sale entre −0.6% y +1.8%. Con solo goles marcados y encajados, el total de goles de un partido apenas
-se predice mejor que con la media de su liga. La web lo dice en el detalle de cada
-partido y en el panel Fiabilidad. No vender estos números como el 1X2.
+```
+alfa   más de 2.5          ambos marcan
+0.3    +0.94% | +0.85%     +0.56% | +0.55%
+0.5    +1.24% | +1.13%     +0.69% | +0.69%   <- app.py
+0.6    +1.29% | +1.18%     +0.68% | +0.68%
+1.0    +0.74% | +0.74%     +0.06% | +0.07%
+```
 
-## Afinado del modelo — dos decisiones cerradas (sept 2026)
+Con el modelo de antes y su 0.3 eran +0.46% y +0.23% en la prueba. Aun así la
+ganancia es pequeña frente al ~9% del 1X2: con solo goles marcados y encajados,
+el total de goles de un partido apenas se predice mejor que con la media de su
+liga. La web lo dice en el detalle de cada partido y en el panel Fiabilidad. No
+vender estos números como el 1X2.
 
-Datos disponibles: solo LaLiga 2023+2024 (2021/2022 dan 403 en plan free).
+## Afinado del modelo — dos decisiones de sept 2026, reabiertas en oct 2026
+
+Con 35.586 partidos de openfootball (ver "El modelo") las dos se reabrieron, como
+pedía esta misma sección: la corrección de empates sale real (`RHO_EMPATES` =
+-0.05) y el prior de ascendidos también (`ATAQUE_RECIEN_LLEGADO` = 0.8), las
+dos elegidas en las temporadas de ajuste y confirmadas en las de prueba.
+`PSEUDO_PARTIDOS` ya no existe: el encogimiento son `PSEUDO_GOLES_*`. Lo que
+sigue es lo que se concluyó en sept 2026 con los datos de entonces.
+
+Datos disponibles entonces: solo LaLiga 2023+2024 (2021/2022 dan 403 en plan free).
 
 ### 1. Hiperparámetros (`PSEUDO_PARTIDOS=6`, `rho=0`): se quedan como están
 
@@ -548,17 +655,15 @@ efecto se diluye solo conforme acumulan partidos.
 
 ## Herramientas de afinado
 
-- `afinar.py` compara configuraciones con un test pareado de LogLoss y su error
-  estándar: dice si una diferencia es real, no solo cuál gana.
-- `afinar.py` avisa ("AVISO: no se pudo cargar …") si una temporada no carga.
-  `backtest.py` solo imprime el error HTTP de esa temporada, y su resumen sigue
-  listando todas las temporadas pedidas: si una falla, mira cuántos partidos
-  cargó antes de fiarte del resultado.
-- `backtest.py` captura `requests.RequestException`: sin conexión, esa temporada
-  vuelve vacía en vez de tumbar el script.
-- `afinar_goles.py` mide `ENCOGER_GOLES` con el mismo método de train/test y test
-  pareado. No necesita token: baja resultados de openfootball (ver "Más
-  temporadas de datos" abajo) y los cachea en `openfootball_cache/`.
+- `afinar_liga.py` (oct 2026) mide el modelo de liga de `app.py` frente al de
+  antes, por liga y por temporada, con test pareado de Brier y LogLoss (~30 s), y
+  con `afinar` busca los parámetros en las temporadas de ajuste y los juzga en
+  las de prueba. Baja ~120 ficheros de openfootball (sin token) a
+  `openfootball_cache/` y casa los nombres entre temporadas. La evaluación usa
+  las funciones de `app.py` y el recorrido de `validacion.py`; la búsqueda, una
+  gemela en numpy del mismo ajuste, y al final comprueba que da lo mismo.
+  Sustituye a `backtest.py`, `afinar.py` y `afinar_goles.py`, que medían el
+  modelo de antes con LaLiga sola (y los dos primeros necesitaban el token).
 - `afinar_champions.py` estima `FACTOR_LIGA`, `FACTOR_OTRA_LIGA`,
   `EXPONENTE_FUERZA_CHAMPIONS`, `ESCALA_CHAMPIONS` y `K_HISTORIAL_CHAMPIONS` con
   cuatro Champions (2022/23 a 2025/26, del repositorio `champions-league` de
@@ -623,11 +728,14 @@ Environment).
   `afinar_champions.py` y reajustar. Ideas sin probar: contar también las copas
   nacionales, y meter la Champions en la validación de la app.
 
-- **Championship (y seguramente Brasileirão) casi no aportan:** sus
-  pronósticos valen lo que la media de la liga (tabla en "Validación"). La web
-  lo enseña en Fiabilidad, pero la tabla los pinta igual que los demás.
-  Opciones: quitarlas, marcarlas en la tabla, o probar un encogimiento propio
-  para ligas igualadas con el método de `afinar_goles.py`.
+- **Championship y Brasileirão aportan poco** (+2.5% y +3.5%, tabla en
+  "Validación"). La web lo enseña en Fiabilidad, pero la tabla los pinta igual
+  que los demás. Para la Championship hay una mejora medida y sin poner: los que
+  bajan de la Premier empiezan como recién llegados (ataque 0.8), cuando son de
+  los fuertes; con un prior propio (ataque 1.1, defensa 0.9) la Championship
+  gana -0.0013 de Brier (-2.6 se en ajuste, -2.2 en prueba). Hace falta saber,
+  al ajustar la Championship, qué equipos estaban en la Premier la temporada
+  anterior (la lista de la Premier ya está en `partidos_liga`).
 - **Registro de predicciones en vivo:** nadie mide si los pronósticos publicados
   aciertan. Con Cloudflare ya no lo bloquea la persistencia: la tabla
   `predicciones` de D1 guarda la última predicción publicada de cada partido y
@@ -636,32 +744,21 @@ Environment).
   acumularía datos propios que el plan free no vende: es lo único que puede
   sacar el `rho` del empate estadístico descrito arriba. En Render sigue igual
   (disco efímero).
-- **`test_migracion.py` está desincronizado:** prueba `app._parsear_standings` y
-  `app.USAR_PRIOR_PREVIA`, que no existen en `app.py`. Es de una migración a
-  `/standings` que no está en el código actual, así que el archivo revienta con
-  `AttributeError` si se corre. O se completa la migración o se borra el test;
-  tal como está no prueba nada.
-- **Más temporadas de datos: ya hay fuente gratis.** El plan free de
-  football-data.org no da temporadas viejas, pero `openfootball/football.json` en
-  GitHub sí: resultados de LaLiga, Premier, Bundesliga, Serie A y Ligue 1,
-  comprobados de 2022/23 a 2024/25 (oct 2026), sin token. Algunas vienen
-  incompletas: LaLiga y Serie A 2024/25 traen 370 de 380 partidos. Con ellos el
-  backtest de LaLiga 2023+2024 da skill +7.9% y +6.9%, en línea con el 7.5% de
-  arriba. Es lo que hace falta para reabrir el "empate estadístico" de
-  `PSEUDO_PARTIDOS`/`rho` y el prior de ascendidos, con 5 ligas en vez de una.
-  No se ha hecho todavía.
-- **xG real** (tier de pago): el techo de un modelo basado solo en goles
-  marcados/encajados ronda un skill score del 9-10%; el actual ya está en 7.5%.
+- **Ideas sin probar en el modelo de liga:** ventaja de campo propia de cada
+  equipo (encogida hacia la de su liga), y los partidos de copa y de Champions
+  en la fuerza de liga.
+- **xG real** (tier de pago): con solo goles marcados y encajados, el modelo ya
+  está en +8.8% de skill en las temporadas de prueba; los modelos de goles
+  publicados no suelen pasar mucho de ahí. Para más hace falta otra información
+  (tiros, xG, alineaciones), que el plan free no da.
 
 ## Convenciones para seguir trabajando aquí
 
-- No reabrir el debate de `PSEUDO_PARTIDOS`/`rho` ni el prior de ascendidos sin
-  datos nuevos (más temporadas) — ya se demostró que con los datos de LaLiga
-  cualquier conclusión es ruido. Ver "Afinado del modelo" arriba. Los datos de
-  openfootball son justo esos datos nuevos: reabrirlo con ellos sí tiene sentido.
-- Cualquier cambio al modelo debe pasar por `backtest.py` sobre LaLiga 2023+2024
-  como mínimo, y usar el test pareado de `afinar.py` para saber si una diferencia
-  es real o ruido antes de adoptarla.
+- Cualquier cambio al modelo de liga pasa por `afinar_liga.py`: se elige mirando
+  solo las temporadas de ajuste (hasta 2020/21) y se juzga en las de prueba con
+  el test pareado. Elegir y juzgar con los mismos partidos es lo que en sept 2026
+  hacía que todo pareciera ruido o señal según el día. Los de la Champions, por
+  `afinar_champions.py`.
 - El modelo vive dos veces: `app.py`/`validacion.py` (Python, lo que miden las
   herramientas de afinado) y `worker/` (lo que publica Cloudflare). Un cambio
   va en los dos y `python test_paridad.py` tiene que dar "todo igual".

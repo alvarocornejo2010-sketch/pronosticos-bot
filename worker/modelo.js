@@ -1,14 +1,16 @@
-// El modelo, el mismo de app.py: fuerzas de ataque y defensa encogidas hacia la
-// media de la liga, Poisson independiente para el 1X2 y los mercados de goles
-// con los goles esperados acercados a la media (ENCOGER_GOLES).
+// El modelo, el mismo de app.py: fuerzas de ataque y defensa de cada equipo
+// ajustadas por el rival (ajustarFuerzas), Poisson con la corrección de
+// Dixon-Coles para el 1X2 (RHO_EMPATES) y los mercados de goles con los goles
+// esperados acercados a la media (ENCOGER_GOLES).
 //
 // Cada función hace las mismas operaciones y en el mismo orden que su gemela de
 // Python, así que salen los mismos números. test_paridad.py lo comprueba con
 // miles de casos: si cambias algo aquí, cámbialo también en app.py.
 
 import {
-  ENCOGER_GOLES, ESCALA_CHAMPIONS, EXPONENTE_FUERZA_CHAMPIONS, K_HISTORIAL_CHAMPIONS, LIMITE_GOLES,
-  PSEUDO_PARTIDOS,
+  ATAQUE_RECIEN_LLEGADO, ENCOGER_GOLES, ESCALA_CHAMPIONS, EXPONENTE_FUERZA_CHAMPIONS, FACTOR_DIARIO,
+  K_HISTORIAL_CHAMPIONS, LIMITE_GOLES, MAX_ITER_FUERZAS, PSEUDO_GOLES_ATAQUE, PSEUDO_GOLES_DEFENSA,
+  RHO_EMPATES, TOLERANCIA_FUERZAS,
 } from "./config.js";
 
 // ------------------------------------------
@@ -112,33 +114,126 @@ const REJILLA = new Float64Array((LIMITE_GOLES + 1) ** 2);
 const pc = (v) => redondear(v * 100, 2);
 
 // ------------------------------------------
-// Goles esperados
+// Fuerzas: ataque y defensa ajustados por el rival
 // ------------------------------------------
-// Media regularizada: con n=0 devuelve el prior, y con muchos partidos converge al dato real.
-export function encoger(total, n, prior, k = PSEUDO_PARTIDOS) {
-  return (total + k * prior) / (n + k);
+// ajustar_fuerzas de app.py: ataque y defensa de todos los equipos de una liga
+// con sus partidos de la temporada anterior y lo jugado de esta
+// ([[día, local, visita, gl, gv], ...]), cada uno medido frente al rival que
+// tuvo, pesado por su antigüedad y encogido hacia el equipo medio. Mismas
+// operaciones y en el mismo orden que en Python (el peso de cada día se
+// multiplica día a día, no con exp, para que salga el mismo double).
+export function ajustarFuerzas(previa, actual, media, inicio = null) {
+  const todos = previa.concat(actual);
+  const conPrevia = previa.length > 0;
+  if (!todos.length) return { equipos: {}, con_previa: conPrevia, dia: null, iteraciones: 0 };
+  // bucles con índices y sin desestructurar: en un isolate recién creado el
+  // código aún no está compilado, y así cuesta mucho menos
+  const n = todos.length;
+  let ref = -Infinity, primero = Infinity;
+  for (let r = 0; r < n; r++) {
+    const d = todos[r][0];
+    if (d > ref) ref = d;
+    if (d < primero) primero = d;
+  }
+  const ids = [], idx = new Map();
+  for (let r = 0; r < n; r++) {
+    const p = todos[r];
+    if (!idx.has(p[1])) { idx.set(p[1], ids.length); ids.push(p[1]); }
+    if (!idx.has(p[2])) { idx.set(p[2], ids.length); ids.push(p[2]); }
+  }
+  const T = ids.length;
+  const previos = new Set();
+  for (let r = 0; r < previa.length; r++) { previos.add(previa[r][1]); previos.add(previa[r][2]); }
+  const a0 = ids.map((t) => (conPrevia && !previos.has(t) ? ATAQUE_RECIEN_LLEGADO : 1.0));
+  const pesos = [1.0];
+  for (let k = 0; k < ref - primero; k++) pesos.push(pesos[k] * FACTOR_DIARIO);
+  const ml = media.avg_local, mv = media.avg_visita;
+  const kAt = PSEUDO_GOLES_ATAQUE, kDe = PSEUDO_GOLES_DEFENSA;
+  const numAt = new Float64Array(T), numDe = new Float64Array(T), jugados = new Array(T).fill(0);
+  for (let x = 0; x < T; x++) { numAt[x] = kAt * a0[x]; numDe[x] = kDe * 1.0; }
+  // peso total de cada cruce (i en casa contra j, en cruce[i*T + j]): las
+  // vueltas del ajuste cuestan T² y no lo que tenga la lista
+  const cruce = new Float64Array(T * T);
+  for (let r = 0; r < n; r++) {
+    const p = todos[r];
+    const gl = p[3], gv = p[4];
+    const i = idx.get(p[1]), j = idx.get(p[2]), w = pesos[ref - p[0]];
+    numAt[i] += w * gl;
+    numAt[j] += w * gv;
+    numDe[i] += w * gv;
+    numDe[j] += w * gl;
+    jugados[i] += 1;
+    jugados[j] += 1;
+    cruce[i * T + j] += w;
+  }
+  // lo que pesa la defensa de j en los goles esperados de i, y el ataque de j
+  // en los que encaja i
+  const pesaDe = new Float64Array(T * T), pesaAt = new Float64Array(T * T);
+  for (let i = 0; i < T; i++) {
+    for (let j = 0; j < T; j++) {
+      pesaDe[i * T + j] = ml * cruce[i * T + j] + mv * cruce[j * T + i];
+      pesaAt[i * T + j] = mv * cruce[i * T + j] + ml * cruce[j * T + i];
+    }
+  }
+  let ataque = Float64Array.from(a0), defensa = new Float64Array(T).fill(1.0);
+  if (inicio) {
+    ids.forEach((t, x) => {
+      const e = inicio[String(t)];
+      if (e) { ataque[x] = e[0]; defensa[x] = e[1]; }
+    });
+  }
+  let it = 0;
+  while (it < MAX_ITER_FUERZAS) {
+    it += 1;
+    const nuevoAt = new Float64Array(T);
+    for (let i = 0; i < T; i++) {
+      let den = kAt;
+      for (let j = 0; j < T; j++) den += pesaDe[i * T + j] * defensa[j];
+      nuevoAt[i] = numAt[i] / den;
+    }
+    const nuevaDe = new Float64Array(T);
+    for (let i = 0; i < T; i++) {
+      let den = kDe;
+      for (let j = 0; j < T; j++) den += pesaAt[i * T + j] * nuevoAt[j];
+      nuevaDe[i] = numDe[i] / den;
+    }
+    let cambio = 0.0;
+    for (let x = 0; x < T; x++) {
+      cambio = Math.max(cambio, Math.abs(nuevoAt[x] - ataque[x]), Math.abs(nuevaDe[x] - defensa[x]));
+    }
+    ataque = nuevoAt; defensa = nuevaDe;
+    if (cambio < TOLERANCIA_FUERZAS) break;
+  }
+  const equipos = {};
+  ids.forEach((t, x) => { equipos[String(t)] = [ataque[x], defensa[x], jugados[x]]; });
+  return { equipos, con_previa: conPrevia, dia: ref, iteraciones: it };
 }
 
-export function calcularXgPartido(statsLocal, statsVisita, promedioLiga) {
-  const avgL = promedioLiga.avg_local;
-  const avgV = promedioLiga.avg_visita;
+// Ataque, defensa y partidos de un equipo; uno sin partidos todavía (un
+// ascendido antes de debutar) parte de la fuerza de un recién llegado.
+export function fuerzaEquipo(fuerzas, teamId) {
+  const e = fuerzas.equipos[String(teamId)];
+  if (e) return { ataque: e[0], defensa: e[1], partidos: e[2] };
+  return { ataque: fuerzas.con_previa ? ATAQUE_RECIEN_LLEGADO : 1.0, defensa: 1.0, partidos: 0 };
+}
 
-  // Los goles que ENCAJA un equipo en casa son goles de visitante -> prior avg_v,
-  // y los que encaja fuera son goles de local -> prior avg_l.
-  const forLocal = encoger(statsLocal.gf_local, statsLocal.n_local, avgL);
-  const againstLocal = encoger(statsLocal.gc_local, statsLocal.n_local, avgV);
-  const forVisita = encoger(statsVisita.gf_visita, statsVisita.n_visita, avgV);
-  const againstVisita = encoger(statsVisita.gc_visita, statsVisita.n_visita, avgL);
-
-  // cada término se divide entre la media de SU MISMO tipo de gol
-  const ataqueLocal = forLocal / avgL;
-  const defensaVisita = againstVisita / avgL;
-  const ataqueVisita = forVisita / avgV;
-  const defensaLocal = againstLocal / avgV;
-
-  const xgLocal = ataqueLocal * defensaVisita * avgL;
-  const xgVisita = ataqueVisita * defensaLocal * avgV;
+// ------------------------------------------
+// Goles esperados
+// ------------------------------------------
+// Media de la liga x ataque propio x defensa del rival.
+export function calcularXgPartido(local, visita, promedioLiga) {
+  const xgLocal = promedioLiga.avg_local * local.ataque * visita.defensa;
+  const xgVisita = promedioLiga.avg_visita * visita.ataque * local.defensa;
   return [redondear(xgLocal, 2), redondear(xgVisita, 2)];
+}
+
+// Corrección de Dixon-Coles (RHO_EMPATES) de un marcador: solo 0-0, 1-0, 0-1 y 1-1.
+function tau(gl, gv, la, lv) {
+  if (gl === 0 && gv === 0) return 1 - la * lv * RHO_EMPATES;
+  if (gl === 0 && gv === 1) return 1 + la * RHO_EMPATES;
+  if (gl === 1 && gv === 0) return 1 + lv * RHO_EMPATES;
+  if (gl === 1 && gv === 1) return 1 - RHO_EMPATES;
+  return 1.0;
 }
 
 // ------------------------------------------
@@ -152,7 +247,8 @@ export function calcularPoisson(gla, gvi, limite = LIMITE_GOLES) {
   for (let gl = 0; gl <= limite; gl++) {
     const pGl = pl[gl];
     for (let gv = 0; gv <= limite; gv++) {
-      const prob = pGl * pv[gv];
+      let prob = pGl * pv[gv];
+      if (gl <= 1 && gv <= 1) prob = prob * tau(gl, gv, gla, gvi);
       if (gl > gv) local += prob;
       else if (gl === gv) empate += prob;
       else visita += prob;
@@ -176,7 +272,8 @@ export function calcularPoisson(gla, gvi, limite = LIMITE_GOLES) {
 // ------------------------------------------
 
 // Más/menos, ambos marcan, porterías a cero y marcadores, todos de una misma
-// rejilla de marcadores con los goles esperados acercados a la media de la liga.
+// rejilla de marcadores con los goles esperados acercados a la media de la liga
+// y la misma corrección de los marcadores bajos que el 1X2.
 export function mercadosDeGoles(xgLocal, xgVisita, promedioLiga, limite = LIMITE_GOLES) {
   const avgL = promedioLiga.avg_local;
   const avgV = promedioLiga.avg_visita;
@@ -191,7 +288,8 @@ export function mercadosDeGoles(xgLocal, xgVisita, promedioLiga, limite = LIMITE
   let suma = 0;
   for (let i = 0; i < n; i++) {
     for (let j = 0; j < n; j++) {
-      const v = pl[i] * pv[j];
+      let v = pl[i] * pv[j];
+      if (i <= 1 && j <= 1) v = v * tau(i, j, gla, gvi);
       rejilla[i * n + j] = v;
       suma += v;
     }
@@ -236,23 +334,11 @@ export function mercadosDeGoles(xgLocal, xgVisita, promedioLiga, limite = LIMITE
 // ------------------------------------------
 // Champions
 // ------------------------------------------
-// Ataque y defensa de un equipo en su liga nacional, relativos a la media de esa
-// liga y atenuados. La parte de fuerzas_champions de app.py que no pide nada.
-export function fuerzasDesdeLiga(stats, promedio, enCasa) {
-  const avgL = promedio.avg_local;
-  const avgV = promedio.avg_visita;
-  let ataque, defensa, n;
-  if (enCasa) {
-    ataque = encoger(stats.gf_local, stats.n_local, avgL) / avgL;
-    defensa = encoger(stats.gc_local, stats.n_local, avgV) / avgV;
-    n = stats.n_local;
-  } else {
-    ataque = encoger(stats.gf_visita, stats.n_visita, avgV) / avgV;
-    defensa = encoger(stats.gc_visita, stats.n_visita, avgL) / avgL;
-    n = stats.n_visita;
-  }
+// Ataque y defensa de un equipo en su liga nacional (fuerzaEquipo), atenuados:
+// la parte de fuerzas_champions de app.py que no pide nada.
+export function fuerzasDesdeLiga(f) {
   const b = EXPONENTE_FUERZA_CHAMPIONS;
-  return { ataque: ataque ** b, defensa: defensa ** b, muestra: n };
+  return { ataque: f.ataque ** b, defensa: f.defensa ** b, muestra: f.partidos };
 }
 
 // Historial en la Champions (historial_champions en app.py): lo que un equipo

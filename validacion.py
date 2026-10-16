@@ -8,8 +8,10 @@ realmente desplegado — `calcular_xg_partido` y `calcular_poisson` se importan 
 en cuanto tocas uno de los dos y entonces validas algo que no es lo que publicas.
 
 Método: para cada liga se bajan dos temporadas. La anterior sirve de ancla y de
-historial inicial; la última se recorre partido a partido prediciendo cada uno
-SOLO con lo ocurrido antes. Es la misma situación que en producción.
+historial inicial; la última se recorre día a día prediciendo cada partido SOLO
+con lo ocurrido en días anteriores: las fuerzas de ajustar_fuerzas con la
+temporada anterior y lo ya jugado de esta, y la media de la temporada en curso
+anclada en la anterior. Es la misma situación que en producción.
 
 Además del 1X2 mide dos mercados de goles, más de 2.5 y ambos marcan, con la
 misma función que publica la web (`mercados_de_goles`) y contra la misma base
@@ -22,7 +24,7 @@ import json
 import math
 import os
 import sys
-from collections import defaultdict, deque
+from collections import defaultdict
 
 
 def _rutas():
@@ -71,36 +73,43 @@ def _cargar_temporada(codigo_liga, season):
 # ==========================================
 # ESTADO INCREMENTAL
 # ==========================================
+def _compacto(m):
+    import app
+    return [app.dia_de(m["fecha"]), m["local"], m["visita"], m["gl"], m["gv"]]
+
+
 class _Historial:
-    """Sabe responder 'qué se sabía justo antes de este partido'.
+    """Sabe responder 'qué se sabía justo antes de este partido': las fuerzas
+    de todos los equipos (ajustar_fuerzas, como obtener_fuerzas_liga en
+    producción) y la media de la temporada en curso anclada en la anterior
+    (como obtener_promedio_liga). Se recalculan al cambiar de día, así que los
+    partidos de un mismo día no se ven entre sí; el ajuste de cada día arranca
+    del anterior, que solo lo hace converger antes."""
 
-    Guarda por equipo los últimos MAX_PARTIDOS_EQUIPO partidos y de ahí saca las
-    sumas por lado, igual que hace `obtener_stats_equipo` en producción: primero
-    corta por los N más recientes y luego separa local de visitante.
-    """
-
-    def __init__(self, ventana):
-        self.ventana = ventana
-        self.equipos = defaultdict(lambda: deque(maxlen=ventana))
+    def __init__(self, previa, ancla, k):
+        self.previa = [_compacto(m) for m in previa]
+        self.actual = []
+        self.ancla, self.k = ancla, k
         self.gl = self.gv = self.n = 0
+        self.dia = None
+        self.fuerzas = None
+        self.media = None
 
-    def stats(self, team_id):
-        s = {"gf_local": 0, "gc_local": 0, "n_local": 0,
-             "gf_visita": 0, "gc_visita": 0, "n_visita": 0}
-        for en_casa, gf, gc in self.equipos[team_id]:
-            if en_casa:
-                s["gf_local"] += gf; s["gc_local"] += gc; s["n_local"] += 1
-            else:
-                s["gf_visita"] += gf; s["gc_visita"] += gc; s["n_visita"] += 1
-        return s
-
-    def media_liga(self, ancla, k):
-        return {"avg_local": (self.gl + k * ancla["avg_local"]) / (self.n + k),
-                "avg_visita": (self.gv + k * ancla["avg_visita"]) / (self.n + k)}
+    def antes_de(self, m):
+        """(fuerzas, media) con todo lo jugado antes del día de m."""
+        import app
+        dia = app.dia_de(m["fecha"])
+        if dia != self.dia:
+            k = self.k
+            self.media = {"avg_local": (self.gl + k * self.ancla["avg_local"]) / (self.n + k),
+                          "avg_visita": (self.gv + k * self.ancla["avg_visita"]) / (self.n + k)}
+            self.fuerzas = app.ajustar_fuerzas(self.previa, self.actual, self.media,
+                                               inicio=self.fuerzas["equipos"] if self.fuerzas else None)
+            self.dia = dia
+        return self.fuerzas, self.media
 
     def registrar(self, m):
-        self.equipos[m["local"]].append((True, m["gl"], m["gv"]))
-        self.equipos[m["visita"]].append((False, m["gv"], m["gl"]))
+        self.actual.append(_compacto(m))
         self.gl += m["gl"]; self.gv += m["gv"]; self.n += 1
 
 
@@ -231,9 +240,8 @@ def validar_liga(codigo_liga, nombre, season):
         ancla = {"avg_local": app.PRIOR_AVG_LOCAL, "avg_visita": app.PRIOR_AVG_VISITA,
                  "origen": "constante de respaldo"}
 
-    hist = _Historial(app.MAX_PARTIDOS_EQUIPO)
-    for m in previa:
-        hist.registrar(m)   # historial de arranque, no se puntúa
+    # la temporada anterior entra en las fuerzas, no se puntúa
+    hist = _Historial(previa if len(previa) >= 100 else [], ancla, app.K_LIGA)
 
     modelo = _Acumulador()
     base_liga = _Acumulador()
@@ -243,11 +251,11 @@ def validar_liga(codigo_liga, nombre, season):
 
     for m in ultima:
         y = _resultado(m)
-        media = hist.media_liga(ancla, app.K_LIGA)
+        fuerzas, media = hist.antes_de(m)
 
         # --- el modelo real, el mismo que publica la web ---
-        xl, xv = app.calcular_xg_partido(hist.stats(m["local"]),
-                                         hist.stats(m["visita"]), media)
+        xl, xv = app.calcular_xg_partido(app.fuerza_equipo(fuerzas, m["local"]),
+                                         app.fuerza_equipo(fuerzas, m["visita"]), media)
         pr = app.calcular_poisson(xl, xv)
         modelo.add([pr["prob_local"] / 100, pr["prob_empate"] / 100, pr["prob_visita"] / 100], y)
 

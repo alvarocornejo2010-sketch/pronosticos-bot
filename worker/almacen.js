@@ -4,10 +4,11 @@
 // El esquema se crea solo la primera vez que una consulta no encuentra su tabla,
 // así una base nueva (o la local de `wrangler dev`) no necesita ningún paso a mano.
 export const ESQUEMA = [
-  // Lo que se baja de football-data.org, por secciones: equipos (sumas de goles
-  // por lado), ligas (media de la temporada en curso), priors (ancla de la
-  // temporada anterior), calendario (cuándo se bajó el de cada competición) y
-  // liga_equipo (de qué liga es cada equipo de la Champions).
+  // Lo que se baja de football-data.org, por secciones: ligas (media de la
+  // temporada en curso), priors (ancla de la temporada anterior), partidos_liga
+  // (los partidos de cada liga de las dos temporadas, compactos), fuerzas (las
+  // de cada equipo, ajustadas con esos partidos), calendario (cuándo se bajó el
+  // de cada competición) y liga_equipo (de qué liga es cada equipo de la Champions).
   `CREATE TABLE IF NOT EXISTS cache (
      seccion TEXT NOT NULL,
      clave   TEXT NOT NULL,

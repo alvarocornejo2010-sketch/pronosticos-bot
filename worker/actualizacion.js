@@ -9,15 +9,15 @@
 // salen de una sola consulta, sin leer (JSON.parse) partido por partido.
 
 import {
-  CODIGOS_TORNEO, COMPETICIONES, DIAS_SEMANA, DIAS_VALIDEZ_LIGA, DIAS_VALIDEZ_LIGA_EQUIPO,
-  DIAS_VALIDEZ_PRIOR, FACTOR_LIGA, FACTOR_OTRA_LIGA, HORAS_VALIDEZ_PREDICCION, K_LIGA, LIGAS,
-  LIGAS_ANO_NATURAL, MAX_PARTIDOS_EQUIPO, PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA, VENTANA_DIAS,
+  CODIGOS_TORNEO, COMPETICIONES, DIAS_SEMANA, DIAS_VALIDEZ_LIGA_EQUIPO, DIAS_VALIDEZ_PRIOR, FACTOR_LIGA,
+  FACTOR_OTRA_LIGA, HORAS_VALIDEZ_LIGA, HORAS_VALIDEZ_PREDICCION, K_LIGA, LIGAS, LIGAS_ANO_NATURAL,
+  PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA,
 } from "./config.js";
 import {
-  calcularPoisson, calcularXgChampions, calcularXgPartido, fuerzasDesdeLiga, mercadosDeGoles,
-  multiplicadoresHistorial, redondear, sumarHistorial,
+  ajustarFuerzas, calcularPoisson, calcularXgChampions, calcularXgPartido, fuerzaEquipo, fuerzasDesdeLiga,
+  mercadosDeGoles, multiplicadoresHistorial, redondear, sumarHistorial,
 } from "./modelo.js";
-import { SinPresupuesto } from "./api.js";
+import { SinPresupuesto, UMBRAL_GRANDE } from "./api.js";
 import { diaSemana, diasEntre, sumarDias } from "./tiempo.js";
 
 const MS_DIA = 86400000;
@@ -91,13 +91,36 @@ function historialDePartidos(matches) {
   return hist;
 }
 
+// Número de día (desde el 1/1/1970) de una fecha de la API (dia_de en app.py).
+export const diaDe = (utcDate) => Math.floor(Date.parse(utcDate.slice(0, 10) + "T00:00:00Z") / MS_DIA);
+
+// [[día, local, visita, gl, gv], ...] de los partidos con resultado, por fecha
+// (partidos_compactos en app.py): lo que necesita ajustarFuerzas.
+export function partidosCompactos(matches) {
+  const out = [];
+  for (const m of (matches || []).slice().sort(porFecha)) {
+    const [gl, gv] = goles90(m);
+    const loc = (m.homeTeam || {}).id, vis = (m.awayTeam || {}).id;
+    if (gl == null || gv == null || loc == null || vis == null || !m.utcDate) continue;
+    out.push([diaDe(m.utcDate), loc, vis, gl, gv]);
+  }
+  return out;
+}
+
+// La lista de partidos guardada de una liga, si es de esa temporada.
+function listaVigente(ctx, clave, temporada) {
+  const e = ctx.cache.get("partidos_liga", clave);
+  return e && e.temporada === temporada ? e : null;
+}
+
 async function obtenerPriorLiga(ctx, codigo) {
   const entry = ctx.cache.get("priors", codigo);
   const season = temporadaActual(ctx.reloj, codigo) - 1;
-  // la temporada también cuenta (en julio la "anterior" pasa a ser otra), y un
-  // torneo guarda además su historial por equipo
+  const esTorneo = CODIGOS_TORNEO.has(codigo);
+  // la temporada también cuenta (en julio la "anterior" pasa a ser otra); un
+  // torneo guarda además su historial por equipo, y una liga, sus partidos
   if (entry && ctx.vigente(entry.actualizado, DIAS_VALIDEZ_PRIOR) && entry.temporada === season
-      && (!CODIGOS_TORNEO.has(codigo) || "historial" in entry)) return entry;
+      && (esTorneo ? "historial" in entry : listaVigente(ctx, codigo + ":previa", season))) return entry;
 
   const respaldo = { avg_local: PRIOR_AVG_LOCAL, avg_visita: PRIOR_AVG_VISITA,
     origen: "constante de respaldo", partidos: 0, actualizado: null };
@@ -118,7 +141,11 @@ async function obtenerPriorLiga(ctx, codigo) {
   }
   const nueva = { avg_local: gl / n, avg_visita: gv / n, origen: `temporada ${season}`, partidos: n,
     temporada: season, actualizado: ctx.ahoraIso() };
-  if (CODIGOS_TORNEO.has(codigo)) nueva.historial = historialDePartidos(r.cuerpo.matches);
+  if (esTorneo) nueva.historial = historialDePartidos(r.cuerpo.matches);
+  else {
+    ctx.cache.poner("partidos_liga", codigo + ":previa", { temporada: season,
+      partidos: partidosCompactos(r.cuerpo.matches), actualizado: nueva.actualizado });
+  }
   ctx.cache.poner("priors", codigo, nueva);
   return nueva;
 }
@@ -126,9 +153,11 @@ async function obtenerPriorLiga(ctx, codigo) {
 // ==========================================
 // PROMEDIO DE GOLES POR LIGA
 // ==========================================
-// Si la media de una liga en caché sirve tal cual (un torneo necesita además su historial).
-const ligaVigente = (ctx, codigo, e) => Boolean(e && ctx.vigente(e.actualizado, DIAS_VALIDEZ_LIGA)
-  && (!CODIGOS_TORNEO.has(codigo) || "historial" in e));
+// Si la media de una liga en caché sirve tal cual (un torneo necesita además su
+// historial, y una liga, sus partidos de esta temporada).
+const ligaVigente = (ctx, codigo, e) => Boolean(e && ctx.vigente(e.actualizado, HORAS_VALIDEZ_LIGA / 24)
+  && (CODIGOS_TORNEO.has(codigo) ? "historial" in e
+    : listaVigente(ctx, codigo + ":actual", temporadaActual(ctx.reloj, codigo))));
 
 export async function obtenerPromedioLiga(ctx, codigo) {
   const entry = ctx.cache.get("ligas", codigo);
@@ -157,55 +186,45 @@ export async function obtenerPromedioLiga(ctx, codigo) {
     actualizado: ctx.ahoraIso(),
   };
   if (CODIGOS_TORNEO.has(codigo)) promedio.historial = historialDePartidos(r.cuerpo.matches);
+  else {
+    ctx.cache.poner("partidos_liga", codigo + ":actual", { temporada: temporadaActual(ctx.reloj, codigo),
+      partidos: partidosCompactos(r.cuerpo.matches), actualizado: promedio.actualizado });
+  }
   ctx.cache.poner("ligas", codigo, promedio);
   return promedio;
 }
 
 // ==========================================
-// STATS POR EQUIPO (sumas crudas, sin normalizar)
+// FUERZAS DE UNA LIGA (obtener_fuerzas_liga en app.py)
 // ==========================================
-const STATS_VACIAS = { gf_local: 0, gc_local: 0, n_local: 0, gf_visita: 0, gc_visita: 0, n_visita: 0, actualizado: null };
-
 const porFecha = (a, b) => {
   const x = a.utcDate || "", y = b.utcDate || "";
   return x < y ? -1 : x > y ? 1 : 0;
 };
 
-export async function obtenerStatsEquipo(ctx, teamId, codigo) {
-  const key = `${teamId}:${codigo}`;
-  const entry = ctx.cache.get("equipos", key);
-  if (entry && ctx.vigente(entry.actualizado, ctx.aj.diasValidezEquipo)) return entry;
-  if (ctx.fallos.has("equipo:" + key)) return { ...STATS_VACIAS };
-
-  const hasta = ctx.hoy;
-  const desde = sumarDias(hasta, -VENTANA_DIAS);
-  const r = await ctx.api.get(`/teams/${teamId}/matches`, {
-    status: "FINISHED",
-    competitions: codigo,   // sin esto se colaban copas, Champions y amistosos
-    dateFrom: desde,
-    dateTo: hasta,
-  });
-  if (r.status !== 200) {
-    console.warn(`Equipo ${teamId}: HTTP ${r.status}, se usa solo el prior de liga.`);
-    ctx.fallos.set("equipo:" + key, true);
-    return { ...STATS_VACIAS };
+// Las de todos los equipos de una liga, con las listas que ya bajaron
+// obtenerPriorLiga y obtenerPromedioLiga: no piden nada, y se recalculan (y
+// guardan en D1) solo cuando cambia alguna de las dos. Como mucho un ajuste por
+// pasada y nunca en la misma que una respuesta grande (leerla ya gasta casi la
+// mitad de la CPU): lo que no cabe espera al minuto siguiente. En frío, recién
+// creado el isolate, un ajuste de la Championship cuesta unos 4 ms; ya
+// compilado, unos 0.2.
+async function obtenerFuerzasLiga(ctx, codigo) {
+  const promedio = await obtenerPromedioLiga(ctx, codigo);
+  const season = temporadaActual(ctx.reloj, codigo);
+  const previa = listaVigente(ctx, codigo + ":previa", season - 1) || {};
+  const actual = listaVigente(ctx, codigo + ":actual", season) || {};
+  const version = `${previa.actualizado ?? null}|${actual.actualizado ?? null}|${promedio.actualizado ?? null}`;
+  const guardadas = ctx.cache.get("fuerzas", codigo);
+  if (guardadas && guardadas.version === version) return guardadas;
+  if (ctx.api.bytes > UMBRAL_GRANDE || ctx.api.pesada) {
+    throw new SinPresupuesto("el ajuste de fuerzas va en la pasada siguiente");
   }
-  // la API no garantiza el orden: se ordena aquí y se toman los N más recientes
-  const matches = (r.cuerpo.matches || []).slice().sort(porFecha).slice(-MAX_PARTIDOS_EQUIPO);
-  const s = { gf_local: 0, gc_local: 0, n_local: 0, gf_visita: 0, gc_visita: 0, n_visita: 0 };
-  for (const m of matches) {
-    const ft = (m.score || {}).fullTime || {};
-    const gl = ft.home, gv = ft.away;
-    if (gl == null || gv == null) continue;
-    if ((m.homeTeam || {}).id === teamId) {
-      s.gf_local += gl; s.gc_local += gv; s.n_local += 1;
-    } else {
-      s.gf_visita += gv; s.gc_visita += gl; s.n_visita += 1;
-    }
-  }
-  s.actualizado = ctx.ahoraIso();
-  ctx.cache.poner("equipos", key, s);
-  return s;
+  ctx.api.pesada = true;
+  const fuerzas = ajustarFuerzas(previa.partidos || [], actual.partidos || [], promedio);
+  fuerzas.version = version;
+  ctx.cache.poner("fuerzas", codigo, fuerzas);
+  return fuerzas;
 }
 
 // ==========================================
@@ -251,7 +270,7 @@ async function historialChampions(ctx, teamId, factor) {
   return sumarHistorial(entradas, teamId, factor, (rival) => niveles.get(rival));
 }
 
-async function fuerzasChampions(ctx, teamId, enCasa) {
+async function fuerzasChampions(ctx, teamId) {
   const liga = await ligaDomestica(ctx, teamId);
   const factor = FACTOR_LIGA[liga] ?? FACTOR_OTRA_LIGA;
   const h = await historialChampions(ctx, teamId, factor);
@@ -261,9 +280,7 @@ async function fuerzasChampions(ctx, teamId, enCasa) {
     return { liga: null, nombre_liga: null, factor: FACTOR_OTRA_LIGA, ataque: 1.0, defensa: 1.0, muestra: 0,
       ...historial };
   }
-  const s = await obtenerStatsEquipo(ctx, teamId, liga);
-  const prom = await obtenerPromedioLiga(ctx, liga);
-  const f = fuerzasDesdeLiga(s, prom, enCasa);
+  const f = fuerzasDesdeLiga(fuerzaEquipo(await obtenerFuerzasLiga(ctx, liga), teamId));
   const nombre = Object.keys(LIGAS).find((k) => LIGAS[k] === liga) ?? liga;
   return { liga, nombre_liga: nombre, factor, ...f, ...historial };
 }
@@ -471,24 +488,21 @@ function construirDebug(ctx, calendarios, filas) {
 // ¿Se puede calcular este partido sin pedir nada a la API? Mira lo mismo que
 // miran las funciones de arriba antes de pedir. Solo ahorra trabajo: si se
 // equivoca, calcularPartido pide, le salta SinPresupuesto y el partido espera.
+// Las fuerzas no piden nada: salen de las listas de la liga.
 function todoEnCache(ctx, f) {
   const ligaLista = (c) => ligaVigente(ctx, c, ctx.cache.get("ligas", c)) || ctx.fallos.has("liga:" + c);
-  const equipoListo = (id, c) => {
-    const e = ctx.cache.get("equipos", `${id}:${c}`);
-    return Boolean(e && ctx.vigente(e.actualizado, ctx.aj.diasValidezEquipo)) || ctx.fallos.has(`equipo:${id}:${c}`);
-  };
   const ligaConocida = (id) => {
     const e = ctx.cache.get("liga_equipo", String(id));
     return Boolean(e && ctx.vigente(e.actualizado, e.fallo ? 1 : DIAS_VALIDEZ_LIGA_EQUIPO));
   };
   if (!ligaLista(f.liga)) return false;
-  if (!CODIGOS_TORNEO.has(f.liga)) return equipoListo(f.local_id, f.liga) && equipoListo(f.visita_id, f.liga);
+  if (!CODIGOS_TORNEO.has(f.liga)) return true;
   // la liga de cada rival de su historial, que da su nivel
   const entradas = entradasHistorial(ctx);
   return [f.local_id, f.visita_id].every((id) => {
     if (!ligaConocida(id)) return false;
     const e = ctx.cache.get("liga_equipo", String(id));
-    if (e.liga !== null && !(equipoListo(id, e.liga) && ligaLista(e.liga))) return false;
+    if (e.liga !== null && !ligaLista(e.liga)) return false;
     return entradas.every((x) => (((x && x.historial) || {})[String(id)] || []).every(([rival]) => ligaConocida(rival)));
   });
 }
@@ -499,8 +513,8 @@ async function calcularPartido(ctx, f) {
   const extra = {};
   let xgLocal, xgVisita, muestraLocal, muestraVisita;
   if (CODIGOS_TORNEO.has(codigo)) {
-    const fl = await fuerzasChampions(ctx, f.local_id, true);
-    const fv = await fuerzasChampions(ctx, f.visita_id, false);
+    const fl = await fuerzasChampions(ctx, f.local_id);
+    const fv = await fuerzasChampions(ctx, f.visita_id);
     [xgLocal, xgVisita] = calcularXgChampions(fl, fv, promedioLiga);
     muestraLocal = fl.muestra; muestraVisita = fv.muestra;
     // de qué liga sale cada equipo, con qué nivel y qué dice su historial en la
@@ -509,15 +523,15 @@ async function calcularPartido(ctx, f) {
       ataque_cl: redondear(x.ataque_cl, 2), defensa_cl: redondear(x.defensa_cl, 2) });
     extra.champions = { local: lado(fl), visita: lado(fv) };
   } else {
-    const sl = await obtenerStatsEquipo(ctx, f.local_id, codigo);
-    const sv = await obtenerStatsEquipo(ctx, f.visita_id, codigo);
-    [xgLocal, xgVisita] = calcularXgPartido(sl, sv, promedioLiga);
-    muestraLocal = sl.n_local; muestraVisita = sv.n_visita;
+    const fuerzas = await obtenerFuerzasLiga(ctx, codigo);
+    const fl = fuerzaEquipo(fuerzas, f.local_id), fv = fuerzaEquipo(fuerzas, f.visita_id);
+    [xgLocal, xgVisita] = calcularXgPartido(fl, fv, promedioLiga);
+    muestraLocal = fl.partidos; muestraVisita = fv.partidos;
   }
   return {
     ...JSON.parse(f.base),
     xg_local: xgLocal, xg_visita: xgVisita,
-    // cuántos partidos reales hay detrás de cada lado
+    // cuántos partidos de liga (esta temporada y la anterior) hay detrás de cada equipo
     muestra_local: muestraLocal,
     muestra_visita: muestraVisita,
     calculado: ctx.ahoraIso(),
