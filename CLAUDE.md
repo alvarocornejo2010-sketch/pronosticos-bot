@@ -64,60 +64,84 @@ suspendería a ambos.
 `{{ }}`: es un shell estático con el CSS y el JS en línea que se pinta entero en
 el cliente sondeando `/api/estado` (cada 4s mientras hay cálculo en curso, cada
 30s el resto del tiempo). No hay `static/`, ni build, ni dependencias de JS; de
-fuera solo llegan la fuente Archivo (Google Fonts, con fallback del sistema) y
-los escudos (URLs de football-data.org). Al tocar la web se trabaja sobre las
-funciones `pintar*` y `html*` del `<script>`, no sobre bucles de plantilla. Cada
+fuera solo llegan las fuentes Saira y Figtree (Google Fonts, con fallback del
+sistema) y los escudos (URLs de football-data.org). Al tocar la web se trabaja
+sobre las funciones `pintar*` y `html*` del `<script>`, no sobre bucles de
+plantilla. Ojo al probar en local: fuera del modo debug, Flask guarda la
+plantilla compilada y no ve los cambios de `index.html` hasta reiniciar. Cada
 zona guarda una "huella" de lo último que pintó y solo toca el DOM si cambió
 (`pintarBloques` lo hace bloque a bloque en la lista central): sin eso la tabla
 parpadearía y perdería el scroll en cada sondeo. Los nombres de equipo vienen de
 football-data.org, así que todo lo que entra pasa por `esc()`.
 
-**Interfaz: una terminal a pantalla completa.** El objetivo es llenar la
-pantalla en vez de dejar márgenes vacíos:
+**Interfaz: marcador de estadio de noche (oct 2026).** Grande y legible, sin
+márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondeados:
 
-- Escritorio (≥1180px): tres columnas de alto fijo. Izquierda: Competiciones
-  (con la media de goles que usa el modelo en cada liga), Calendario y "Cómo
-  leer la tabla". Centro: tira de fechas + tabla. Derecha: Mapa de la ventana
-  (una casilla por partido con la sigla del favorito y su %), Confianza del
-  favorito (histograma) y Fiabilidad medida (`/api/validacion`). Arriba,
-  buscador (`/` lo enfoca, Esc lo limpia) y cinta de próximos partidos; abajo,
-  barra de estado. Entre 880 y 1179px los dos laterales se apilan en una sola
-  columna. En móvil, una columna con pestañas fijas abajo: Partidos / Panorama /
-  Ligas y fechas.
+- Escritorio (≥1180px): banda del marcador arriba (marca, buscador —`/` lo
+  enfoca, Esc lo limpia— y los 10 próximos partidos como tarjetas con escudos,
+  cuenta atrás y la casilla dorada del favorito). Debajo, tres tableros de alto
+  fijo. Izquierda: Ligas (insignia con la sigla, media de goles que usa el
+  modelo y recuento) y Fiabilidad medida (`/api/validacion`, con selector
+  1X2 / +2.5 / Ambos). Centro: tira de días + tabla. Derecha: Los más claros
+  (los 8 favoritos más fuertes de la semana; un clic abre el partido) y
+  Confianza del favorito (histograma). Abajo, barra de estado. Entre 880 y
+  1179px los laterales se apilan en una sola columna. En móvil, una columna con
+  pestañas fijas abajo: Partidos / Panorama / Ligas; la cabecera no es pegajosa
+  (se va al bajar y las cabeceras de grupo se anclan arriba del todo).
+- Un solo calendario: la tira de días. Primera tarjeta "Semana" (o "Todas" en
+  una liga) y luego un día por tarjeta, con su recuento y una barrita por
+  partido coloreada por la fuerza del favorito. Antes había además un
+  calendario mensual a la izquierda y un "mapa de la ventana" por días a la
+  derecha: se quitaron por repetir lo mismo. "Cómo leer la tabla" también se
+  quitó: cada cabecera de columna lo explica en un tooltip.
 - La tabla responde al ancho del panel central (container query `centro`), no
-  al de la ventana: <640px compacta (equipos apilados + 1 X 2), ≥640px tabla,
-  ≥800px añade 1X/X2/12, goles esperados y muestra, ≥960px más de 2.5 y ambos
-  marcan, ≥1150px la barra de reparto. Al abrir un partido sale el detalle, con
-  los mercados de goles (histograma de goles totales, más/menos 1.5-3.5, ambos
-  marcan, porterías a cero, tres marcadores) y una nota con lo que mide su liga.
-  El panel Fiabilidad tiene un selector 1X2 / +2.5 / Ambos.
-  La columna Liga solo aparece en las vistas que mezclan ligas.
+  al de la ventana. Las columnas entran por prioridad: <640px compacta (equipos
+  apilados + 1 X 2), ≥640px tabla con 1 X 2, ≥780px más de 2.5 y ambos marcan,
+  ≥940px 1X/X2/12, ≥1080px goles esperados y muestra, ≥1280px la barra de
+  reparto. Al abrir un partido sale el detalle, con los mercados de goles
+  (histograma de goles totales, más/menos 1.5-3.5, ambos marcan, porterías a
+  cero, tres marcadores) y una nota con lo que mide su liga. La columna Liga
+  solo aparece en las vistas que mezclan ligas.
 - Los % de 1/X/2 se redondean por resto mayor para que sumen 100, y la doble
   oportunidad se suma de esos mismos enteros: lo que se lee, cuadra. Igual el
   histograma de goles; "menos de" y "ambos marcan: no" se restan del número ya
-  redondeado.
+  redondeado. La casilla de los próximos y la de los más claros usan el mismo
+  entero que la tabla (`pctFavorito`).
 - Rutas por hash: `#/`, `#/semana`, `#/dia/2026-10-10`, `#/liga/PD`,
-  `#/liga/PD/2026-10-10`. `#/` es toda la ventana en escritorio y el primer día
+  `#/liga/PD/2026-10-10`. `#/` es toda la semana en escritorio y el primer día
   en móvil.
-- Color: la rampa arena es secuencial y está reservada a la probabilidad
-  (celdas 1/X/2, mapa, cinta); el calendario cuenta partidos con una rampa neutra
-  aparte. Los tonos de liga son los 8 de la paleta oscura de referencia del
-  skill dataviz, validados por pares vecinos en el orden fijo PD, PL, FL1, BL1,
-  SA, DED, PPL, ELC (`ORDEN_LIGAS`): cada vecino se separa al menos ΔE 19 en
-  visión normal y 8.7 con daltonismo. La novena, BSA, va en gris rayado
-  (`--liga-BSA`): la paleta validada tiene 8 tonos y un noveno inventado no
-  pasaría la prueba; el rayado la separa del gris liso de "Todas". Pares que no son vecinos se parecen mucho
-  (LaLiga rojo y Bundesliga naranja, ΔE ≈ 7; Bundesliga y Eredivisie ámbar,
-  ΔE ≈ 11) y solo funcionan porque nunca salen juntos: si cambia el orden o se
-  añade una liga, hay que volver a validar la paleta. Aun así la liga la
-  identifica la sigla (ESP, ENG, FRA, ALE, ITA, NED, POR, EN2, BRA) y no el
-  color solo, y ningún texto va en color de liga.
+- Tipografía: Saira (marca, títulos y todos los números) y Figtree (nombres y
+  textos), de Google Fonts. Las dos tienen cifras tabulares, comprobadas en el
+  navegador: las columnas de números no bailan.
+- Redondeo con jerarquía: tableros 20px, tarjetas 14, controles 10, celdas 8 y
+  píldoras redondas. Sin sombras ni degradados de adorno.
+- Color: el oro es la probabilidad y nada más lo usa. La rampa es de un solo
+  tono ámbar, 8 tramos (`RAMPA`), validada con el modo `--ordinal` del script
+  de dataviz: luminosidad monótona, saltos ≥ 0.06, el tramo más bajo ≥ 2:1
+  sobre el tablero y sobre el hover, tono que varía 11°. Tinta blanca en los
+  tres primeros tramos y oscura en el resto, todas ≥ 4.8:1. La rampa anterior
+  (arena oliva) no pasaba ese validador: dos tramos casi iguales, el más bajo a
+  1.15:1 del fondo y 53° de tono. El blanco marca lo seleccionado (día, liga,
+  orden).
+- Ligas: insignia con la sigla dentro (ESP, ENG, FRA, ALE, ITA, NED, POR, EN2,
+  BRA) y el tono de la liga de fondo; tinta oscura o blanca según el tono, todas
+  ≥ 4.8:1. Como la sigla va siempre dentro, las insignias pueden ir mezcladas
+  (tabla, próximos, más claros). Los tonos son los 8 de la paleta oscura de
+  referencia del skill dataviz, validados por pares vecinos en el orden fijo
+  PD, PL, FL1, BL1, SA, DED, PPL, ELC (`ORDEN_LIGAS`): cada vecino se separa al
+  menos ΔE 19 en visión normal y 8.7 con daltonismo. La novena, BSA, va en gris
+  rayado (`--liga-BSA`): la paleta validada tiene 8 tonos y un noveno inventado
+  no pasaría la prueba. Pares que no son vecinos se parecen mucho (LaLiga rojo y
+  Bundesliga naranja, ΔE ≈ 7; Bundesliga y Eredivisie ámbar, ΔE ≈ 11): si cambia
+  el orden o se añade una liga, hay que volver a validar la paleta. Ningún texto
+  va en color de liga.
 - Escudos y nombres cortos: `_ficha_base` añade `local_corto`, `local_sigla` y
   `local_escudo` (y los de visita) sacados de la misma respuesta del calendario:
   cero peticiones extra. `_escudo` solo deja pasar URLs https; si una imagen no
   carga, la web pinta un monograma, y sin esos campos abrevia el nombre largo.
-- Logo "Casilla": tres casillas 1 X 2 con el favorito encendido. El mismo SVG va
-  en la cabecera y como favicon (data URI del `<link rel="icon">`).
+- Logo "Casilla": tres casillas 1 X 2 con el favorito encendido, en tres tramos
+  de la rampa (#ffd24c, #a18047, #594d39). El mismo SVG va en la cabecera y
+  como favicon (data URI del `<link rel="icon">`).
 
 **Endpoints:** `/` (web), `/api/estado`, `/api/ligas` (qué ancla y qué media usa
 cada liga), `/salud`, `/actualizar?token=...&forzar=1`,
@@ -131,7 +155,8 @@ después de arrancar y que paga el coste completo de API (~2 peticiones/equipo)
 porque la caché está vacía; las pasadas siguientes continúan cada 5 min
 mientras queden partidos pendientes. Con 9 ligas una semana normal son unas
 200 peticiones: 5 o 6 pasadas de 40, y la ventana tarda del orden de 50 min
-en llenarse entera (los partidos más cercanos salen primero). `/actualizar?token=...&forzar=1` no acelera
+en llenarse entera (los partidos más cercanos salen primero).
+`/actualizar?token=...&forzar=1` no acelera
 esto: sirve para rehacer una pasada antes de `MIN_MINUTOS_ACTUALIZACION`
 (25 min) y para volver a bajar el calendario ignorando la caché.
 
