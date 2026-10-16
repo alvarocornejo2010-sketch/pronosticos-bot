@@ -280,6 +280,7 @@ function htmlDetalle(p) {
     + dato("Goles esperados", f2(p.xg_local) + " – " + f2(p.xg_visita))
     + dato("Muestra", muestraTxt)
     + (ch ? dato("Nivel de liga", htmlNivelChampions(p)) : "")
+    + (ch && ch.local && ch.local.partidos_cl !== undefined ? dato("En la Champions, frente a lo esperado", htmlHistorialChampions(p)) : "")
     + (conGoles(p) ? htmlDetalleGoles(p, dato) : "")
     + '</dl>' + (ch ? htmlAvisoChampions(p, m) : aviso) + (ch ? htmlNotaChampions() : "")
     + (conGoles(p) ? htmlNotaGoles(p) : "") + '</div>';
@@ -295,13 +296,32 @@ function htmlNivelChampions(p) {
   return uno("local") + ", " + uno("visita");
 }
 
+// Un multiplicador como porcentaje frente a lo esperado: 1.18 -> "+18 %", 0.85 -> "−15 %".
+function frenteAEsperado(x) {
+  const v = Math.round((Number(x) - 1) * 100);
+  return (v > 0 ? "+" : v < 0 ? "−" : "±") + Math.abs(v) + " %";
+}
+
+/** El historial de cada equipo en la Champions (esta temporada y la anterior), uno por línea. */
+function htmlHistorialChampions(p) {
+  const uno = (lado) => {
+    const c = p.champions[lado] || {};
+    const n = c.partidos_cl || 0;
+    return esc(cortoDe(p, lado)) + ": "
+      + (n ? n + " partido" + (n === 1 ? "" : "s") + ', marca <span class="nw">' + frenteAEsperado(c.ataque_cl)
+        + '</span> y encaja <span class="nw">' + frenteAEsperado(c.defensa_cl) + '</span>' : "sin partidos");
+  };
+  return uno("local") + "<br>" + uno("visita");
+}
+
 function htmlAvisoChampions(p, m) {
   const sinLiga = ["local", "visita"].filter(l => !(p.champions[l] || {}).liga);
   if (sinLiga.length) {
     const nombres = sinLiga.map(l => cortoDe(p, l)).join(" y ");
     const factor = Number(p.champions[sinLiga[0]].factor).toFixed(2);
     return '<p class="aviso">' + ICONO_AVISO + '<span>' + esc(nombres) + (sinLiga.length > 1 ? " juegan" : " juega")
-      + ' en una liga que no está en el plan: sin datos de su liga, cuenta como un equipo medio de nivel ×' + factor + '.</span></p>';
+      + ' en una liga que no está en el plan: sin datos de su liga, cuenta como un equipo medio de nivel ×' + factor
+      + ', corregido con lo que haya jugado en la Champions.</span></p>';
   }
   return m.min < 4
     ? '<p class="aviso">' + ICONO_AVISO + '<span>Solo ' + m.min + ' partido' + (m.min === 1 ? "" : "s")
@@ -311,8 +331,10 @@ function htmlAvisoChampions(p, m) {
 
 function htmlNotaChampions() {
   return '<p class="nota-goles">En la Champions cada equipo se mide en su liga nacional (sus últimos partidos, '
-    + 'atenuados a la mitad) y se ajusta por el nivel de esa liga, medido con los cruces de la Champions 2024/25. '
-    + 'Así acertó un 7 % mejor que no saber nada, con una sola temporada de datos: tómalo como una base.</p>';
+    + 'atenuados), se ajusta por el nivel de esa liga y se corrige con sus partidos de Champions de esta temporada y '
+    + 'la anterior: lo que marcó y encajó frente a lo esperado de un equipo de su liga contra esos mismos rivales. '
+    + 'Medido con cuatro Champions (2022/23 a 2025/26, 628 partidos): acierta un 12 % mejor que no saber nada, y el '
+    + 'historial suma 2 puntos a lo que daba la liga sola.</p>';
 }
 
 function htmlDetalleGoles(p, dato) {

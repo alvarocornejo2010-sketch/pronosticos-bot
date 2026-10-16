@@ -51,6 +51,7 @@ const out = {
   constantes: {
     LIGAS: c.LIGAS, TORNEOS: c.TORNEOS, FACTOR_LIGA: c.FACTOR_LIGA, FACTOR_OTRA_LIGA: c.FACTOR_OTRA_LIGA,
     EXPONENTE_FUERZA_CHAMPIONS: c.EXPONENTE_FUERZA_CHAMPIONS, ESCALA_CHAMPIONS: c.ESCALA_CHAMPIONS,
+    K_HISTORIAL_CHAMPIONS: c.K_HISTORIAL_CHAMPIONS,
     DIAS_VALIDEZ_LIGA_EQUIPO: c.DIAS_VALIDEZ_LIGA_EQUIPO, DIAS_VALIDEZ_LIGA: c.DIAS_VALIDEZ_LIGA,
     HORAS_VALIDEZ_PREDICCION: c.HORAS_VALIDEZ_PREDICCION, VENTANA_DIAS: c.VENTANA_DIAS,
     MAX_PARTIDOS_EQUIPO: c.MAX_PARTIDOS_EQUIPO, PSEUDO_PARTIDOS: c.PSEUDO_PARTIDOS, K_LIGA: c.K_LIGA,
@@ -67,11 +68,21 @@ const out = {
     return { xg: [xl, xv], ...m.calcularPoisson(xl, xv), ...m.mercadosDeGoles(xl, xv, prom) };
   }),
   sueltos: casos.sueltos.map(({ gl, gv, prom }) => ({ ...m.calcularPoisson(gl, gv), ...m.mercadosDeGoles(gl, gv, prom) })),
-  champions: casos.champions.map(({ local, visita, cl }) => {
-    const f = (x, enCasa) => x.liga === null
-      ? { liga: null, nombre_liga: null, factor: c.FACTOR_OTRA_LIGA, ataque: 1.0, defensa: 1.0, muestra: 0 }
-      : { liga: x.liga, nombre_liga: Object.keys(c.LIGAS).find((k) => c.LIGAS[k] === x.liga),
-          factor: c.FACTOR_LIGA[x.liga] ?? c.FACTOR_OTRA_LIGA, ...m.fuerzasDesdeLiga(x.stats, x.prom, enCasa) };
+  champions: casos.champions.map(({ local, visita, cl, previa, rivales }) => {
+    // lo mismo que fuerzasChampions en actualizacion.js, con las ligas ya resueltas
+    const factorDe = (rival) => c.FACTOR_LIGA[rivales[rival]] ?? c.FACTOR_OTRA_LIGA;
+    const f = (x, enCasa) => {
+      const factor = c.FACTOR_LIGA[x.liga] ?? c.FACTOR_OTRA_LIGA;
+      const entradas = [{ ...cl, historial: { [x.id]: x.hist_actual } },
+        previa && { ...previa, historial: { [x.id]: x.hist_previa } }];
+      const h = m.sumarHistorial(entradas, x.id, factor, factorDe);
+      const [ataqueCl, defensaCl] = m.multiplicadoresHistorial(h);
+      const historial = { partidos_cl: h.partidos, ataque_cl: ataqueCl, defensa_cl: defensaCl };
+      return x.liga === null
+        ? { liga: null, nombre_liga: null, factor: c.FACTOR_OTRA_LIGA, ataque: 1.0, defensa: 1.0, muestra: 0, ...historial }
+        : { liga: x.liga, nombre_liga: Object.keys(c.LIGAS).find((k) => c.LIGAS[k] === x.liga),
+            factor, ...m.fuerzasDesdeLiga(x.stats, x.prom, enCasa), ...historial };
+    };
     const fl = f(local, true), fv = f(visita, false);
     return { local: fl, visita: fv, xg: m.calcularXgChampions(fl, fv, cl) };
   }),
@@ -126,9 +137,16 @@ def _casos(rnd):
                 {"gl": 1.3, "gv": 1.3, "prom": {"avg_local": 1.3, "avg_visita": 1.3}}]
     ligas = list(app.FACTOR_LIGA) + ["ELC", "BSA", None]
     champions = []
-    for _ in range(N_CHAMPIONS):
-        lado = lambda: {"liga": rnd.choice(ligas), "stats": _stats(rnd), "prom": _prom(rnd)}
-        champions.append({"local": lado(), "visita": lado(), "cl": _prom(rnd)})
+    for k in range(N_CHAMPIONS):
+        # rivales de su historial en la Champions, cada uno de una liga
+        rivales = {str(10 ** 6 + 40 * k + j): rnd.choice(ligas) for j in range(rnd.choice((1, 8, 30)))}
+        def hist():
+            return [[int(rnd.choice(list(rivales))), rnd.choice((0, 1)), rnd.randint(0, 5), rnd.randint(0, 4)]
+                    for _ in range(rnd.choice((0, 0, 1, 4, 8, 12)))]
+        lado = lambda tid: {"id": tid, "liga": rnd.choice(ligas), "stats": _stats(rnd), "prom": _prom(rnd),
+                            "hist_actual": hist(), "hist_previa": hist()}
+        champions.append({"local": lado(2 * k), "visita": lado(2 * k + 1), "cl": _prom(rnd),
+                          "previa": _prom(rnd) if rnd.random() < 0.8 else None, "rivales": rivales})
 
     validaciones = []
     for i, (n_equipos, jornadas_previa, jornadas_ultima) in enumerate(((20, 38, 38), (18, 34, 34), (20, 8, 38), (20, 38, 6))):
@@ -156,15 +174,22 @@ def _python(casos):
     hoy = app.ahora().isoformat()
     for k, c in enumerate(casos["champions"]):
         # fuerzas_champions de verdad, con la caché ya llena: no pide nada a la API
-        def fuerzas(tid, x, en_casa):
+        # y su historial en la Champions, con la liga de cada rival ya en la caché
+        def fuerzas(x, en_casa):
+            tid = x["id"]
             cache = {"liga_equipo": {str(tid): {"liga": x["liga"], "actualizado": hoy}},
-                     "equipos": {}, "ligas": {}, "fixtures": {}}
+                     "equipos": {}, "ligas": {}, "priors": {}, "fixtures": {}}
+            for rival, liga in c["rivales"].items():
+                cache["liga_equipo"][rival] = {"liga": liga, "actualizado": hoy}
             if x["liga"]:
                 cache["equipos"][f"{tid}:{x['liga']}"] = dict(x["stats"], actualizado=hoy)
                 cache["ligas"][x["liga"]] = dict(x["prom"], actualizado=hoy)
+            cache["ligas"]["CL"] = dict(c["cl"], historial={str(tid): x["hist_actual"]}, actualizado=hoy)
+            if c["previa"]:
+                cache["priors"]["CL"] = dict(c["previa"], historial={str(tid): x["hist_previa"]}, actualizado=hoy)
             return app.fuerzas_champions(tid, en_casa, cache)
-        fl = fuerzas(2 * k, c["local"], True)
-        fv = fuerzas(2 * k + 1, c["visita"], False)
+        fl = fuerzas(c["local"], True)
+        fv = fuerzas(c["visita"], False)
         champions.append({"local": fl, "visita": fv, "xg": list(app.calcular_xg_champions(fl, fv, c["cl"]))})
 
     vals = []
@@ -178,7 +203,7 @@ def _python(casos):
         validacion._cargar_temporada = original
 
     constantes = {k: getattr(app, k) for k in (
-        "LIGAS", "TORNEOS", "FACTOR_LIGA", "FACTOR_OTRA_LIGA", "EXPONENTE_FUERZA_CHAMPIONS",
+        "LIGAS", "TORNEOS", "FACTOR_LIGA", "FACTOR_OTRA_LIGA", "EXPONENTE_FUERZA_CHAMPIONS", "K_HISTORIAL_CHAMPIONS",
         "DIAS_VALIDEZ_LIGA_EQUIPO", "DIAS_VALIDEZ_LIGA", "HORAS_VALIDEZ_PREDICCION", "VENTANA_DIAS",
         "MAX_PARTIDOS_EQUIPO", "PSEUDO_PARTIDOS", "K_LIGA", "PRIOR_AVG_LOCAL", "PRIOR_AVG_VISITA",
         "DIAS_VALIDEZ_PRIOR", "LIMITE_GOLES", "ENCOGER_GOLES", "DIAS_SEMANA", "DIAS_VALIDEZ_EQUIPO",

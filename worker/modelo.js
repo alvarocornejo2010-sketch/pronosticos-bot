@@ -7,7 +7,8 @@
 // miles de casos: si cambias algo aquí, cámbialo también en app.py.
 
 import {
-  ENCOGER_GOLES, ESCALA_CHAMPIONS, EXPONENTE_FUERZA_CHAMPIONS, LIMITE_GOLES, PSEUDO_PARTIDOS,
+  ENCOGER_GOLES, ESCALA_CHAMPIONS, EXPONENTE_FUERZA_CHAMPIONS, K_HISTORIAL_CHAMPIONS, LIMITE_GOLES,
+  PSEUDO_PARTIDOS,
 } from "./config.js";
 
 // ------------------------------------------
@@ -254,12 +255,48 @@ export function fuerzasDesdeLiga(stats, promedio, enCasa) {
   return { ataque: ataque ** b, defensa: defensa ** b, muestra: n };
 }
 
+// Historial en la Champions (historial_champions en app.py): lo que un equipo
+// marcó y encajó en sus partidos de Champions de esta temporada y la anterior,
+// y lo que se esperaba de él: la media de la Champions de esa temporada por la
+// escala, por su nivel de liga y entre el del rival (al revés para lo encajado).
+// entradas: [la de esta temporada, la de la anterior], con avg_local, avg_visita
+// e historial; factorDe(rival): el nivel de la liga del rival.
+export function sumarHistorial(entradas, teamId, factor, factorDe) {
+  let gf = 0, gc = 0, esperadoF = 0, esperadoC = 0, n = 0;
+  for (const entrada of entradas) {
+    if (!entrada) continue;
+    const muL = entrada.avg_local, muV = entrada.avg_visita;
+    for (const [rival, enCasa, aFavor, enContra] of (entrada.historial || {})[String(teamId)] || []) {
+      const fRival = factorDe(rival);
+      if (enCasa) {
+        esperadoF += muL * ESCALA_CHAMPIONS[0] * factor / fRival;
+        esperadoC += muV * ESCALA_CHAMPIONS[1] * fRival / factor;
+      } else {
+        esperadoF += muV * ESCALA_CHAMPIONS[1] * factor / fRival;
+        esperadoC += muL * ESCALA_CHAMPIONS[0] * fRival / factor;
+      }
+      gf += aFavor;
+      gc += enContra;
+      n += 1;
+    }
+  }
+  return { partidos: n, gf, gc, esperado_f: esperadoF, esperado_c: esperadoC };
+}
+
+// [ataque, defensa] que aporta el historial: goles frente a lo esperado,
+// encogidos hacia 1 con k goles de pseudo-cuenta. Sin partidos, [1, 1].
+export function multiplicadoresHistorial(h, k = K_HISTORIAL_CHAMPIONS) {
+  return [(h.gf + k) / (h.esperado_f + k), (h.gc + k) / (h.esperado_c + k)];
+}
+
 // Goles esperados de un partido de Champions: ataque de uno por defensa del
-// otro por la media de la Champions, y el nivel de cada liga.
+// otro por la media de la Champions, el nivel de cada liga y el historial.
 export function calcularXgChampions(local, visita, promedioCl) {
   const xgLocal = promedioCl.avg_local * ESCALA_CHAMPIONS[0]
-    * local.ataque * visita.defensa * local.factor / visita.factor;
+    * local.ataque * visita.defensa * local.factor / visita.factor
+    * local.ataque_cl * visita.defensa_cl;
   const xgVisita = promedioCl.avg_visita * ESCALA_CHAMPIONS[1]
-    * visita.ataque * local.defensa * visita.factor / local.factor;
+    * visita.ataque * local.defensa * visita.factor / local.factor
+    * visita.ataque_cl * local.defensa_cl;
   return [redondear(xgLocal, 2), redondear(xgVisita, 2)];
 }

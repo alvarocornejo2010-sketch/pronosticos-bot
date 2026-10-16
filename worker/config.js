@@ -22,10 +22,11 @@ export const TORNEOS = {
 export const COMPETICIONES = { ...LIGAS, ...TORNEOS };
 export const CODIGOS_TORNEO = new Set(Object.values(TORNEOS));
 
-export const FACTOR_LIGA = { PL: 1.33, PD: 1.16, FL1: 1.13, SA: 1.10, BL1: 1.03, PPL: 0.93, DED: 0.91 };
-export const FACTOR_OTRA_LIGA = 0.72;
-export const EXPONENTE_FUERZA_CHAMPIONS = 0.5;
-export const ESCALA_CHAMPIONS = [0.91, 0.92];
+export const FACTOR_LIGA = { PL: 1.28, PD: 1.09, FL1: 1.12, SA: 1.03, BL1: 1.06, PPL: 1.00, DED: 0.83 };
+export const FACTOR_OTRA_LIGA = 0.76;
+export const EXPONENTE_FUERZA_CHAMPIONS = 0.39;
+export const ESCALA_CHAMPIONS = [0.96, 0.97];
+export const K_HISTORIAL_CHAMPIONS = 31;
 export const DIAS_VALIDEZ_LIGA_EQUIPO = 30;
 
 export const DIAS_VALIDEZ_LIGA = 7;

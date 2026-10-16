@@ -14,7 +14,8 @@ import {
   LIGAS_ANO_NATURAL, MAX_PARTIDOS_EQUIPO, PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA, VENTANA_DIAS,
 } from "./config.js";
 import {
-  calcularPoisson, calcularXgChampions, calcularXgPartido, fuerzasDesdeLiga, mercadosDeGoles, redondear,
+  calcularPoisson, calcularXgChampions, calcularXgPartido, fuerzasDesdeLiga, mercadosDeGoles,
+  multiplicadoresHistorial, redondear, sumarHistorial,
 } from "./modelo.js";
 import { SinPresupuesto } from "./api.js";
 import { diaSemana, diasEntre, sumarDias } from "./tiempo.js";
@@ -54,25 +55,54 @@ export function temporadaActual(reloj, codigoLiga = null) {
   return mes >= 7 ? anio : anio - 1;
 }
 
+// Goles a los 90 minutos (goles_90 en app.py): con prórroga o penaltis,
+// fullTime es el resultado final y manda regularTime. En liga no cambia nada.
+function goles90(m) {
+  const score = m.score || {};
+  if (score.duration === "EXTRA_TIME" || score.duration === "PENALTY_SHOOTOUT") {
+    const rt = score.regularTime || {};
+    if (rt.home != null && rt.away != null) return [rt.home, rt.away];
+  }
+  const ft = score.fullTime || {};
+  return [ft.home ?? null, ft.away ?? null];
+}
+
 const sumarGoles = (matches) => {
   let gl = 0, gv = 0, n = 0;
   for (const m of matches || []) {
-    const ft = (m.score || {}).fullTime || {};
-    if (ft.home == null || ft.away == null) continue;
-    gl += ft.home; gv += ft.away; n += 1;
+    const [a, b] = goles90(m);
+    if (a == null || b == null) continue;
+    gl += a; gv += b; n += 1;
   }
   return { gl, gv, n };
 };
 
+// {id: [[rival, en casa (1/0), a favor, en contra], ...]}: el historial de un
+// torneo, como historial_de_partidos en app.py.
+function historialDePartidos(matches) {
+  const hist = {};
+  for (const m of matches || []) {
+    const [gl, gv] = goles90(m);
+    const loc = (m.homeTeam || {}).id, vis = (m.awayTeam || {}).id;
+    if (gl == null || gv == null || loc == null || vis == null) continue;
+    (hist[String(loc)] ||= []).push([vis, 1, gl, gv]);
+    (hist[String(vis)] ||= []).push([loc, 0, gv, gl]);
+  }
+  return hist;
+}
+
 async function obtenerPriorLiga(ctx, codigo) {
   const entry = ctx.cache.get("priors", codigo);
-  if (entry && ctx.vigente(entry.actualizado, DIAS_VALIDEZ_PRIOR)) return entry;
+  const season = temporadaActual(ctx.reloj, codigo) - 1;
+  // la temporada también cuenta (en julio la "anterior" pasa a ser otra), y un
+  // torneo guarda además su historial por equipo
+  if (entry && ctx.vigente(entry.actualizado, DIAS_VALIDEZ_PRIOR) && entry.temporada === season
+      && (!CODIGOS_TORNEO.has(codigo) || "historial" in entry)) return entry;
 
   const respaldo = { avg_local: PRIOR_AVG_LOCAL, avg_visita: PRIOR_AVG_VISITA,
     origen: "constante de respaldo", partidos: 0, actualizado: null };
   if (ctx.fallos.has("prior:" + codigo)) return respaldo;
 
-  const season = temporadaActual(ctx.reloj, codigo) - 1;
   const r = await ctx.api.get(`/competitions/${codigo}/matches`, { season, status: "FINISHED" }, { grande: true });
   if (r.status !== 200) {
     console.warn(`Prior ${codigo}: temporada ${season} no disponible (HTTP ${r.status}). Se usa la constante de respaldo.`);
@@ -87,7 +117,8 @@ async function obtenerPriorLiga(ctx, codigo) {
     return respaldo;
   }
   const nueva = { avg_local: gl / n, avg_visita: gv / n, origen: `temporada ${season}`, partidos: n,
-    actualizado: ctx.ahoraIso() };
+    temporada: season, actualizado: ctx.ahoraIso() };
+  if (CODIGOS_TORNEO.has(codigo)) nueva.historial = historialDePartidos(r.cuerpo.matches);
   ctx.cache.poner("priors", codigo, nueva);
   return nueva;
 }
@@ -95,9 +126,13 @@ async function obtenerPriorLiga(ctx, codigo) {
 // ==========================================
 // PROMEDIO DE GOLES POR LIGA
 // ==========================================
+// Si la media de una liga en caché sirve tal cual (un torneo necesita además su historial).
+const ligaVigente = (ctx, codigo, e) => Boolean(e && ctx.vigente(e.actualizado, DIAS_VALIDEZ_LIGA)
+  && (!CODIGOS_TORNEO.has(codigo) || "historial" in e));
+
 export async function obtenerPromedioLiga(ctx, codigo) {
   const entry = ctx.cache.get("ligas", codigo);
-  if (entry && ctx.vigente(entry.actualizado, DIAS_VALIDEZ_LIGA)) return entry;
+  if (ligaVigente(ctx, codigo, entry)) return entry;
   const fallo = ctx.fallos.get("liga:" + codigo);
   if (fallo) return fallo;
 
@@ -121,6 +156,7 @@ export async function obtenerPromedioLiga(ctx, codigo) {
     prior_visita: redondear(prior.avg_visita, 3),
     actualizado: ctx.ahoraIso(),
   };
+  if (CODIGOS_TORNEO.has(codigo)) promedio.historial = historialDePartidos(r.cuerpo.matches);
   ctx.cache.poner("ligas", codigo, promedio);
   return promedio;
 }
@@ -198,16 +234,38 @@ async function ligaDomestica(ctx, teamId) {
   return liga;
 }
 
+// Los partidos de Champions de esta temporada y la anterior de un equipo
+// (historial_champions en app.py). Los bajaron ya obtenerPromedioLiga y
+// obtenerPriorLiga; solo puede costar alguna petición la liga de un rival que
+// aún no esté en la caché.
+const entradasHistorial = (ctx) => [ctx.cache.get("ligas", "CL"), ctx.cache.get("priors", "CL")];
+
+async function historialChampions(ctx, teamId, factor) {
+  const entradas = entradasHistorial(ctx);
+  const niveles = new Map();
+  for (const e of entradas) {
+    for (const [rival] of ((e && e.historial) || {})[String(teamId)] || []) {
+      if (!niveles.has(rival)) niveles.set(rival, FACTOR_LIGA[await ligaDomestica(ctx, rival)] ?? FACTOR_OTRA_LIGA);
+    }
+  }
+  return sumarHistorial(entradas, teamId, factor, (rival) => niveles.get(rival));
+}
+
 async function fuerzasChampions(ctx, teamId, enCasa) {
   const liga = await ligaDomestica(ctx, teamId);
+  const factor = FACTOR_LIGA[liga] ?? FACTOR_OTRA_LIGA;
+  const h = await historialChampions(ctx, teamId, factor);
+  const [ataqueCl, defensaCl] = multiplicadoresHistorial(h);
+  const historial = { partidos_cl: h.partidos, ataque_cl: ataqueCl, defensa_cl: defensaCl };
   if (liga === null) {
-    return { liga: null, nombre_liga: null, factor: FACTOR_OTRA_LIGA, ataque: 1.0, defensa: 1.0, muestra: 0 };
+    return { liga: null, nombre_liga: null, factor: FACTOR_OTRA_LIGA, ataque: 1.0, defensa: 1.0, muestra: 0,
+      ...historial };
   }
   const s = await obtenerStatsEquipo(ctx, teamId, liga);
   const prom = await obtenerPromedioLiga(ctx, liga);
   const f = fuerzasDesdeLiga(s, prom, enCasa);
   const nombre = Object.keys(LIGAS).find((k) => LIGAS[k] === liga) ?? liga;
-  return { liga, nombre_liga: nombre, factor: FACTOR_LIGA[liga] ?? FACTOR_OTRA_LIGA, ...f };
+  return { liga, nombre_liga: nombre, factor, ...f, ...historial };
 }
 
 // ==========================================
@@ -414,20 +472,24 @@ function construirDebug(ctx, calendarios, filas) {
 // miran las funciones de arriba antes de pedir. Solo ahorra trabajo: si se
 // equivoca, calcularPartido pide, le salta SinPresupuesto y el partido espera.
 function todoEnCache(ctx, f) {
-  const ligaLista = (c) => {
-    const e = ctx.cache.get("ligas", c);
-    return Boolean(e && ctx.vigente(e.actualizado, DIAS_VALIDEZ_LIGA)) || ctx.fallos.has("liga:" + c);
-  };
+  const ligaLista = (c) => ligaVigente(ctx, c, ctx.cache.get("ligas", c)) || ctx.fallos.has("liga:" + c);
   const equipoListo = (id, c) => {
     const e = ctx.cache.get("equipos", `${id}:${c}`);
     return Boolean(e && ctx.vigente(e.actualizado, ctx.aj.diasValidezEquipo)) || ctx.fallos.has(`equipo:${id}:${c}`);
   };
+  const ligaConocida = (id) => {
+    const e = ctx.cache.get("liga_equipo", String(id));
+    return Boolean(e && ctx.vigente(e.actualizado, e.fallo ? 1 : DIAS_VALIDEZ_LIGA_EQUIPO));
+  };
   if (!ligaLista(f.liga)) return false;
   if (!CODIGOS_TORNEO.has(f.liga)) return equipoListo(f.local_id, f.liga) && equipoListo(f.visita_id, f.liga);
+  // la liga de cada rival de su historial, que da su nivel
+  const entradas = entradasHistorial(ctx);
   return [f.local_id, f.visita_id].every((id) => {
+    if (!ligaConocida(id)) return false;
     const e = ctx.cache.get("liga_equipo", String(id));
-    if (!e || !ctx.vigente(e.actualizado, e.fallo ? 1 : DIAS_VALIDEZ_LIGA_EQUIPO)) return false;
-    return e.liga === null || (equipoListo(id, e.liga) && ligaLista(e.liga));
+    if (e.liga !== null && !(equipoListo(id, e.liga) && ligaLista(e.liga))) return false;
+    return entradas.every((x) => (((x && x.historial) || {})[String(id)] || []).every(([rival]) => ligaConocida(rival)));
   });
 }
 
@@ -441,8 +503,10 @@ async function calcularPartido(ctx, f) {
     const fv = await fuerzasChampions(ctx, f.visita_id, false);
     [xgLocal, xgVisita] = calcularXgChampions(fl, fv, promedioLiga);
     muestraLocal = fl.muestra; muestraVisita = fv.muestra;
-    // de qué liga sale cada equipo y con qué nivel: la web lo explica
-    const lado = (x) => ({ liga: x.liga, nombre_liga: x.nombre_liga, factor: x.factor });
+    // de qué liga sale cada equipo, con qué nivel y qué dice su historial en la
+    // Champions: la web lo explica
+    const lado = (x) => ({ liga: x.liga, nombre_liga: x.nombre_liga, factor: x.factor, partidos_cl: x.partidos_cl,
+      ataque_cl: redondear(x.ataque_cl, 2), defensa_cl: redondear(x.defensa_cl, 2) });
     extra.champions = { local: lado(fl), visita: lado(fv) };
   } else {
     const sl = await obtenerStatsEquipo(ctx, f.local_id, codigo);

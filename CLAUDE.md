@@ -355,41 +355,73 @@ El modelo de liga no sirve para la Champions: mide a cada equipo con sus
 partidos en la misma competición, y en la Champions son 4 en casa y 4 fuera
 contra rivales de niveles muy distintos; su "media de liga" mezcla al Bayern con
 el campeón de Kazajistán. Por eso la Champions va en `TORNEOS` y no en `LIGAS`,
-con su propio cálculo:
+con su propio cálculo, que junta tres cosas:
 
-- Cada equipo se mide en SU liga nacional (`fuerzas_champions`): los mismos
-  `obtener_stats_equipo` y `obtener_promedio_liga` que sus partidos de liga, así
-  que casi siempre salen de la caché. Su ataque y su defensa relativos a la
-  media de su liga se elevan a `EXPONENTE_FUERZA_CHAMPIONS` (0.5): los grandes
-  arrasan en su liga y su fuerza nacional tomada tal cual exagera.
-- Se ajusta por el nivel de su liga (`FACTOR_LIGA`): PL 1.33, PD 1.16, FL1 1.13,
-  SA 1.10, BL1 1.03, PPL 0.93, DED 0.91, y 0.72 para un equipo de una liga fuera
-  del plan (`FACTOR_OTRA_LIGA`), que cuenta como un equipo medio de ese nivel.
+- **Su liga nacional** (`fuerzas_champions`): los mismos `obtener_stats_equipo`
+  y `obtener_promedio_liga` que sus partidos de liga, así que casi siempre
+  salen de la caché. Su ataque y su defensa relativos a la media de su liga se
+  elevan a `EXPONENTE_FUERZA_CHAMPIONS` (0.39): los grandes arrasan en su liga
+  y su fuerza nacional tomada tal cual exagera.
+- **El nivel de su liga** (`FACTOR_LIGA`): PL 1.28, FL1 1.12, PD 1.09, BL1 1.06,
+  SA 1.03, PPL 1.00, DED 0.83, y 0.76 para un equipo de una liga fuera del plan
+  (`FACTOR_OTRA_LIGA`), que cuenta como un equipo medio de ese nivel.
+- **Su historial en la Champions** (`historial_champions`): lo que marcó y
+  encajó en sus partidos de Champions de esta temporada y la anterior, frente a
+  lo esperado de un equipo de su nivel de liga contra esos mismos rivales
+  (media de la Champions × escala × nivel propio / nivel del rival). Se encoge
+  hacia 1 con `K_HISTORIAL_CHAMPIONS` (31 goles de pseudo-cuenta,
+  `multiplicadores_historial`): con 16 partidos de Champions un equipo pesa casi
+  a medias entre su historial y su liga, y sin partidos queda como estaba. Las
+  dos temporadas pesan igual (medido: la anterior aporta tanto como la actual).
+  Los partidos salen de lo que ya se baja para la media (`historial` en la
+  entrada de la Champions de `ligas` y de `priors`); solo cuesta alguna
+  petición la liga de un rival de la temporada pasada que no esté en caché
+  (`liga_domestica`, guardada 30 días): unas pocas al mes.
 - Goles esperados (`calcular_xg_champions`): media de la Champions ×
-  `ESCALA_CHAMPIONS` × ataque propio × defensa rival × nivel propio / nivel
-  rival. Luego, el mismo `calcular_poisson` y `mercados_de_goles` que en liga.
+  `ESCALA_CHAMPIONS` (0.96, 0.97) × ataque propio × defensa rival × nivel propio
+  / nivel rival × historial de ataque propio × historial de defensa rival.
+  Luego, el mismo `calcular_poisson` y `mercados_de_goles` que en liga.
+- Los goles de la Champions se cuentan a los 90 minutos (`goles_90`): con
+  prórroga o penaltis, `fullTime` es el resultado final (en la v4, con la
+  tanda sumada) y manda `regularTime`. Afecta a la media y al historial; en
+  liga no cambia nada.
 - De qué liga es cada equipo (`liga_domestica`): primero, gratis, en los
   calendarios de liga ya descargados; si no sale, una petición a `/teams/{id}`
   (`runningCompetitions`). Se guarda 30 días en la caché (`liga_equipo`).
 - Los cruces de eliminatoria aún sin decidir (equipo sin id) no se pintan.
 
-Medido con `afinar_champions.py` sobre la Champions 2024/25 (188 partidos con
-resultado, datos de openfootball; 10 de los 36 equipos venían de ligas fuera del
-plan), con validación cruzada de 5 bloques. Skill del 1X2 frente a "equipo
-medio":
+Medido con `afinar_champions.py` sobre cuatro Champions (2022/23 a 2025/26, 628
+partidos con resultado, de openfootball; las ligas nacionales de 2021/22 a
+2025/26), cada partido predicho solo con lo anterior a su fecha. Skill del 1X2
+frente a "equipo medio", dejando fuera una temporada entera cada vez (con 5
+bloques al azar sale casi igual):
 
 ```
-solo liga nacional                 +3.6%  (-1.1 se)
-solo nivel de liga                 +6.6%  (-1.7 se)
-liga nacional + nivel              +5.9%  (-1.3 se)
-liga nacional atenuada + nivel     +7.1%  (-1.7 se)   <- el de la app
+solo nivel de liga                 +7.4%  (-3.8 se)
+liga nacional atenuada + nivel    +10.2%  (-5.0 se)   <- la app hasta oct 2026
++ historial en la Champions       +12.3%  (-6.0 se)   <- la de ahora
+historial frente a la de antes: -0.0134 ± 0.0037 de Brier (-3.6 se)
 ```
 
-El exponente sale entre 0.44 y 0.59 en los cinco bloques. Es UNA temporada: ninguna
-mejora llega a 2 errores estándar, así que es una base, no una conclusión. La
-fórmula de producción reproduce la del estudio (Brier 0.5367 frente a 0.5369 en
-la muestra). La Champions no entra en la validación de la app (`validacion.py`
-recorre solo `LIGAS`): la web explica el cálculo en el detalle de cada partido.
+El historial gana en las cuatro temporadas por separado (+1.3 a +3.4 puntos de
+skill), y los parámetros salen estables: exponente entre 0.30 y 0.46, K entre
+26 y 36 en los nueve ajustes. En un estudio previo con los mismos partidos se
+probaron otras dos formas de medir el historial: frente a la media de la
+Champions sin mirar a los rivales (+11.3%) y frente a lo que decía el modelo
+completo (+11.5%); la elegida (+12.0% en ese estudio) les ganaba por unos 2 se.
+La fórmula de producción reproduce la del estudio (Brier 0.5392 frente a
+0.5391 en la muestra). Lo esperado del historial usa los niveles y la escala de
+`app.py`, así que se ajustan dando vueltas hasta que no se mueven (la escala
+tarda unas cuantas; los niveles, ninguna).
+
+Ojo con los datos: la Champions 2022/23 de openfootball usa nombres cortos
+("Real Madrid", "Inter", "Sporting CP") y las demás temporadas y las ligas, los
+largos. Sin casarlos (`casar` y `ALIAS` en `afinar_champions.py`), 8 grandes de
+2022/23 contaban como "otra liga" y el historial parecía mejor de lo que es.
+
+La Champions no entra en la validación de la app (`validacion.py` recorre solo
+`LIGAS`): la web explica el cálculo en el detalle de cada partido, con lo que
+dice el historial de cada equipo.
 
 ## Validación
 
@@ -528,9 +560,12 @@ efecto se diluye solo conforme acumulan partidos.
   pareado. No necesita token: baja resultados de openfootball (ver "Más
   temporadas de datos" abajo) y los cachea en `openfootball_cache/`.
 - `afinar_champions.py` estima `FACTOR_LIGA`, `FACTOR_OTRA_LIGA`,
-  `EXPONENTE_FUERZA_CHAMPIONS` y `ESCALA_CHAMPIONS` con la Champions 2024/25 y
-  las ligas nacionales de openfootball, y compara modelos con validación
-  cruzada. Tampoco necesita token.
+  `EXPONENTE_FUERZA_CHAMPIONS`, `ESCALA_CHAMPIONS` y `K_HISTORIAL_CHAMPIONS` con
+  cuatro Champions (2022/23 a 2025/26, del repositorio `champions-league` de
+  openfootball, en formato de texto) y las ligas nacionales de football.json, y
+  compara modelos con validación cruzada y dejando fuera una temporada entera.
+  Usa las funciones de `app.py` (`historial_champions`, `calcular_xg_champions`),
+  no una copia. Tampoco necesita token. Tarda ~1 minuto.
 
 ## Cloudflare: cómo se despliega
 
@@ -582,12 +617,11 @@ Environment).
 
 ## Pendiente (por orden de lo que más mueve la aguja)
 
-- **Champions con más datos:** los niveles de liga salen de una sola temporada
-  (openfootball solo tiene la 2024/25). Con la 2025/26 o más, reajustar con
-  `afinar_champions.py`. Mejoras pensadas: contar también los partidos de
-  Champions y copas de cada equipo (no solo su liga), medir a los equipos de
-  ligas fuera del plan con sus propios partidos, y meter la Champions en la
-  validación de la app.
+- **Champions:** ya junta liga nacional, nivel de liga e historial en la
+  Champions, medido con cuatro temporadas (ver "Champions: cómo se predice").
+  Cada verano, añadir la temporada que termina a `TEMPORADAS_CL` en
+  `afinar_champions.py` y reajustar. Ideas sin probar: contar también las copas
+  nacionales, y meter la Champions en la validación de la app.
 
 - **Championship (y seguramente Brasileirão) casi no aportan:** sus
   pronósticos valen lo que la media de la liga (tabla en "Validación"). La web
