@@ -1525,7 +1525,7 @@ function pintarEstado() {
     + '<span class="punto"></span>' + esc(texto) + (e === "parcial" ? ", faltan " + pend : "") + '</span>';
   if (e === "error") {
     seg += '<span class="err">' + ICONO_AVISO + esc("La última actualización falló: " + (datos.error || "sin detalle")
-      + ". Se ven los números de la pasada anterior.") + '</span>';
+      + (total ? ". Se ven los números de la pasada anterior." : ".")) + '</span>';
   }
   if (total) {
     seg += '<span><b>' + hechos + '</b> de <b>' + total + '</b> calculados'
@@ -1543,7 +1543,7 @@ function pintarEstado() {
   let banda = "";
   if (e === "parcial") {
     banda = ICONO_PAUSA + '<span><b>Faltan ' + pend + ' por calcular.</b> Entran en la próxima pasada.</span>';
-  } else if (e === "error") {
+  } else if (e === "error" && total) {   // sin ningún partido, el error ya ocupa el centro
     banda = ICONO_AVISO + '<span><b>La última actualización falló.</b> ' + esc(datos.error || "sin detalle") + '. Se ven los números de la pasada anterior.</span>';
   }
   bandaEl.hidden = !banda;
@@ -1555,13 +1555,24 @@ function pintarEstado() {
 // RENDER
 // ==========================================
 function estadoVacio() {
+  // un error antes de tener ningún partido (en Cloudflare, casi siempre un secreto sin poner)
+  if (datos.estado === "error") {
+    return '<div class="vacio"><h2>No se pudo actualizar</h2><p>' + esc(datos.error || "Sin detalle.") + '</p>'
+      + '<p>La página lo vuelve a intentar sola cada pocos minutos.</p></div>';
+  }
   const sinDatos = datos.estado === "sin_datos";
+  // el mismo HTML lo sirven Render (app.py) y Cloudflare (worker/), que se llenan distinto
+  const cloudflare = datos.plataforma === "cloudflare";
+  const pasos = cloudflare
+    ? '<p>Es la primera vez: la base de datos está vacía y hay que bajarlo todo de football-data.org. Después se guarda y los despliegues ya no la borran.</p>'
+      + '<ul class="pasos"><li><b>Ahora</b><span>Un cron de Cloudflare lanza la actualización cada minuto, sin que nadie abra la página.</span></li>'
+      + '<li><b>Cada minuto</b><span>Hace como mucho 6 peticiones a la API (el plan gratis da 10 por minuto) y deja el resto para el minuto siguiente.</span></li>'
+    : '<p>Cada despliegue en Render borra el disco, así que la caché arranca vacía y la primera pasada tiene que bajarlo todo de nuevo.</p>'
+      + '<ul class="pasos"><li><b>Ahora</b><span>El planificador interno lanza la actualización sola, sin esperar al siguiente turno.</span></li>'
+      + '<li><b>Cada pasada</b><span>Calcula hasta agotar 40 peticiones a la API y deja el resto para la siguiente.</span></li>';
   return '<div class="vacio"><h2>' + (sinDatos ? "Todavía no hay datos" : "No hay partidos en los próximos días") + '</h2>'
     + (sinDatos
-      ? '<p>Cada despliegue en Render borra el disco, así que la caché arranca vacía y la primera pasada tiene que bajarlo todo de nuevo.</p>'
-        + '<ul class="pasos"><li><b>Ahora</b><span>El planificador interno lanza la actualización sola, sin esperar al siguiente turno.</span></li>'
-        + '<li><b>Cada pasada</b><span>Calcula hasta agotar 40 peticiones a la API y deja el resto para la siguiente.</span></li>'
-        + '<li><b>Esta página</b><span>Se actualiza sola: los partidos aparecen en cuanto haya números.</span></li></ul>'
+      ? pasos + '<li><b>Esta página</b><span>Se actualiza sola: los partidos aparecen en cuanto haya números.</span></li></ul>'
       : '<p>Ninguna de las ligas juega en la ventana consultada. Es lo normal en parones de selecciones.</p>')
     + '</div>';
 }
@@ -1570,7 +1581,7 @@ function render() {
   if (!datos) return;
   pintarEstado();
 
-  if (datos.estado === "sin_datos" || datos.estado === "sin_partidos") {
+  if (datos.estado === "sin_datos" || datos.estado === "sin_partidos" || (datos.estado === "error" && !datos.total)) {
     rutaPintada = null;
     app.classList.add("sin-datos");
     tituloEl.innerHTML = "Pronósticos";

@@ -6,15 +6,24 @@ proyecto.
 
 ## Qué es
 
-App Flask en Render que predice resultados de fútbol (1/X/2, doble oportunidad y
-mercados de goles: más/menos, ambos marcan, porterías a cero y marcadores) con un
-modelo Poisson de fuerzas ataque/defensa.
+Web que predice resultados de fútbol (1/X/2, doble oportunidad y mercados de
+goles: más/menos, ambos marcan, porterías a cero y marcadores) con un modelo
+Poisson de fuerzas ataque/defensa. Corre en dos sitios con la misma lógica:
+
+- **Cloudflare Workers** (`worker/`, oct 2026): adonde se muda. JavaScript, base
+  D1 y un cron por minuto. Ver "Cloudflare: cómo funciona".
+- **Render** (`app.py`, Flask): la versión de siempre. Sigue siendo la
+  referencia del modelo (la usan `backtest.py`, `afinar*.py` y `validacion.py`
+  offline) y sigue desplegándose desde `main` hasta que se apague.
 
 - Repo: `pronosticos-bot`
 - Carpeta local: `C:\Users\Alvaro\Desktop\webapp`
-- URL producción: https://pronosticos-bot.onrender.com
-- Ficheros clave: `app.py`, `templates/index.html`, `validacion.py`, `backtest.py`,
-  `afinar.py`, `afinar_goles.py`, `diagnostico.py`
+- URL en Render: https://pronosticos-bot.onrender.com
+- URL en Cloudflare: `https://pronosticos-bot.<subdominio>.workers.dev` (el
+  subdominio es el de la cuenta: Workers & Pages → el Worker → Settings → Domains)
+- Ficheros clave: `app.py`, `public/index.html`, `validacion.py`, `worker/`,
+  `wrangler.jsonc`, `test_paridad.py`, `backtest.py`, `afinar.py`,
+  `afinar_goles.py`, `diagnostico.py`
 
 ## Stack
 
@@ -32,8 +41,19 @@ modelo Poisson de fuerzas ataque/defensa.
   (`LIGAS_ANO_NATURAL`). `temporada_actual(codigo)` lo tiene en cuenta para el
   prior; sin eso, entre enero y junio se anclaría en la temporada de hace dos
   años.
+- Cloudflare, plan gratis: Worker en JavaScript (módulos ES, sin build ni
+  dependencias), D1 (base `pronosticos-bot`, id
+  `ab0a2af0-6f18-4e8d-92f4-32326e651bff`, región ENAM), un Cron Trigger cada
+  minuto y la web como archivo estático (`public/`). Límites que mandan en el
+  diseño: **10 ms de CPU por ejecución** (también en el cron), 50 peticiones
+  externas por ejecución, 100.000 peticiones al día, 5 crons por cuenta; D1, 5
+  millones de filas leídas y 100.000 escritas al día (desde sept 2026 se
+  cortan al pasarse). `wrangler` va fijado en `package.json`.
 
 ## Arquitectura
+
+Lo que sigue describe `app.py`. El Worker hace lo mismo con otro ritmo y otro
+almacén: ver "Cloudflare: cómo funciona".
 
 **Actualización reanudable por presupuesto.** Cada pasada gasta como mucho
 `PRESUPUESTO_REQUESTS` (40). Al agotarse, el estado queda en `parcial` y la
@@ -61,8 +81,10 @@ En local viene desactivado por defecto (solo se activa si detecta
 `pronosticos-bot` es el único servicio del workspace — un segundo servicio free
 suspendería a ambos.
 
-**La interfaz no usa Jinja2.** `templates/index.html` no tiene ni una etiqueta
-`{{ }}`: es un shell estático con el CSS y el JS en línea que se pinta entero en
+**La interfaz no usa Jinja2.** `public/index.html` (antes `templates/`) no tiene
+ni una etiqueta `{{ }}`: Flask la sirve como plantilla (`template_folder=
+"public"`) y Cloudflare como archivo estático, con sus cabeceras en
+`public/_headers`. Es un shell estático con el CSS y el JS en línea que se pinta entero en
 el cliente sondeando `/api/estado` (cada 4s mientras hay cálculo en curso, cada
 30s el resto del tiempo). No hay `static/`, ni build, ni dependencias de JS; de
 fuera solo llegan las fuentes Saira y Figtree (Google Fonts, con fallback del
@@ -163,6 +185,79 @@ partidos más cercanos salen primero).
 `/actualizar?token=...&forzar=1` no acelera
 esto: sirve para rehacer una pasada antes de `MIN_MINUTOS_ACTUALIZACION`
 (25 min) y para volver a bajar el calendario ignorando la caché.
+
+En Cloudflare no pasa: D1 sobrevive a los despliegues y la web solo arranca
+vacía la primera vez (unos 40 min hasta llenarse). La web sabe en cuál de los
+dos está (`plataforma: "cloudflare"` en `/api/estado`) y explica cada caso.
+
+## Cloudflare: cómo funciona (oct 2026)
+
+`worker/` es `app.py` + `validacion.py` pasados a JavaScript función a función,
+con las mismas cachés, validez, orden y redondeos. **Mismos números:**
+`test_paridad.py` corre el modelo de los dos lados con miles de casos (goles
+esperados, 1X2, mercados, Champions, validación entera, redondeo) y da 0
+diferencias en 170.000 valores. Y de punta a punta, contra una API falsa
+determinista (`/api/estado` con 166 partidos y 16 de Champions, `/api/ligas`,
+`/api/validacion` de las 9 ligas): 0 diferencias entre Flask y el Worker,
+también con 1 de cada 5 peticiones respondida con 429.
+
+Ficheros: `config.js` (constantes, las mismas de `app.py`), `modelo.js` (el
+modelo y un `redondear` que imita a `round()` de Python, empates al par
+incluidos), `actualizacion.js` (la pasada), `validacion.js`, `planificador.js`
+(el cron), `almacen.js` (D1), `api.js` (football-data con su presupuesto),
+`tiempo.js` (hora de Lima) e `index.js` (rutas).
+
+**El ritmo lo marca la CPU.** El plan gratis da 10 ms por ejecución y leer el
+JSON de la API cuesta ~7 ms por MB, así que en vez de una pasada de 40
+peticiones cada 5 min hay una cada minuto con: como mucho 6 peticiones
+(`PRESUPUESTO_REQUESTS`), separadas 6.5 s también entre pasadas (la hora de la
+última va en D1), 350 KB de JSON (`MAX_BYTES_PASADA`), una sola respuesta
+grande (una temporada entera, ~400 KB) y al principio de la pasada, y 40
+partidos calculados (`MAX_CALCULOS_PASADA`). Lo que no cabe queda pendiente y el
+estado sigue en `actualizando` (no hay `parcial`: el siguiente minuto continúa).
+Medido dentro de `workerd` (el runtime de Cloudflare, en local, D1 incluido):
+3 a 9 ms por pasada, ~5 ms lo normal. Llenar la semana entera: ~40 pasadas.
+
+**Para que quepa, casi no se lee JSON.** El calendario va en la tabla
+`partidos`, cada partido con su ficha (nombres, hora, escudos) ya en JSON; las
+predicciones, en `predicciones`, también en JSON. Lo que lee la web sale de un
+solo JOIN y se monta pegando textos. La caché de la API (`cache`, por
+secciones como `cache.json`) se lee fila a fila solo cuando se usa.
+
+**Tablas de D1** (se crean solas si faltan, `ESQUEMA` en `almacen.js`):
+`cache`, `partidos`, `predicciones` (la última publicada de cada partido; no se
+borra al empezar el partido: es el registro de lo que dijo la web),
+`documentos` (`estado` que sirve `/api/estado`, `resumen`, `validacion`,
+pedidos, temporadas terminadas compactas) y `candado` (que dos pasadas no se
+pisen, hora de la última petición, pasadas muertas).
+
+**Si una pasada muere** (lo más probable, por CPU) deja el candado puesto; la
+siguiente lo nota y hace la mitad (presupuesto, bytes y cálculos), hasta un
+octavo, y recupera el ritmo de uno en uno cuando vuelven a terminar bien. El
+candado caduca a los 5 min.
+
+**La validación va por pasos de un minuto**, solo con la web `listo`: bajar
+una temporada, bajar la otra, y recorrer la liga de 25 en 25 partidos
+(`PARTIDOS_POR_PASO`) guardando por dónde iba. Unas 2 h y media la primera vez;
+las temporadas quedan en D1. Como D1 no se borra, se repite sola cuando termina
+una temporada nueva.
+
+**Cambios respecto a `app.py`** (ninguno toca el modelo):
+- un 429 de la API no se calcula a ciegas: el partido espera al minuto
+  siguiente (`app.py` lo publicaba solo con la media de liga, 24 h);
+- una petición que falla no se repite partido tras partido en la misma pasada;
+- si el calendario cambia la hora o el nombre de un partido ya calculado, la
+  ficha se corrige sin recalcular (`app.py` enseñaba la hora vieja hasta 24 h);
+- los intentos de la validación se arrastran (en `validacion.py` se perdían y
+  el tope de 3 no frenaba nada);
+- `/actualizar?forzar=1` y `/validar` dejan un pedido en D1 que el cron recoge
+  en menos de un minuto: una petición web no puede durar lo que una pasada.
+
+**En local:** `npm install`, copiar `.dev.vars.example` a `.dev.vars`, `npm run
+dev` y lanzar el cron a mano con
+`curl "http://localhost:8787/cdn-cgi/local/scheduled?cron=*+*+*+*+*"`. Con
+`API_BASE` en `.dev.vars` se apunta a una API falsa y con
+`PAUSA_ENTRE_REQUESTS=0` no espera entre peticiones.
 
 ## Bugs ya encontrados y corregidos (no reabrir sin motivo nuevo)
 
@@ -376,6 +471,30 @@ efecto se diluye solo conforme acumulan partidos.
   las ligas nacionales de openfootball, y compara modelos con validación
   cruzada. Tampoco necesita token.
 
+## Cloudflare: cómo se despliega
+
+Workers Builds, conectado al repo de GitHub desde el panel (Workers & Pages →
+Create → Import a repository): **un push a `main` despliega solo**, con
+`npx wrangler deploy` (sin comando de build). El Worker del panel tiene que
+llamarse `pronosticos-bot`, como `name` en `wrangler.jsonc`, o el build falla.
+La base D1 va enlazada por su id en `wrangler.jsonc`; el cron, también ahí.
+
+Secretos, en el panel (Settings → Variables and Secrets, tipo Secret):
+`FOOTBALL_DATA_TOKEN` y `UPDATE_SECRET`, los mismos valores que en Render →
+Environment. Sin el token, la web lo dice ("Falta el secreto
+FOOTBALL_DATA_TOKEN...") y en cuanto se pone, el siguiente minuto arranca.
+
+Para ver qué pasa: Workers & Pages → `pronosticos-bot` → Deployments (qué
+versión está viva) y Logs (cada pasada escribe una línea con lo que hizo:
+`{"tarea":"actualizar","estado":...,"peticiones":6,"kb":180,"muertes":0}`).
+`muertes` mayor que 0 quiere decir que alguna pasada se pasó de CPU.
+
+**Apagar Render** cuando Cloudflare esté lleno: poner `REDIRIGIR_A=https://...
+workers.dev` en Render → Environment. Desde entonces Render manda cada
+petición a la misma ruta de Cloudflare (302) y su planificador no arranca. Hace
+falta: los dos usan el mismo token, y juntos se pasarían de 10 peticiones por
+minuto.
+
 ## Render: cómo se despliega
 
 Configuración del servicio `pronosticos-bot` (`srv-da749a2d0e5s73d8iuvg`),
@@ -414,13 +533,14 @@ Environment).
   lo enseña en Fiabilidad, pero la tabla los pinta igual que los demás.
   Opciones: quitarlas, marcarlas en la tabla, o probar un encogimiento propio
   para ligas igualadas con el método de `afinar_goles.py`.
-- **Persistencia:** el disco de Render free borra `cache.json`/`data.json` en cada
-  deploy. Bloquea el registro de predicciones. Variable `DATA_DIR` ya preparada
-  para cuando se resuelva (¿disco persistente de pago? ¿DB externa gratuita?).
 - **Registro de predicciones en vivo:** nadie mide si los pronósticos publicados
-  aciertan. Guardarlos con su resultado real cerraría el círculo y acumularía
-  datos propios que el plan free no vende — es lo único que puede sacar el `rho`
-  del empate estadístico descrito arriba.
+  aciertan. Con Cloudflare ya no lo bloquea la persistencia: la tabla
+  `predicciones` de D1 guarda la última predicción publicada de cada partido y
+  no la borra. Falta bajar los resultados (los partidos `FINISHED` de cada
+  competición, una petición por liga) y medirlos. Cerraría el círculo y
+  acumularía datos propios que el plan free no vende: es lo único que puede
+  sacar el `rho` del empate estadístico descrito arriba. En Render sigue igual
+  (disco efímero).
 - **`test_migracion.py` está desincronizado:** prueba `app._parsear_standings` y
   `app.USAR_PRIOR_PREVIA`, que no existen en `app.py`. Es de una migración a
   `/standings` que no está en el código actual, así que el archivo revienta con
@@ -447,6 +567,13 @@ Environment).
 - Cualquier cambio al modelo debe pasar por `backtest.py` sobre LaLiga 2023+2024
   como mínimo, y usar el test pareado de `afinar.py` para saber si una diferencia
   es real o ruido antes de adoptarla.
-- Antes de depurar "la web no se actualiza", mirar Render → Events primero.
+- El modelo vive dos veces: `app.py`/`validacion.py` (Python, lo que miden las
+  herramientas de afinado) y `worker/` (lo que publica Cloudflare). Un cambio
+  va en los dos y `python test_paridad.py` tiene que dar "todo igual".
+- En el Worker, cada ejecución tiene 10 ms de CPU: nada de recorrer o parsear
+  la semana entera en cada pasada sin medirlo antes (ver "Cloudflare: cómo
+  funciona").
+- Antes de depurar "la web no se actualiza", mirar primero qué versión está
+  viva: Cloudflare → Deployments (y sus Logs), o Render → Events.
 - Los hilos de fondo (keep-alive, actualizador) solo se activan si existe
   `RENDER_EXTERNAL_URL` — en local no consumen cuota de API al importar `app.py`.

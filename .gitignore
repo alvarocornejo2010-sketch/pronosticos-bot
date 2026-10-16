@@ -12,3 +12,8 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Cloudflare Workers:
+node_modules/
+.wrangler/
+.dev.vars

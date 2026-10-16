@@ -1,0 +1,4 @@
+# Copia este archivo a .dev.vars para `npm run dev` (wrangler dev). .dev.vars
+# no se sube a GitHub. En Cloudflare estos valores son secretos del Worker.
+FOOTBALL_DATA_TOKEN=tu_token_de_football-data.org
+UPDATE_SECRET=un_secreto_de_al_menos_12_caracteres

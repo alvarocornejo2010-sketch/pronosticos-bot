@@ -1,0 +1,80 @@
+// Constantes del modelo y de la app. Son las de app.py, copiadas una a una:
+// test_paridad.py comprueba que no se separen y que el modelo dé lo mismo en
+// los dos lenguajes. El porqué de cada valor está comentado en app.py.
+
+export const LIGAS = {
+  "La Liga": "PD",
+  "Premier League": "PL",
+  "Ligue 1": "FL1",
+  "Bundesliga": "BL1",
+  "Serie A": "SA",
+  "Eredivisie": "DED",
+  "Primeira Liga": "PPL",
+  "Championship": "ELC",
+  "Brasileirão": "BSA",
+};
+
+// Torneos: cada equipo se mide en su liga nacional (ver fuerzasChampions).
+export const TORNEOS = {
+  "Champions League": "CL",
+};
+
+export const COMPETICIONES = { ...LIGAS, ...TORNEOS };
+export const CODIGOS_TORNEO = new Set(Object.values(TORNEOS));
+
+export const FACTOR_LIGA = { PL: 1.33, PD: 1.16, FL1: 1.13, SA: 1.10, BL1: 1.03, PPL: 0.93, DED: 0.91 };
+export const FACTOR_OTRA_LIGA = 0.72;
+export const EXPONENTE_FUERZA_CHAMPIONS = 0.5;
+export const ESCALA_CHAMPIONS = [0.91, 0.92];
+export const DIAS_VALIDEZ_LIGA_EQUIPO = 30;
+
+export const DIAS_VALIDEZ_LIGA = 7;
+export const HORAS_VALIDEZ_PREDICCION = 24;
+export const VENTANA_DIAS = 400;
+export const MAX_PARTIDOS_EQUIPO = 20;
+export const PSEUDO_PARTIDOS = 6;
+export const K_LIGA = 50;
+export const PRIOR_AVG_LOCAL = 1.50;
+export const PRIOR_AVG_VISITA = 1.15;
+export const DIAS_VALIDEZ_PRIOR = 30;
+export const LIMITE_GOLES = 10;
+export const ENCOGER_GOLES = 0.3;
+export const LIGAS_ANO_NATURAL = new Set(["BSA"]);
+export const DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"];
+export const MAX_INTENTOS_VALIDACION = 3;
+
+// Lo que en app.py se lee de variables de entorno sale aquí de env: los "vars"
+// de wrangler.jsonc o el panel de Cloudflare, con los mismos nombres.
+//
+// Dos cambian de valor por defecto, porque aquí no hay un hilo que corre cada
+// 5 minutos sino un cron que corre CADA MINUTO, y en el plan gratis cada
+// ejecución tiene 10 ms de CPU:
+//   PRESUPUESTO_REQUESTS  6 por pasada (en app.py, 40 cada 5 min). Llenar la web
+//                         la primera vez tarda algo más, ~35 minutos, y luego D1
+//                         la conserva: los despliegues ya no la vacían.
+//   MAX_BYTES_PASADA      cuánto JSON de la API se lee como mucho en una pasada.
+//                         Leerlo es casi toda la CPU: ~7 ms por MB.
+//   MAX_CALCULOS_PASADA   cuántos partidos se calculan como mucho en una pasada,
+//                         aunque tengan todo en caché (pasa cuando caducan
+//                         muchas predicciones a la vez).
+export function ajustes(env = {}) {
+  const num = (clave, defecto) => {
+    const v = env[clave];
+    return v === undefined || v === null || v === "" ? defecto : Number(v);
+  };
+  const si = (clave, defecto) =>
+    !["0", "false", "no"].includes(String(env[clave] ?? defecto).toLowerCase());
+  return {
+    tz: env.TZ_LOCAL || "America/Lima",
+    apiBase: String(env.API_BASE || "https://api.football-data.org/v4").replace(/\/+$/, ""),
+    diasValidezEquipo: num("DIAS_VALIDEZ_EQUIPO", 3),
+    maxDiasBusqueda: num("DIAS_ADELANTE", 7),
+    horasValidezFixtures: num("HORAS_VALIDEZ_FIXTURES", 2),
+    minMinutosActualizacion: num("MIN_MINUTOS_ACTUALIZACION", 25),
+    presupuesto: num("PRESUPUESTO_REQUESTS", 6),
+    pausaMs: num("PAUSA_ENTRE_REQUESTS", 6.5) * 1000,
+    maxBytes: num("MAX_BYTES_PASADA", 350000),
+    maxCalculos: num("MAX_CALCULOS_PASADA", 40),
+    autoValidar: si("AUTO_VALIDAR", "1"),
+  };
+}

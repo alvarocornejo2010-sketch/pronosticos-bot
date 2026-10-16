@@ -10,10 +10,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import numpy as np
 import requests
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request
 from scipy.stats import poisson
 
-app = Flask(__name__)
+# La web vive en public/: el mismo archivo lo sirve el Worker de Cloudflare
+# (worker/, wrangler.jsonc) como archivo estático.
+app = Flask(__name__, template_folder="public")
 
 # ==========================================
 # CONFIGURACIÓN
@@ -890,6 +892,21 @@ def correr_actualizacion(forzar=False):
 # ==========================================
 # RUTAS WEB
 # ==========================================
+# Mudanza a Cloudflare: con REDIRIGIR_A=https://... en Render → Environment, la
+# app manda cada petición a la misma ruta en la dirección nueva y el planificador
+# no arranca, así Render deja de gastar la cuota de la API que ahora usa el
+# Worker (es el mismo token: entre los dos se pasarían de 10 por minuto).
+# 302 y no 301: si hubiera que volver atrás, los navegadores no lo recuerdan.
+REDIRIGIR_A = os.environ.get("REDIRIGIR_A", "").rstrip("/")
+
+
+@app.before_request
+def redirigir_a_cloudflare():
+    if REDIRIGIR_A:
+        consulta = request.query_string.decode()
+        return redirect(REDIRIGIR_A + request.path + ("?" + consulta if consulta else ""), code=302)
+
+
 @app.after_request
 def agregar_headers_seguridad(response):
     # Básicos y sin costo: evitan que el navegador "adivine" tipos de contenido
@@ -1038,7 +1055,7 @@ URL_PROPIA = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 # En local viene desactivado por defecto: al importar app.py para el backtest o
 # para una prueba no queremos que se ponga a gastar cuota de la API por su cuenta.
 AUTO_ACTUALIZAR = os.environ.get(
-    "AUTO_ACTUALIZAR", "1" if EN_RENDER else "0").lower() not in ("0", "false", "no")
+    "AUTO_ACTUALIZAR", "1" if EN_RENDER else "0").lower() not in ("0", "false", "no") and not REDIRIGIR_A
 
 SEGUNDOS_KEEPALIVE = int(os.environ.get("SEGUNDOS_KEEPALIVE", "540"))   # 9 min < 15 de Render
 SEGUNDOS_TICK = int(os.environ.get("SEGUNDOS_TICK", "300"))            # cada cuánto se revisa

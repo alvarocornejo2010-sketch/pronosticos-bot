@@ -1,0 +1,7 @@
+# Las mismas cabeceras que pone app.py a la web. no-store: después de un
+# despliegue el navegador tiene que ver la interfaz nueva sin Ctrl+F5.
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+  Cache-Control: no-store, must-revalidate

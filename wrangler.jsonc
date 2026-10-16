@@ -1,0 +1,37 @@
+// Configuración del Worker de Cloudflare. Un push a la rama de producción
+// (main) lo despliega solo con Workers Builds, como Render con app.py.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Tiene que llamarse igual que el Worker en el panel de Cloudflare.
+  "name": "pronosticos-bot",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-09-30",
+  // La web (public/index.html) la sirve Cloudflare directamente, sin gastar
+  // CPU del Worker. public/_headers le pone las mismas cabeceras que app.py.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  // Cada minuto el planificador mira si toca actualizar o validar.
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  // La caché, las predicciones y la validación. A diferencia del disco de
+  // Render, no se borra al desplegar. Las tablas se crean solas.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pronosticos-bot",
+      "database_id": "ab0a2af0-6f18-4e8d-92f4-32326e651bff"
+    }
+  ],
+  // Ajustes sin secreto (los mismos nombres que en app.py). Los secretos,
+  // FOOTBALL_DATA_TOKEN y UPDATE_SECRET, van en el panel: Settings →
+  // Variables and Secrets. En local, en .dev.vars (ver .dev.vars.example).
+  "vars": {
+    "TZ_LOCAL": "America/Lima"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
