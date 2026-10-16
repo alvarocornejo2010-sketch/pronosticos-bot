@@ -44,25 +44,40 @@ LIGAS = {
     "Eredivisie": "DED",
     "Primeira Liga": "PPL",
     "Championship": "ELC",
-    # Con estas ocho ya están todas las LIGAS del plan free. Lo que queda en él son
-    # torneos: Mundial ("WC"), Eurocopa ("EC") y Champions (abajo). Europa League
-    # y Conference League no están en el plan free.
-
-    # "Champions League": "CL",  <- NO la actives sin cambiar el modelo antes.
-    #
-    # El modelo calcula la fuerza de un equipo con sus partidos EN ESA MISMA
-    # competición. En una liga doméstica son ~19 en casa y ~19 fuera; en Champions
-    # son 4 y 4. Con esa muestra el encogimiento manda casi por completo y todos los
-    # partidos saldrían parecidos.
-    #
-    # Y peor: la "media de la liga" en Champions no significa nada. Mezcla al Bayern
-    # con el campeón de Kazajistán, así que dividir entre esa media no mide fuerza
-    # relativa, que es justo lo que el modelo necesita.
-    #
-    # Para hacerla bien habría que coger las stats de cada equipo de SU liga
-    # doméstica y normalizarlas entre ligas. Es un proyecto aparte, no un
-    # descomentar.
+    "Brasileirão": "BSA",
+    # Con estas nueve ya están todas las LIGAS del plan free. Lo que queda en él son
+    # torneos: Champions (abajo, en TORNEOS), Mundial ("WC") y Eurocopa ("EC").
+    # Europa League y Conference League no están en el plan free.
 }
+
+# Torneos: NO se predicen con sus propios partidos. En la Champions cada equipo
+# juega 4 en casa y 4 fuera contra rivales de niveles muy distintos, y su "media
+# de liga" mezcla al Bayern con el campeón de Kazajistán. Cada equipo se mide en
+# SU liga nacional (fuerzas_champions) y se ajusta por el nivel de esa liga.
+TORNEOS = {
+    "Champions League": "CL",
+}
+
+# Nivel de cada liga frente al equipo medio de la Champions (1.00): cuánto más
+# marca y cuánto menos encaja un equipo medio de esa liga en la Champions.
+# Medido con afinar_champions.py sobre la Champions 2024/25 (188 partidos, datos
+# de openfootball), con validación cruzada: es la única temporada disponible, así
+# que el margen es amplio (ver CLAUDE.md, "Champions"). Championship y Brasileirão
+# no juegan la Champions; si algún día hiciera falta, usan FACTOR_OTRA_LIGA.
+FACTOR_LIGA = {"PL": 1.33, "PD": 1.16, "FL1": 1.13, "SA": 1.10, "BL1": 1.03, "PPL": 0.93, "DED": 0.91}
+# Equipos de ligas fuera del plan (Bélgica, Austria, Escocia...): sin datos de su
+# liga, cuentan como un equipo medio de este nivel.
+FACTOR_OTRA_LIGA = 0.72
+# La fuerza en la liga nacional se eleva a este exponente: los grandes arrasan en
+# su liga y su fuerza nacional tomada tal cual exagera (con 1.0 el modelo predice
+# peor, ver afinar_champions.py). 0.5 es lo que ajustan los datos, estable entre
+# 0.44 y 0.59 en los cinco bloques de la validación cruzada.
+EXPONENTE_FUERZA_CHAMPIONS = 0.5
+# Los goles esperados parten de la media de la Champions por este factor (local,
+# visitante): con equipos que en su liga son de los mejores, el producto de
+# ataque y defensa sale algo por encima de 1 y hay que compensarlo.
+ESCALA_CHAMPIONS = (0.91, 0.92)
+DIAS_VALIDEZ_LIGA_EQUIPO = 30   # de qué liga es cada equipo: no cambia en la temporada
 
 # Zona horaria de referencia para decidir qué es "hoy".
 # Render corre en UTC; sin esto, a partir de las 19:00 de Lima el servidor
@@ -242,13 +257,21 @@ def escribir_estado(estado):
 # ==========================================
 # ANCLA POR LIGA (temporada anterior)
 # ==========================================
-def temporada_actual():
+# Ligas que juegan de enero a diciembre: su temporada es el año natural.
+LIGAS_ANO_NATURAL = {"BSA"}
+
+
+def temporada_actual(codigo_liga=None):
     """Año de inicio de la temporada en curso, como lo numera football-data.org.
 
     Las ligas europeas van de agosto a mayo, así que de julio en adelante ya
-    cuenta el año nuevo. La temporada 2026/27 es 'season=2026'.
+    cuenta el año nuevo. La temporada 2026/27 es 'season=2026'. El Brasileirão
+    va de enero a diciembre: en marzo de 2027 su temporada en curso es la 2027,
+    no la 2026, y la anterior terminada es la 2026.
     """
     a = ahora()
+    if codigo_liga in LIGAS_ANO_NATURAL:
+        return a.year
     return a.year if a.month >= 7 else a.year - 1
 
 
@@ -270,7 +293,7 @@ def obtener_prior_liga(codigo_liga, cache):
     respaldo = {"avg_local": PRIOR_AVG_LOCAL, "avg_visita": PRIOR_AVG_VISITA,
                 "origen": "constante de respaldo", "partidos": 0, "actualizado": None}
 
-    season = temporada_actual() - 1
+    season = temporada_actual(codigo_liga) - 1
     resp = get_con_pausa(f"{BASE_URL}/competitions/{codigo_liga}/matches",
                          {"season": season, "status": "FINISHED"})
     if resp.status_code != 200:
@@ -498,6 +521,81 @@ def mercados_de_goles(xg_local, xg_visita, promedio_liga, limite=LIMITE_GOLES):
 
 
 # ==========================================
+# CHAMPIONS: la fuerza de cada equipo, medida en su liga nacional
+# ==========================================
+def liga_domestica(team_id, cache):
+    """Código de la liga del plan en la que juega un equipo, o None si juega en
+    otra (Bélgica, Austria...). Primero se busca gratis en los calendarios de
+    liga ya descargados; si no sale, una petición a /teams/{id}, que trae las
+    competiciones que disputa. Se guarda un mes: no cambia en la temporada."""
+    mapa = cache.setdefault("liga_equipo", {})
+    entrada = mapa.get(str(team_id))
+    # un fallo se recuerda un día: si /teams/{id} no responde, no se reintenta en
+    # cada pasada de 5 minutos
+    dias = 1 if entrada and entrada.get("fallo") else DIAS_VALIDEZ_LIGA_EQUIPO
+    if entrada and esta_vigente(entrada.get("actualizado"), dias):
+        return entrada["liga"]
+
+    liga = None
+    for codigo in LIGAS.values():
+        for m in cache.get("fixtures", {}).get(codigo, {}).get("matches", []):
+            if team_id in ((m.get("homeTeam") or {}).get("id"), (m.get("awayTeam") or {}).get("id")):
+                liga = codigo
+                break
+        if liga:
+            break
+    if liga is None:
+        resp = get_con_pausa(f"{BASE_URL}/teams/{team_id}")
+        if resp.status_code != 200:
+            print(f"Equipo {team_id}: HTTP {resp.status_code} al buscar su liga, cuenta como otra liga.",
+                  file=sys.stderr)
+            mapa[str(team_id)] = {"liga": None, "fallo": True, "actualizado": ahora().isoformat()}
+            return None
+        codigos = [c.get("code") for c in resp.json().get("runningCompetitions", [])]
+        liga = next((c for c in LIGAS.values() if c in codigos), None)
+    mapa[str(team_id)] = {"liga": liga, "actualizado": ahora().isoformat()}
+    return liga
+
+
+def fuerzas_champions(team_id, en_casa, cache):
+    """Ataque y defensa de un equipo para un partido de Champions: su fuerza en
+    su liga nacional, relativa a la media de esa liga (como en calcular_xg_partido),
+    atenuada con EXPONENTE_FUERZA_CHAMPIONS, y el nivel de su liga. Un equipo de
+    otra liga cuenta como un equipo medio de FACTOR_OTRA_LIGA."""
+    liga = liga_domestica(team_id, cache)
+    if liga is None:
+        return {"liga": None, "nombre_liga": None, "factor": FACTOR_OTRA_LIGA,
+                "ataque": 1.0, "defensa": 1.0, "muestra": 0}
+    s = obtener_stats_equipo(team_id, liga, cache)
+    prom = obtener_promedio_liga(liga, cache)
+    avg_l, avg_v = prom["avg_local"], prom["avg_visita"]
+    if en_casa:
+        ataque = _encoger(s["gf_local"], s["n_local"], avg_l) / avg_l
+        defensa = _encoger(s["gc_local"], s["n_local"], avg_v) / avg_v
+        n = s["n_local"]
+    else:
+        ataque = _encoger(s["gf_visita"], s["n_visita"], avg_v) / avg_v
+        defensa = _encoger(s["gc_visita"], s["n_visita"], avg_l) / avg_l
+        n = s["n_visita"]
+    b = EXPONENTE_FUERZA_CHAMPIONS
+    nombre = next((k for k, v in LIGAS.items() if v == liga), liga)
+    return {"liga": liga, "nombre_liga": nombre, "factor": FACTOR_LIGA.get(liga, FACTOR_OTRA_LIGA),
+            "ataque": ataque ** b, "defensa": defensa ** b, "muestra": n}
+
+
+def calcular_xg_champions(local, visita, promedio_cl):
+    """Goles esperados de un partido de Champions. Misma forma que
+    calcular_xg_partido (ataque de uno por defensa del otro por la media), con
+    la media de la Champions y el nivel de cada liga: el ataque se multiplica
+    por el nivel propio y se divide por el del rival."""
+    xg_local = (promedio_cl["avg_local"] * ESCALA_CHAMPIONS[0]
+                * local["ataque"] * visita["defensa"] * local["factor"] / visita["factor"])
+    xg_visita = (promedio_cl["avg_visita"] * ESCALA_CHAMPIONS[1]
+                 * visita["ataque"] * local["defensa"] * visita["factor"] / local["factor"])
+    return round(xg_local, 2), round(xg_visita, 2)
+
+
+# ==========================================
 # BUSCAR EL PRIMER DÍA CON PARTIDOS (hoy, luego mañana, etc.)
 # ==========================================
 def etiqueta_de_dia(fecha, hoy):
@@ -531,7 +629,7 @@ def obtener_fixtures(cache, forzar=False):
     por_fecha = defaultdict(list)
     ahora_utc = datetime.now(timezone.utc)
 
-    for nombre_liga, codigo in LIGAS.items():
+    for nombre_liga, codigo in {**LIGAS, **TORNEOS}.items():
         entrada = guardadas.get(codigo)
         vigente = (entrada and not forzar
                    and entrada.get("rango") == rango
@@ -564,6 +662,8 @@ def obtener_fixtures(cache, forzar=False):
 
         vivos = 0
         for m in matches:
+            if not (m.get("homeTeam") or {}).get("id") or not (m.get("awayTeam") or {}).get("id"):
+                continue   # eliminatoria con un cruce todavía sin decidir
             dt = datetime.fromisoformat(m["utcDate"].replace("Z", "+00:00"))
             if dt <= ahora_utc:
                 continue   # ya empezó: fuera, aunque la caché aún lo traiga
@@ -736,9 +836,20 @@ def correr_actualizacion(forzar=False):
             codigo_liga = match["competition"]["code"]
 
             promedio_liga = obtener_promedio_liga(codigo_liga, cache)
-            stats_local = obtener_stats_equipo(local_id, codigo_liga, cache)
-            stats_visita = obtener_stats_equipo(visita_id, codigo_liga, cache)
-            xg_local, xg_visita = calcular_xg_partido(stats_local, stats_visita, promedio_liga)
+            extra = {}
+            if codigo_liga in TORNEOS.values():
+                f_local = fuerzas_champions(local_id, True, cache)
+                f_visita = fuerzas_champions(visita_id, False, cache)
+                xg_local, xg_visita = calcular_xg_champions(f_local, f_visita, promedio_liga)
+                muestra_local, muestra_visita = f_local["muestra"], f_visita["muestra"]
+                # de qué liga sale cada equipo y con qué nivel: la web lo explica
+                extra["champions"] = {lado: {k: f[k] for k in ("liga", "nombre_liga", "factor")}
+                                      for lado, f in (("local", f_local), ("visita", f_visita))}
+            else:
+                stats_local = obtener_stats_equipo(local_id, codigo_liga, cache)
+                stats_visita = obtener_stats_equipo(visita_id, codigo_liga, cache)
+                xg_local, xg_visita = calcular_xg_partido(stats_local, stats_visita, promedio_liga)
+                muestra_local, muestra_visita = stats_local["n_local"], stats_visita["n_visita"]
             probs = calcular_poisson(xg_local, xg_visita)
             goles = mercados_de_goles(xg_local, xg_visita, promedio_liga)
 
@@ -747,11 +858,11 @@ def correr_actualizacion(forzar=False):
                 xg_local=xg_local, xg_visita=xg_visita,
                 # cuántos partidos reales hay detrás de cada lado: si son pocos,
                 # la predicción está dominada por la media de liga y conviene saberlo
-                muestra_local=stats_local["n_local"],
-                muestra_visita=stats_visita["n_visita"],
+                muestra_local=muestra_local,
+                muestra_visita=muestra_visita,
                 calculado=ahora().isoformat(),
                 pendiente=False,
-                **probs, **goles
+                **probs, **goles, **extra
             )
 
             # se escribe el progreso DESPUÉS de cada partido -> la web los va
@@ -880,7 +991,7 @@ def api_ligas():
     vistazo que cada una va con sus propios números y no con los de otra."""
     cache = cargar_cache()
     salida = {}
-    for nombre, codigo in LIGAS.items():
+    for nombre, codigo in {**LIGAS, **TORNEOS}.items():
         p = cache.get("priors", {}).get(codigo)
         m = cache.get("ligas", {}).get(codigo)
         salida[codigo] = {

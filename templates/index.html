@@ -3,51 +3,60 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="description" content="Pronósticos 1X2 y doble oportunidad de LaLiga, Premier League, Ligue 1, Bundesliga, Serie A, Eredivisie, Primeira Liga y Championship con un modelo Poisson de fuerzas ataque/defensa.">
-<meta name="theme-color" content="#0d1210">
+<meta name="description" content="Pronósticos 1X2 y doble oportunidad de la Champions League, LaLiga, Premier League, Ligue 1, Bundesliga, Serie A, Eredivisie, Primeira Liga, Championship y Brasileirão con un modelo Poisson de fuerzas ataque/defensa.">
+<meta name="theme-color" content="#0b130f">
 <meta name="color-scheme" content="dark">
 <title>Pronósticos</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230d1210'/%3E%3Crect x='3' y='8.5' width='7.6' height='15' rx='1.6' fill='%23e8c468'/%3E%3Crect x='12.2' y='8.5' width='7.6' height='15' rx='1.6' fill='%238b7a46'/%3E%3Crect x='21.4' y='8.5' width='7.6' height='15' rx='1.6' fill='%23575134'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b130f'/%3E%3Crect x='3' y='8.5' width='7.6' height='15' rx='2' fill='%23ffd24c'/%3E%3Crect x='12.2' y='8.5' width='7.6' height='15' rx='2' fill='%23a18047'/%3E%3Crect x='21.4' y='8.5' width='7.6' height='15' rx='2' fill='%23594d39'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400..800&family=Saira:wdth,wght@75..100,500..800&display=swap">
 <style>
   /* ================================================================
-     TERMINAL DE PRONÓSTICOS
-     Paneles de borde a borde separados por líneas finas, como una
-     terminal de datos: el ancho de la pantalla se convierte en columnas,
-     no en márgenes. Inspiración por pieza:
-       - tabla con celdas 1/X/2 teñidas: predicciones de FiveThirtyEight
-       - mapa de la ventana: mapas de calor de finviz
-       - tira de fechas con mini barras: calendarios de tarifas de vuelos
-       - barra de estado inferior: VS Code
-       - cinta de próximos partidos: rótulos de TV deportiva
+     MARCADOR DE ESTADIO DE NOCHE
+     La banda de arriba es el marcador: los próximos partidos en grande,
+     con su casilla dorada. Debajo, tableros redondeados sobre la noche.
+     Es lo único llamativo; el resto, sobrio.
+
+     Tipografía: Saira (letra de marcador, cuadrada y redondeada) para la
+     marca, los títulos y TODOS los números; Figtree para nombres y textos.
+     Las dos con cifras tabulares, comprobadas.
+
      Color con trabajo asignado, nunca decorativo:
-       - arena (--cal) = probabilidad. Escala secuencial de 8 tramos,
-         monótona en luminosidad y validada; nada más usa ese tono.
-       - 8 tintes de liga, validados para pares adyacentes en orden fijo
+       - oro = probabilidad. Escala secuencial de 8 tramos de un solo tono
+         ámbar, validada con el script de dataviz (luminosidad monótona,
+         saltos >= 0.06, el tramo más bajo >= 2:1 sobre el tablero). En las
+         celdas, tinta blanca en los 3 primeros tramos y oscura en el resto,
+         todas >= 4.8:1. Nada más usa ese tono.
+       - 8 tonos de liga, validados para pares adyacentes en orden fijo
          (LaLiga, Premier, Ligue 1, Bundesliga, Serie A, Eredivisie,
-         Primeira Liga, Championship). Ninguna combinación de 4
-         pasa cuando cualquier liga puede quedar junto a cualquier otra,
-         así que la identidad de liga va SIEMPRE en texto (ESP, ENG...) y
-         el tinte solo acompaña en listas de orden fijo.
+         Primeira Liga, Championship). Van siempre en una insignia CON la
+         sigla dentro (ESP, ENG...): la sigla identifica la liga y el color
+         acompaña, así que pueden ir mezcladas. La novena liga (Brasileirão)
+         no tiene tono: la paleta validada tiene 8 y un noveno color
+         inventado no pasaría la prueba. Va en gris rayado.
+       - blanco = lo seleccionado (día, liga, orden).
        - estado (error) con icono y texto, nunca color solo.
+
+     Redondeo con jerarquía, no uno para todo: tableros 20, tarjetas 14,
+     controles 10, celdas 8, píldoras redondas.
      ================================================================ */
   :root {
-    --fondo: #0d1210;
-    --panel: #121a17;
-    --panel-alto: #18221e;
-    --panel-hondo: #0f1513;
-    --linea: #223029;
-    --linea-viva: #2f4038;
+    --fondo: #070d0a;
+    --banda: #0b130f;
+    --panel: #111a15;
+    --panel-alto: #18241e;
+    --panel-hondo: #0c130f;
+    --linea: #1f2b25;
+    --linea-viva: #2d3d35;
 
-    --tinta: #edf2ee;
-    --tinta-2: #b4c2b9;
-    --tinta-3: #84948a;
-    --oscura: #0d1210;
+    --tinta: #f4f7f5;
+    --tinta-2: #b8c5bd;
+    --tinta-3: #87968c;
+    --oscura: #0a120e;
 
-    --cal: #e8c468;
-    --cal-2: #8b7a46;   /* arena apagado: barras de probabilidad que no son la más alta */
+    --oro: #ffd24c;        /* tramo alto de la escala de probabilidad */
+    --oro-medio: #a18047;  /* tramo 50-60: barras que no son la más alta */
 
     /* paleta de liga: validada con el script de dataviz, orden adyacente */
     --liga-PD: #e66767;
@@ -58,27 +67,32 @@
     --liga-DED: #c98500;
     --liga-PPL: #d55181;
     --liga-ELC: #008300;
+    --liga-BSA: repeating-linear-gradient(135deg, #a7b3ab 0 4px, #8a978f 4px 8px);
 
-    --critico: #d03b3b;
+    --critico: #e5484d;
 
-    /* rampa neutra para recuentos (calendario): no usa el arena, que es probabilidad */
-    --n1: #1a2420;
-    --n2: #22302a;
-    --n3: #2c3d35;
-    --n4: #3a4f45;
+    --f-disp: "Saira", "Archivo Narrow", "Arial Narrow", system-ui, sans-serif;
+    --f-txt: "Figtree", "Segoe UI", system-ui, -apple-system, sans-serif;
 
-    --t-11: 0.6875rem;
     --t-12: 0.75rem;
     --t-13: 0.8125rem;
     --t-14: 0.875rem;
+    --t-15: 0.9375rem;
     --t-16: 1rem;
+    --t-18: 1.125rem;
     --t-20: 1.25rem;
+    --t-24: 1.5rem;
+    --t-28: 1.75rem;
 
-    --ancho-izq: 15.5rem;
-    --ancho-der: clamp(18.75rem, 24vw, 28.75rem);
-    --alto-cab: 3.25rem;
-    --alto-estado: 1.625rem;
-    --col-liga: 2.625rem;
+    --r-tablero: 20px;
+    --r-tarjeta: 14px;
+    --r-control: 10px;
+    --r-celda: 8px;
+
+    --hueco: 12px;
+    --ancho-izq: 19rem;
+    --ancho-der: clamp(20rem, 23vw, 28rem);
+    --col-liga: 3rem;
   }
 
   * { box-sizing: border-box; }
@@ -89,27 +103,44 @@
 
   body {
     margin: 0;
-    font-family: "Archivo", "Archivo Variable", "Segoe UI", system-ui, sans-serif;
-    font-size: var(--t-14);
-    line-height: 1.4;
+    font-family: var(--f-txt);
+    font-size: var(--t-15);
+    line-height: 1.45;
     background: var(--fondo);
     color: var(--tinta);
   }
 
   button { font: inherit; color: inherit; }
-  :focus-visible { outline: 2px solid var(--tinta); outline-offset: -2px; }
+  :focus-visible { outline: 2px solid var(--tinta); outline-offset: 2px; }
 
   .salto { position: absolute; left: -9999px; z-index: 20; background: var(--tinta); color: var(--oscura);
-           padding: 8px 14px; font-weight: 600; }
-  .salto:focus { left: 12px; top: 8px; }
+           padding: 10px 16px; font-weight: 700; border-radius: var(--r-control); }
+  .salto:focus { left: 12px; top: 10px; }
 
   .num { font-variant-numeric: tabular-nums; }
+  .disp { font-family: var(--f-disp); font-stretch: 88%; }
+
+  /* insignia de liga: la sigla dentro de su color. Tinta oscura o blanca según
+     el tono, todas >= 4.8:1 */
+  .insignia {
+    display: inline-grid; place-items: center; flex-shrink: 0;
+    min-width: 2.25rem; height: 1.375rem; padding: 0 6px; border-radius: 6px;
+    background: var(--tono, var(--tinta-3)); color: var(--tono-t, var(--oscura));
+    font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-12); font-weight: 800;
+    letter-spacing: 0.03em; line-height: 1;
+  }
+  .insignia.grande { width: 2.75rem; height: 2.75rem; border-radius: var(--r-control); font-size: var(--t-14); }
+  .insignia.redonda { min-width: 0; width: 2rem; height: 2rem; padding: 0; border-radius: 50%; font-size: 0.6875rem; }
+  .insignia.todas { background: var(--panel-hondo); color: var(--tinta-2); box-shadow: inset 0 0 0 1px var(--linea-viva); }
+  /* la Champions: torneo, insignia de contorno en la tinta del texto */
+  .insignia.copa { background: none; box-shadow: inset 0 0 0 1.5px currentColor; }
+  .tira-ligas button[aria-current="true"] .insignia.copa { color: var(--oscura); }
 
   /* ================================================================
      ESQUELETO
-     Escritorio: aplicación de altura fija, cada panel con su propio
-     desplazamiento. Móvil: documento normal, cabecera pegajosa y pestañas
-     abajo, que en el teléfono se desplaza mejor la página que un panel.
+     Escritorio: aplicación de altura fija; cada tablero con su propio
+     desplazamiento. Móvil: documento normal y pestañas abajo, que en el
+     teléfono se desplaza mejor la página que un panel.
      ================================================================ */
   .app {
     display: grid;
@@ -118,7 +149,7 @@
     min-height: 100dvh;
   }
   .cab { grid-area: cab; }
-  .centro { grid-area: centro; min-width: 0; }
+  .centro { grid-area: centro; min-width: 0; --sup: var(--fondo); }
   .lateral { display: none; }
   .pane-izq, .pane-der { min-width: 0; }
   .estado-barra { display: none; }
@@ -127,15 +158,18 @@
     .app {
       height: 100dvh;
       grid-template-columns: minmax(0, 1fr) var(--ancho-der);
-      grid-template-rows: var(--alto-cab) minmax(0, 1fr) var(--alto-estado);
+      grid-template-rows: auto minmax(0, 1fr) auto;
       grid-template-areas: "cab cab" "centro lat" "estado estado";
+      column-gap: var(--hueco);
+      padding: 0 var(--hueco);
     }
-    .centro { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--linea); }
-    .lateral { display: block; grid-area: lat; overflow-y: auto; min-height: 0; scrollbar-width: thin; background: var(--panel); }
-    .lateral { display: flex; flex-direction: column; }
+    .cab { margin: 0 calc(-1 * var(--hueco)) var(--hueco); }
+    .centro { display: flex; flex-direction: column; min-height: 0; --sup: var(--panel);
+              background: var(--panel); border-radius: var(--r-tablero); overflow: hidden; }
+    .lateral { display: flex; flex-direction: column; grid-area: lat; overflow-y: auto; min-height: 0; scrollbar-width: thin;
+               background: var(--panel); border-radius: var(--r-tablero); }
     .pane-izq, .pane-der { display: contents; }
-    .m-ligas { order: 1; } .m-mapa { order: 2; } .m-confianza { order: 3; }
-    .m-fiab { order: 4; } .m-cal { order: 5; } .m-leyenda { order: 6; }
+    .m-ligas { order: 1; } .m-claros { order: 2; } .m-confianza { order: 3; } .m-fiab { order: 4; }
     .estado-barra { display: flex; grid-area: estado; }
     .pestanas { display: none !important; }
   }
@@ -146,71 +180,102 @@
     }
     /* el envoltorio desaparece y cada panel ocupa su propia columna */
     .lateral { display: contents; }
-    .pane-izq, .pane-der { display: block; overflow-y: auto; min-height: 0; scrollbar-width: thin; background: var(--panel); }
-    .pane-izq { grid-area: izq; border-bottom: 0; border-right: 1px solid var(--linea); }
+    .pane-izq, .pane-der { display: block; overflow-y: auto; min-height: 0; scrollbar-width: thin;
+                           background: var(--panel); border-radius: var(--r-tablero); }
+    .pane-izq { grid-area: izq; }
     .pane-der { grid-area: der; }
   }
 
-  /* ---------------- cabecera ---------------- */
+  /* ---------------- banda del marcador ---------------- */
   .cab {
-    position: sticky; top: 0; z-index: 6;
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    padding: 10px 14px; background: var(--fondo); border-bottom: 1px solid var(--linea);
+    display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap;
+    padding: 14px 16px 16px; background: var(--banda); border-bottom: 1px solid var(--linea);
   }
   @media (min-width: 880px) {
-    .cab { position: static; flex-wrap: nowrap; padding: 0 14px 0 16px; height: var(--alto-cab); }
+    .cab { flex-wrap: nowrap; gap: 22px; min-height: 6rem; padding: 10px var(--hueco) 10px 22px; }
   }
 
-  .marca { display: flex; align-items: center; gap: 9px; text-decoration: none; color: var(--tinta); flex-shrink: 0; }
-  .marca svg { display: block; }
-  .marca .nombre { font-size: 1.0625rem; font-weight: 760; font-stretch: 78%; letter-spacing: -0.015em; }
+  .marca { display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--tinta); flex-shrink: 0; }
+  .marca svg { display: block; width: 34px; height: 34px; }
+  .marca .nombre { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-24); font-weight: 800; letter-spacing: -0.02em; }
+  @media (min-width: 880px) {
+    .marca svg { width: 42px; height: 42px; }
+    .marca .nombre { font-size: 1.875rem; }
+  }
 
   .buscar {
     order: 3; flex: 1 1 100%;
-    display: flex; align-items: center; gap: 8px;
-    background: var(--panel); border: 1px solid var(--linea); border-radius: 4px;
-    padding: 0 8px 0 10px; height: 36px; color: var(--tinta-3);
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel); border: 1px solid var(--linea-viva); border-radius: 999px;
+    padding: 0 14px 0 18px; height: 3rem; color: var(--tinta-3);
   }
-  .buscar:focus-within { border-color: var(--tinta-3); }
+  .buscar:focus-within { border-color: var(--tinta-2); background: var(--panel-alto); }
   .buscar input {
     flex: 1; min-width: 0; background: none; border: 0; color: var(--tinta);
-    font: inherit; font-size: var(--t-14); outline: none; height: 100%;
+    font: inherit; font-size: var(--t-16); outline: none; height: 100%;
   }
   .buscar input::placeholder { color: var(--tinta-3); }
   .buscar input::-webkit-search-cancel-button { filter: invert(0.6); }
   kbd {
-    font: inherit; font-size: var(--t-11); font-weight: 600; color: var(--tinta-3);
-    border: 1px solid var(--linea-viva); border-radius: 3px; padding: 0 5px; line-height: 16px;
+    font-family: var(--f-disp); font-size: var(--t-13); font-weight: 700; color: var(--tinta-2);
+    border: 1px solid var(--linea-viva); border-radius: 6px; padding: 1px 7px; line-height: 18px;
   }
   .buscar kbd { display: none; }
   @media (min-width: 880px) {
-    .buscar { order: 0; flex: 0 1 300px; height: 32px; }
-    .buscar kbd { display: inline; }
+    .buscar { order: 0; flex: 0 1 20rem; }
+    .buscar kbd { display: inline-block; }
   }
 
-  /* cinta de próximos: lo que se juega primero, con cuenta atrás */
-  .proximos { display: none; }
+  /* próximos: tarjetas de marcador con su cuenta atrás y la casilla del favorito */
+  .proximos {
+    order: 4; flex: 1 1 100%; min-width: 0;
+    display: flex; align-items: center; gap: 10px;
+    overflow-x: auto; scrollbar-width: none;
+    margin: 2px -16px 0; padding: 0 16px;
+  }
+  .proximos::-webkit-scrollbar { display: none; }
+  .proximos:empty { display: none; }
   @media (min-width: 880px) {
     .proximos {
-      display: flex; flex: 1; min-width: 0; height: var(--alto-cab);
-      flex-wrap: wrap; overflow: hidden; align-content: flex-start;
-      border-left: 1px solid var(--linea); margin-left: 4px;
+      order: 0; flex: 1 1 auto; margin: 0; padding: 0;
+      -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 48px), transparent);
+      mask-image: linear-gradient(90deg, #000 calc(100% - 48px), transparent);
     }
   }
-  .proximos .rotulo-cinta {
-    display: flex; align-items: center; height: var(--alto-cab); padding: 0 12px;
-    font-size: var(--t-12); font-weight: 600; color: var(--tinta-3);
+  .rotulo-cinta { display: none; }
+  @media (min-width: 880px) { .rotulo-cinta { display: block; } }
+  .rotulo-cinta {
+    flex-shrink: 0; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-18); font-weight: 700;
+    color: var(--tinta-3); padding-right: 2px;
   }
   .prox {
-    display: flex; align-items: center; gap: 8px; height: var(--alto-cab);
-    padding: 0 14px; border: 0; border-left: 1px solid var(--linea); background: none; cursor: pointer;
-    font-size: var(--t-13); white-space: nowrap;
+    flex: 0 0 auto; width: 15.5rem;
+    display: grid; grid-template-columns: minmax(0, 1fr) 3.5rem; grid-template-rows: auto auto auto; gap: 3px 12px;
+    align-items: center; text-align: left; cursor: pointer;
+    padding: 9px 9px 9px 14px; border: 1px solid var(--linea); border-radius: var(--r-tarjeta); background: var(--panel);
   }
-  .prox:hover { background: var(--panel); }
-  .prox .cuando { color: var(--tinta-3); font-size: var(--t-12); }
-  .prox .quienes { font-weight: 600; font-stretch: 88%; letter-spacing: 0.01em; }
+  .prox:hover { background: var(--panel-alto); border-color: var(--linea-viva); }
+  .prox .p-cab { grid-column: 1; display: flex; align-items: center; gap: 8px; min-width: 0;
+                 font-size: var(--t-13); color: var(--tinta-2); white-space: nowrap; }
+  .prox .p-cab .insignia { height: 1.25rem; min-width: 2rem; font-size: 0.6875rem; }
+  .prox .p-eq { grid-column: 1; display: flex; align-items: center; gap: 8px; min-width: 0;
+                font-size: var(--t-15); font-weight: 600; line-height: 1.25; }
+  .prox .p-eq .nom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prox .escudo, .prox .escudo img { width: 18px; height: 18px; }
+  .prox .p-fav {
+    grid-column: 2; grid-row: 1 / 4; align-self: stretch;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    border-radius: var(--r-control); background: var(--bg); color: var(--fg); line-height: 1;
+  }
+  .prox .p-fav .s { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-12); font-weight: 700; letter-spacing: 0.03em; }
+  .prox .p-fav .v { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-28); font-weight: 800; }
+  .prox .p-fav.nada { background: var(--panel-alto); color: var(--tinta-3); font-size: var(--t-20); }
 
-  .estado-corto { margin-left: auto; display: flex; align-items: center; gap: 7px; font-size: var(--t-12); color: var(--tinta-3); }
+  .estado-corto {
+    order: 2; margin-left: auto; display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px; border: 1px solid var(--linea-viva); border-radius: 999px;
+    font-size: var(--t-13); font-weight: 600; color: var(--tinta-2);
+  }
   @media (min-width: 880px) { .estado-corto { display: none; } }
 
   .punto { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--tinta-3); }
@@ -221,92 +286,97 @@
   @keyframes latido { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
   /* ---------------- centro ---------------- */
-  .centro { container-type: inline-size; container-name: centro; background: var(--panel-hondo); }
+  .centro { container-type: inline-size; container-name: centro; }
 
-  .carril {
-    display: flex; overflow-x: auto; scrollbar-width: none;
-    border-bottom: 1px solid var(--linea); background: var(--fondo);
-  }
+  /* el único calendario: un día por tarjeta, con cuántos partidos tiene y, con
+     una barrita por partido, cómo de claros son */
+  .carril { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 14px 16px 6px; }
   .carril::-webkit-scrollbar { display: none; }
-
-  /* tira de fechas a lo calendario de tarifas: cada día dice cuántos partidos
-     tiene y, con una barrita por partido, cómo de claros son */
   .dia-celda {
-    flex: 1 1 0; min-width: 5.25rem;
-    display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto;
-    align-items: end; gap: 0 10px; text-align: left;
-    padding: 9px 12px 10px; border: 0; border-right: 1px solid var(--linea);
-    background: none; cursor: pointer; color: var(--tinta-2);
-    box-shadow: inset 0 -2px 0 transparent; overflow: hidden; min-width: 0;
+    flex: 0 0 auto; width: 6.5rem;
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto auto;
+    align-items: center; gap: 2px 8px; text-align: left; min-width: 0; overflow: hidden;
+    padding: 10px 12px 10px; border: 1px solid var(--linea); border-radius: var(--r-tarjeta);
+    background: var(--panel-alto); cursor: pointer; color: var(--tinta-2);
   }
-  .dia-celda:hover { background: var(--panel); }
-  .dia-celda[aria-current="true"] { background: var(--panel); color: var(--tinta); box-shadow: inset 0 -2px 0 var(--tinta); }
-  .dia-celda .dow { grid-column: 1; font-size: var(--t-12); font-weight: 500; }
-  .dia-celda .fecha { grid-column: 1; font-size: var(--t-20); font-weight: 650; font-stretch: 85%; line-height: 1.05; letter-spacing: -0.01em; }
-  .dia-celda .fecha small { font-size: var(--t-12); font-weight: 500; color: var(--tinta-3); margin-left: 3px; letter-spacing: 0; }
-  .dia-celda .cuantos { grid-column: 2; grid-row: 1; justify-self: end; font-size: var(--t-11); color: var(--tinta-3); }
-  .dia-celda .forma { grid-column: 2; grid-row: 2; justify-self: end; display: flex; align-items: flex-end; gap: 1px; height: 18px;
-                      max-width: 100%; overflow: hidden; }
-  .dia-celda .forma i { display: block; width: 3px; border-radius: 1px 1px 0 0; }
-  @media (max-width: 879px) {
-    .dia-celda { flex: 0 0 auto; width: 6.25rem; padding: 6px 10px 7px; }
-    .dia-celda .fecha { font-size: var(--t-16); }
-    .dia-celda .forma { height: 14px; }
+  .dia-celda:hover { border-color: var(--linea-viva); color: var(--tinta); }
+  .dia-celda[aria-current="true"] { background: var(--tinta); border-color: var(--tinta); color: var(--oscura); }
+  .dia-celda .dow { grid-column: 1; grid-row: 1; font-size: var(--t-13); font-weight: 600;
+                    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dia-celda .cuantos { grid-column: 2; grid-row: 1; justify-self: end;
+                        font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-15); font-weight: 700; }
+  .dia-celda .fecha { grid-column: 1 / -1; grid-row: 2; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-28);
+                      font-weight: 800; line-height: 1.05; letter-spacing: -0.01em; color: var(--tinta); white-space: nowrap; }
+  .dia-celda[aria-current="true"] .fecha { color: var(--oscura); }
+  .dia-celda .fecha small { font-family: var(--f-txt); font-size: var(--t-13); font-weight: 600; margin-left: 4px; letter-spacing: 0; opacity: 0.75; }
+  .dia-celda .forma { grid-column: 1 / -1; grid-row: 3; display: flex; align-items: flex-end; gap: 1px;
+                      height: 16px; min-width: 0; overflow: hidden; margin-top: 4px; }
+  .dia-celda .forma i { display: block; flex: 0 0 3px; border-radius: 1.5px 1.5px 0 0; }
+  .dia-celda.toda { width: 7.25rem; }
+  @container centro (min-width: 720px) {
+    .dia-celda { flex: 1 1 0; width: auto; min-width: 6.25rem; max-width: 10rem; }
+    .dia-celda.toda { flex-grow: 1.1; min-width: 7.25rem; max-width: 11rem; }
   }
 
   .herramientas {
-    display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap;
-    padding: 10px 14px; border-bottom: 1px solid var(--linea);
+    display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap;
+    padding: 12px 16px 14px;
   }
-  .titulo-vista { font-size: var(--t-16); font-weight: 650; font-stretch: 90%; margin: 0; letter-spacing: -0.01em; }
-  .titulo-vista small { font-size: var(--t-12); font-weight: 500; color: var(--tinta-3); margin-left: 6px; letter-spacing: 0; }
+  .titulo-vista { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-28); font-weight: 800;
+                  margin: 0; letter-spacing: -0.015em; line-height: 1.1; }
+  .titulo-vista small { font-family: var(--f-txt); font-size: var(--t-15); font-weight: 500; color: var(--tinta-3);
+                        margin-left: 10px; letter-spacing: 0; }
   @media (max-width: 879px) {
-    .herramientas { flex-wrap: nowrap; padding: 8px 14px; }
-    .titulo-vista { font-size: var(--t-14); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .titulo-vista small { display: none; }
+    .titulo-vista { flex: 1 1 100%; font-size: var(--t-24); min-width: 0; }
+    .titulo-vista small { font-size: var(--t-14); }
+    .herramientas .segmentos { margin-left: 0; }
   }
 
-  .segmentos { display: flex; margin-left: auto; border: 1px solid var(--linea-viva); border-radius: 4px; overflow: hidden; }
-  .segmentos button {
-    border: 0; background: none; cursor: pointer; padding: 5px 11px;
-    font-size: var(--t-12); font-weight: 500; color: var(--tinta-3);
+  .segmentos {
+    display: flex; gap: 2px; margin-left: auto; padding: 3px;
+    background: var(--panel-hondo); border: 1px solid var(--linea); border-radius: 999px;
   }
-  .segmentos button + button { border-left: 1px solid var(--linea-viva); }
+  .segmentos button {
+    border: 0; background: none; cursor: pointer; padding: 7px 15px; border-radius: 999px;
+    font-size: var(--t-14); font-weight: 600; color: var(--tinta-3); white-space: nowrap;
+  }
   .segmentos button:hover { color: var(--tinta); }
-  .segmentos button[aria-pressed="true"] { background: var(--panel-alto); color: var(--tinta); font-weight: 600; }
+  .segmentos button[aria-pressed="true"] { background: var(--tinta); color: var(--oscura); }
+  @media (max-width: 879px) { .segmentos button { padding: 7px 12px; } }
 
   .segmentos:empty { display: none; }
   .app.sin-datos .cab-tabla, .app.sin-datos .carril { display: none; }
   .app.sin-datos .buscar { visibility: hidden; }
 
-  .limpiar { border: 1px solid var(--linea-viva); border-radius: 4px; background: none; cursor: pointer;
-             padding: 4px 10px; font-size: var(--t-12); color: var(--tinta-2); }
-  .limpiar:hover { color: var(--tinta); }
+  #limpiar-hueco:empty { display: none; }
+  .limpiar { border: 1px solid var(--linea-viva); border-radius: 999px; background: none; cursor: pointer;
+             padding: 7px 14px; font-size: var(--t-14); font-weight: 600; color: var(--tinta-2); }
+  .limpiar:hover { color: var(--tinta); border-color: var(--tinta-3); }
 
-  /* ligas en tira: solo en móvil, donde no hay carril lateral */
-  .tira-ligas { display: flex; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--linea); }
+  /* ligas en píldoras: solo en móvil, donde no hay tablero lateral */
+  .tira-ligas { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 8px 16px 4px; }
   .tira-ligas::-webkit-scrollbar { display: none; }
   @media (min-width: 880px) { .tira-ligas { display: none; } }
   .tira-ligas button {
-    flex-shrink: 0; display: flex; align-items: center; gap: 7px;
-    border: 0; border-right: 1px solid var(--linea); background: none; cursor: pointer;
-    padding: 10px 14px; font-size: var(--t-13); color: var(--tinta-2);
-    box-shadow: inset 0 -2px 0 transparent;
+    flex: 0 0 auto; display: flex; align-items: center; gap: 9px;
+    height: 2.75rem; padding: 0 16px 0 6px; border: 1px solid var(--linea-viva); border-radius: 999px;
+    background: var(--panel-alto); cursor: pointer; font-size: var(--t-15); font-weight: 600; color: var(--tinta);
+    white-space: nowrap;
   }
-  .tira-ligas button[aria-current="true"] { color: var(--tinta); font-weight: 600; box-shadow: inset 0 -2px 0 var(--tinta); }
-  .tira-ligas .n { color: var(--tinta-3); font-size: var(--t-12); }
+  .tira-ligas button.sin-insignia { padding-left: 16px; }
+  .tira-ligas button[aria-current="true"] { background: var(--tinta); border-color: var(--tinta); color: var(--oscura); }
+  .tira-ligas .n { font-family: var(--f-disp); font-stretch: 88%; font-weight: 700; opacity: 0.7; }
 
   .centro:not(.mezcla) { --col-liga: 0px; }
   .centro:not(.mezcla) .c-liga { visibility: hidden; }
 
-  .muestra-tono { width: 8px; height: 8px; border-radius: 1px; flex-shrink: 0; background: var(--tono, var(--tinta-3)); }
-
   .banda {
-    display: flex; gap: 9px; align-items: flex-start; padding: 9px 14px;
-    border-bottom: 1px solid var(--linea); font-size: var(--t-13); color: var(--tinta-2); background: var(--fondo);
+    display: flex; gap: 10px; align-items: flex-start; margin: 8px 16px 4px; padding: 12px 14px;
+    border-radius: var(--r-tarjeta); background: var(--panel-alto);
+    font-size: var(--t-14); color: var(--tinta-2);
   }
-  .banda b { color: var(--tinta); font-weight: 600; }
-  .banda svg { flex-shrink: 0; margin-top: 2px; }
+  .banda b { color: var(--tinta); font-weight: 700; }
+  .banda svg { flex-shrink: 0; margin-top: 3px; }
   .banda.error svg { color: var(--critico); }
   @media (min-width: 880px) { .banda { display: none; } }
 
@@ -317,20 +387,22 @@
   .cab-tabla { display: none; }
 
   .grupo {
-    position: sticky; top: var(--pega, 0px); z-index: 2;
-    display: flex; align-items: center; gap: 9px;
-    padding: 7px 14px 6px; background: var(--fondo);
-    border-bottom: 1px solid var(--linea); border-top: 1px solid var(--linea); margin-top: -1px;
-    font-size: var(--t-12); font-weight: 600; color: var(--tinta-2);
+    position: sticky; top: 0; z-index: 2;
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 16px 10px; background: var(--sup);
+    border-bottom: 1px solid var(--linea);
+    font-size: var(--t-16); font-weight: 700; color: var(--tinta);
   }
-  .grupo .g-nom { display: flex; align-items: center; gap: 9px; min-width: 0; }
-  .grupo .cuenta { font-weight: 500; color: var(--tinta-3); }
-  .grupo.dia { font-size: var(--t-13); color: var(--tinta); }
+  .grupo .g-nom { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .grupo .g-nom .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .grupo .cuenta { font-size: var(--t-14); font-weight: 500; color: var(--tinta-3); white-space: nowrap; }
+  .grupo.dia .g-nom .txt { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-20); font-weight: 800; letter-spacing: -0.01em; }
   /* en compacto la cabecera usa la rejilla de la fila para rotular 1 X 2 encima de las celdas */
   @container centro (max-width: 639px) {
-    .grupo { display: grid; grid-template-columns: 2.875rem minmax(0, 1fr) 2.25rem 2.25rem 2.25rem; gap: 0 2px; }
+    .grupo { display: grid; grid-template-columns: 3.25rem minmax(0, 1fr) 2.875rem 2.875rem 2.875rem; gap: 0 4px; }
     .grupo .g-nom { grid-column: 1 / 3; }
-    .grupo .g-col { text-align: center; font-size: var(--t-11); color: var(--tinta-3); }
+    .grupo .cuenta { display: none; }
+    .grupo .g-col { text-align: center; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-14); font-weight: 700; color: var(--tinta-3); }
   }
   @container centro (min-width: 640px) {
     .grupo .g-nom { flex: 1; }
@@ -340,22 +412,26 @@
   .partido { border-bottom: 1px solid var(--linea); }
 
   /* ---- fila compacta (por defecto: el panel central es estrecho) ---- */
-  /* la misma tira 1 X 2 que la tabla de escritorio, a la derecha y centrada entre
-     los dos equipos: dos líneas por partido en vez de tres */
+  /* la tira 1 X 2 a la derecha y centrada entre los dos equipos: dos líneas por
+     partido en vez de tres */
   .fila {
     display: grid; width: 100%; text-align: left; cursor: pointer;
-    grid-template-columns: 2.875rem minmax(0, 1fr) 2.25rem 2.25rem 2.25rem;
+    grid-template-columns: 3.25rem minmax(0, 1fr) 2.875rem 2.875rem 2.875rem;
     grid-template-areas:
       "hora local  p1 px p2"
       "liga visita p1 px p2";
-    gap: 3px 2px; align-items: center;
-    padding: 9px 14px; border: 0; background: none;
+    gap: 5px 4px; align-items: center;
+    padding: 12px 16px; border: 0; background: none;
   }
-  .fila:hover { background: var(--panel); }
-  .c-hora { grid-area: hora; display: flex; flex-direction: column; align-self: start; padding-top: 2px; }
-  .c-hora .hh { font-size: var(--t-13); font-weight: 600; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
-  .c-hora .dd { font-size: var(--t-11); color: var(--tinta-3); white-space: nowrap; }
-  .c-liga { grid-area: liga; align-self: start; font-size: var(--t-11); font-weight: 700; color: var(--tinta-3); letter-spacing: 0.02em; }
+  .fila:hover { background: color-mix(in srgb, var(--sup), #fff 3.5%); }
+  .fila:focus-visible { outline-offset: -2px; }
+  .fila[aria-expanded="true"] { background: color-mix(in srgb, var(--sup), #fff 3.5%); }
+  .c-hora { grid-area: hora; display: flex; flex-direction: column; align-self: start; padding-top: 1px; }
+  .c-hora .hh { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-16); font-weight: 700; color: var(--tinta-2);
+                font-variant-numeric: tabular-nums; }
+  .c-hora .dd { font-size: var(--t-12); color: var(--tinta-3); white-space: nowrap; }
+  .c-liga { grid-area: liga; align-self: start; display: flex; }
+  .c-liga .insignia { height: 1.25rem; min-width: 2.125rem; font-size: 0.6875rem; }
   .c-local { grid-area: local; }
   .c-visita { grid-area: visita; }
   .c-1 { grid-area: p1; }
@@ -363,214 +439,209 @@
   .c-2 { grid-area: p2; }
   .c-d, .c-xg, .c-g, .c-m, .c-rep { display: none; }
 
-  .c-eq { display: flex; align-items: center; gap: 8px; min-width: 0; padding-right: 8px; }
+  .c-eq { display: flex; align-items: center; gap: 10px; min-width: 0; padding-right: 8px; }
   .partido.pendiente .c-eq .nom { color: var(--tinta-3); }
   .c-eq .nom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-               font-size: var(--t-14); font-weight: 500; color: var(--tinta-2); font-stretch: 92%; }
-  .c-eq.gana .nom { color: var(--tinta); font-weight: 650; }
+               font-size: var(--t-16); font-weight: 500; color: var(--tinta-2); }
+  .c-eq.gana .nom { color: var(--tinta); font-weight: 700; }
 
-  .escudo { flex-shrink: 0; width: 18px; height: 18px; display: grid; place-items: center; }
-  .escudo img { width: 18px; height: 18px; object-fit: contain; display: block; }
+  .escudo { flex-shrink: 0; width: 24px; height: 24px; display: grid; place-items: center; }
+  .escudo img { width: 24px; height: 24px; object-fit: contain; display: block; }
   .escudo.mono { border-radius: 50%; background: var(--linea-viva); color: var(--tinta-2);
-                 font-size: 0.625rem; font-weight: 700; font-stretch: 85%; }
+                 font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-12); font-weight: 700; }
 
   /* celda de probabilidad: fondo del tramo de la escala, tinta elegida por luminancia */
   .c-p {
-    display: grid; place-items: center; height: 1.75rem; border-radius: 3px;
+    display: grid; place-items: center; height: 2.625rem; border-radius: var(--r-celda);
     background: var(--bg); color: var(--fg);
-    font-size: var(--t-13); font-weight: 650; font-variant-numeric: tabular-nums;
+    font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-18); font-weight: 600; font-variant-numeric: tabular-nums;
   }
   .c-p.gana { font-weight: 800; }
-  .c-p.nada { background: var(--panel); color: var(--tinta-3); font-weight: 500; }
+  .c-p.nada { background: var(--panel-alto); color: var(--tinta-3); font-weight: 500; }
 
-  /* ---- tabla: el panel central ya tiene ancho para una línea por partido ---- */
+  /* ---- tabla: el panel central ya tiene ancho para una línea por partido.
+     Las columnas entran por prioridad: 1X2, luego más de 2.5 y ambos marcan,
+     luego la doble oportunidad, luego goles esperados y muestra, y al final
+     la barra de reparto ---- */
   @container centro (min-width: 640px) {
     .cab-tabla, .fila {
       grid-template-areas: none;
-      grid-template-columns: 3.5rem var(--col-liga) minmax(0, 1fr) minmax(0, 1fr) 3.125rem 3.125rem 3.125rem;
-      gap: 0 2px; align-items: stretch;
+      grid-template-columns: 4rem var(--col-liga) minmax(0, 1fr) minmax(0, 1fr) 3.375rem 3.375rem 3.375rem;
+      gap: 0 6px; align-items: center;
     }
     .cab-tabla {
-      display: grid; padding: 0 14px; background: var(--fondo); border-bottom: 1px solid var(--linea);
-      font-size: var(--t-11); font-weight: 600; color: var(--tinta-3);
+      display: grid; padding: 0 16px; background: var(--sup); border-bottom: 1px solid var(--linea);
+      font-size: var(--t-13); font-weight: 600; color: var(--tinta-3);
     }
-    .cab-tabla span { padding: 6px 0; }
+    .cab-tabla span { padding: 8px 0; font: inherit; color: inherit; }
     .cab-tabla .der { text-align: center; }
-    .fila { padding: 0 14px; min-height: 36px; }
-    .fila > *, .cab-tabla > * { grid-area: auto; align-self: center; }
+    .cab-tabla [data-tip] { cursor: help; }
+    .fila { padding: 0 16px; min-height: 3.875rem; }
+    .fila > *, .cab-tabla > * { grid-area: auto; }
     .c-hora, .c-liga { align-self: center; padding-top: 0; }
     .c-hora { flex-direction: row; align-items: baseline; gap: 6px; }
-    .c-eq { padding-right: 10px; }
-    .c-eq .nom { font-size: var(--t-13); }
-    .c-p { align-self: stretch; justify-self: stretch; height: auto; border-radius: 0; }
+    .c-eq { padding-right: 12px; }
   }
-  @container centro (min-width: 800px) {
+  @container centro (min-width: 780px) {
     .cab-tabla, .fila {
-      grid-template-columns: 3.5rem var(--col-liga) minmax(0, 1fr) minmax(0, 1fr) 3.125rem 3.125rem 3.125rem
-                             2.875rem 2.875rem 2.875rem 5.25rem 4rem;
+      grid-template-columns: 4rem var(--col-liga) minmax(0, 1fr) minmax(0, 1fr) 3.375rem 3.375rem 3.375rem
+                             3.25rem 3.25rem;
     }
-    .c-d, .c-xg, .c-m { display: grid; place-items: center; font-size: var(--t-12); color: var(--tinta-3); font-variant-numeric: tabular-nums; }
-    .c-d { color: var(--tinta-2); }
-    .c-m.poca { display: flex; justify-content: center; align-items: center; gap: 4px; color: var(--tinta); }
+    .c-g { display: grid; place-items: center; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-16);
+           font-weight: 600; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
   }
-  @container centro (min-width: 960px) {
+  @container centro (min-width: 940px) {
     .cab-tabla, .fila {
-      grid-template-columns: 3.5rem var(--col-liga) minmax(0, 1fr) minmax(0, 1fr) 3.125rem 3.125rem 3.125rem
-                             2.875rem 2.875rem 2.875rem 5.25rem 2.875rem 2.875rem 4rem;
+      grid-template-columns: 4rem var(--col-liga) minmax(0, 1fr) minmax(0, 1fr) 3.375rem 3.375rem 3.375rem
+                             3rem 3rem 3rem 3.25rem 3.25rem;
     }
-    .c-g { display: grid; place-items: center; font-size: var(--t-12); color: var(--tinta-2); font-variant-numeric: tabular-nums; }
+    .c-d { display: grid; place-items: center; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-16);
+           font-weight: 600; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
   }
-  @container centro (min-width: 1150px) {
+  @container centro (min-width: 1080px) {
     .cab-tabla, .fila {
-      grid-template-columns: 3.5rem var(--col-liga) minmax(0, 1fr) minmax(0, 1fr) 3.125rem 3.125rem 3.125rem
-                             2.875rem 2.875rem 2.875rem 5.25rem 2.875rem 2.875rem 4rem 11.875rem;
+      grid-template-columns: 4rem var(--col-liga) minmax(0, 1fr) minmax(0, 1fr) 3.375rem 3.375rem 3.375rem
+                             3rem 3rem 3rem 5.75rem 3.25rem 3.25rem 4.25rem;
     }
-    .c-rep { display: flex; align-items: center; gap: 2px; height: 8px; padding-left: 12px; }
-    .c-rep i { display: block; height: 8px; min-width: 2px; }
-    .c-rep i:first-child { border-radius: 2px 0 0 2px; }
-    .c-rep i:last-child { border-radius: 0 2px 2px 0; }
-    .cab-tabla .c-rep { display: block; height: auto; }
+    .c-xg, .c-m { display: grid; place-items: center; font-size: var(--t-14); color: var(--tinta-3); font-variant-numeric: tabular-nums; }
+    .c-m.poca { display: flex; justify-content: center; align-items: center; gap: 5px; color: var(--tinta); }
+  }
+  @container centro (min-width: 1280px) {
+    .cab-tabla, .fila {
+      grid-template-columns: 4rem var(--col-liga) minmax(0, 1fr) minmax(0, 1fr) 3.375rem 3.375rem 3.375rem
+                             3rem 3rem 3rem 5.75rem 3.25rem 3.25rem 4.25rem 10rem;
+    }
+    .c-rep { display: flex; align-items: center; gap: 2px; height: 10px; padding-left: 14px; }
+    .c-rep i { display: block; height: 10px; min-width: 2px; }
+    .c-rep i:first-child { border-radius: 5px 0 0 5px; }
+    .c-rep i:last-child { border-radius: 0 5px 5px 0; }
+    .cab-tabla .c-rep { display: block; height: auto; padding-left: 14px; }
   }
 
   /* ---- detalle desplegado ---- */
-  .detalle { padding: 4px 14px 14px 74px; background: var(--panel); }
-  .detalle dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 22px; margin: 0; padding-top: 8px; }
-  .detalle dt { font-size: var(--t-11); font-weight: 600; color: var(--tinta-3); }
-  .detalle dd { margin: 2px 0 0; font-size: var(--t-13); color: var(--tinta); font-variant-numeric: tabular-nums; }
-  .aviso { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; font-size: var(--t-12); color: var(--tinta-2); }
-  .aviso svg { flex-shrink: 0; margin-top: 1px; }
-  @container centro (min-width: 640px) { .detalle { padding-left: 112px; } }
-  .detalle .ou { border-collapse: collapse; font-size: var(--t-12); font-variant-numeric: tabular-nums; }
-  .detalle .ou th { font-weight: 600; color: var(--tinta-3); text-align: right; padding: 0 0 2px 14px; }
+  .detalle { margin: 0 12px 14px; padding: 16px 18px 18px; background: var(--panel-hondo);
+             border: 1px solid var(--linea); border-radius: var(--r-tarjeta); }
+  .detalle dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px 28px; margin: 0; }
+  .detalle dt { font-size: var(--t-13); font-weight: 600; color: var(--tinta-3); }
+  .detalle dd { margin: 3px 0 0; font-size: var(--t-15); color: var(--tinta); font-variant-numeric: tabular-nums; }
+  .aviso { display: flex; gap: 8px; align-items: flex-start; margin: 14px 0 0; font-size: var(--t-14); color: var(--tinta-2); }
+  .aviso svg { flex-shrink: 0; margin-top: 3px; }
+  .detalle .ou { border-collapse: collapse; font-size: var(--t-14); font-variant-numeric: tabular-nums; }
+  .detalle .ou th { font-weight: 600; color: var(--tinta-3); text-align: right; padding: 0 0 3px 16px; }
   .detalle .ou th:first-child, .detalle .ou td:first-child { text-align: left; padding-left: 0; }
-  .detalle .ou td { text-align: right; padding: 1px 0 1px 14px; color: var(--tinta); }
+  .detalle .ou td { text-align: right; padding: 2px 0 2px 16px; color: var(--tinta); }
   .detalle .ou td:first-child { color: var(--tinta-3); }
-  /* goles totales del partido: una barra por resultado, la más probable en arena pleno */
-  .goles-graf { display: flex; align-items: flex-end; gap: 2px; margin-top: 4px; }
-  .goles-graf .gb { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 1.625rem; }
-  .goles-graf .gb i { display: block; width: 100%; border-radius: 3px 3px 0 0; background: var(--cal-2); }
-  .goles-graf .gb.max i { background: var(--cal); }
-  .goles-graf .v { font-size: var(--t-11); color: var(--tinta-2); font-variant-numeric: tabular-nums; }
-  .goles-graf .gb.max .v { color: var(--tinta); font-weight: 650; }
-  .goles-graf .k { width: 100%; padding-top: 2px; border-top: 1px solid var(--linea-viva);
-                   text-align: center; font-size: var(--t-11); color: var(--tinta-3); }
+  /* goles totales del partido: una barra por resultado, la más probable en oro pleno */
+  .goles-graf { display: flex; align-items: flex-end; gap: 3px; margin-top: 8px; }
+  .goles-graf .gb { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 2rem; }
+  .goles-graf .gb i { display: block; width: 100%; border-radius: 4px 4px 0 0; background: var(--oro-medio); }
+  .goles-graf .gb.max i { background: var(--oro); }
+  .goles-graf .v { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-13); font-weight: 600; color: var(--tinta-2);
+                   font-variant-numeric: tabular-nums; }
+  .goles-graf .gb.max .v { color: var(--tinta); font-weight: 800; }
+  .goles-graf .k { width: 100%; padding-top: 3px; border-top: 1px solid var(--linea-viva);
+                   text-align: center; font-size: var(--t-12); color: var(--tinta-3); }
   .detalle .nw { white-space: nowrap; }
-  .detalle .nota-goles { margin: 12px 0 0; max-width: 72ch; font-size: var(--t-12); color: var(--tinta-3); }
+  .detalle .nota-goles { margin: 14px 0 0; max-width: 72ch; font-size: var(--t-13); color: var(--tinta-3); }
 
-  .vacio { padding: 36px 18px; max-width: 560px; }
-  .vacio h2 { font-size: var(--t-20); font-weight: 650; font-stretch: 90%; margin: 0 0 10px; letter-spacing: -0.01em; }
-  .vacio p { margin: 0 0 8px; color: var(--tinta-2); font-size: var(--t-14); max-width: 62ch; }
-  .vacio .pasos { margin: 16px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--linea); }
-  .vacio .pasos li { display: flex; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--linea); font-size: var(--t-13); color: var(--tinta-2); }
-  .vacio .pasos b { color: var(--tinta); font-weight: 600; min-width: 92px; }
+  .vacio { padding: 40px 20px; max-width: 600px; }
+  .vacio h2 { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-28); font-weight: 800; margin: 0 0 10px; letter-spacing: -0.015em; }
+  .vacio p { margin: 0 0 8px; color: var(--tinta-2); font-size: var(--t-16); max-width: 62ch; }
+  .vacio .pasos { margin: 18px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+  .vacio .pasos li { display: flex; gap: 14px; padding: 12px 14px; border-radius: var(--r-tarjeta); background: var(--panel-alto);
+                     font-size: var(--t-14); color: var(--tinta-2); }
+  .vacio .pasos b { color: var(--tinta); font-weight: 700; min-width: 96px; }
 
-  /* ---------------- paneles laterales ---------------- */
-  .modulo { padding: 14px 14px 16px; border-bottom: 1px solid var(--linea); }
-  .modulo h2 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px;
-               font-size: var(--t-13); font-weight: 650; color: var(--tinta); font-stretch: 92%; }
-  .modulo h2 .meta { margin-left: auto; font-size: var(--t-11); font-weight: 500; color: var(--tinta-3); font-stretch: 100%; }
-  .modulo .nota { margin: 10px 0 0; font-size: var(--t-11); color: var(--tinta-3); }
-  .placeholder { font-size: var(--t-12); color: var(--tinta-3); }
+  /* ---------------- tableros laterales ---------------- */
+  .modulo { padding: 20px 18px 22px; border-bottom: 1px solid var(--linea); }
+  .modulo h2 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 14px;
+               font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-20); font-weight: 800; letter-spacing: -0.01em; }
+  .modulo h2 .meta { margin-left: auto; font-family: var(--f-txt); font-size: var(--t-13); font-weight: 500; color: var(--tinta-3);
+                     letter-spacing: 0; }
+  .modulo .nota { margin: 14px 0 0; font-size: var(--t-13); color: var(--tinta-3); }
+  .placeholder { margin: 0; font-size: var(--t-14); color: var(--tinta-3); }
+  @media (min-width: 1180px) { .pane-izq .modulo:last-child, .pane-der .modulo:last-child { border-bottom: 0; } }
 
-  .leyenda-escala { display: flex; gap: 2px; }
-  .leyenda-escala span { flex: 1; display: flex; flex-direction: column; gap: 3px;
-                         font-size: 0.625rem; color: var(--tinta-3); font-variant-numeric: tabular-nums; }
-  .leyenda-escala i { display: block; height: 12px; border-radius: 1px; }
-  .leyenda-tabla { margin: 12px 0 0; display: grid; gap: 7px; font-size: var(--t-12); }
-  .leyenda-tabla div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 10px; align-items: baseline; }
-  .leyenda-tabla dt { display: flex; align-items: center; gap: 4px; font-weight: 650; color: var(--tinta); }
-  .leyenda-tabla dd { margin: 0; color: var(--tinta-2); }
-
+  .ligas { display: grid; gap: 4px; }
   .liga-fila {
-    display: grid; grid-template-columns: 8px 34px minmax(0, 1fr) auto; align-items: center; gap: 2px 9px;
-    width: 100%; text-align: left; border: 0; background: none; cursor: pointer;
-    padding: 9px 10px; margin: 0 -10px; width: calc(100% + 20px); border-radius: 3px;
+    display: grid; grid-template-columns: 2.75rem minmax(0, 1fr) auto; grid-template-rows: auto auto;
+    align-items: center; gap: 0 12px; width: 100%; text-align: left; cursor: pointer;
+    padding: 9px 10px; border: 1px solid transparent; border-radius: var(--r-tarjeta); background: none;
   }
   .liga-fila:hover { background: var(--panel-alto); }
-  .liga-fila[aria-current="true"] { background: var(--panel-alto); box-shadow: inset 2px 0 0 var(--tinta); }
-  .liga-fila .sig { font-size: var(--t-11); font-weight: 700; color: var(--tinta-3); letter-spacing: 0.02em; }
-  .liga-fila .nom { font-size: var(--t-13); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .liga-fila .n { font-size: var(--t-12); color: var(--tinta-2); font-variant-numeric: tabular-nums; }
-  .liga-fila .sig:empty { display: none; }
-  .liga-fila .sig:empty + .nom { grid-column: 2 / 4; }
-  .liga-fila .stats { grid-column: 2 / -1; font-size: var(--t-11); color: var(--tinta-3); font-variant-numeric: tabular-nums; }
+  .liga-fila[aria-current="true"] { background: var(--panel-alto); border-color: var(--tinta-2); }
+  .liga-fila .insignia { grid-row: 1 / 3; }
+  .liga-fila .nom { grid-column: 2; grid-row: 1; align-self: end; font-size: var(--t-16); font-weight: 700;
+                    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .liga-fila .stats { grid-column: 2 / -1; grid-row: 2; align-self: start; font-size: var(--t-13); color: var(--tinta-3);
+                      font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .liga-fila .n { grid-column: 3; grid-row: 1; align-self: end; min-width: 2.25rem; padding: 2px 8px; border-radius: 999px; text-align: center;
+                  background: var(--panel-hondo); font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-15); font-weight: 700;
+                  color: var(--tinta-2); }
+  .liga-fila[aria-current="true"] .n { background: var(--tinta); color: var(--oscura); }
+  .liga-fila.sin-stats .nom, .liga-fila.sin-stats .n { grid-row: 1 / 3; align-self: center; }
 
-  .fiab { display: grid; grid-template-columns: 34px minmax(0, 1fr) 46px 40px; align-items: center; gap: 0 9px;
-          padding: 6px 0; font-size: var(--t-12); }
-  .fiab .sig { font-size: var(--t-11); font-weight: 700; color: var(--tinta-3); }
-  .fiab .eje { position: relative; height: 10px; }
-  .fiab .eje::before { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--linea-viva); }
-  .fiab .eje i { position: absolute; top: 1px; height: 8px; background: var(--tinta-2); }
-  .fiab .eje i.neg { background: var(--tinta-3); }
-  .fiab .val { text-align: right; font-weight: 650; font-variant-numeric: tabular-nums; }
-  .fiab .acierto { text-align: right; color: var(--tinta-3); font-variant-numeric: tabular-nums; }
-  .fiab-cab { display: grid; grid-template-columns: 34px minmax(0, 1fr) 46px 40px; gap: 0 9px;
-              font-size: var(--t-11); color: var(--tinta-3); padding-bottom: 4px; border-bottom: 1px solid var(--linea); }
-  .fiab-cab span:nth-child(3), .fiab-cab span:nth-child(4) { text-align: right; }
-  .m-fiab .segmentos { margin: 0 0 10px; width: max-content; max-width: 100%; }
-
-  /* mapa de la ventana: una columna por día, una baldosa por partido */
-  .mapa { display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; gap: 2px; }
-  .mapa-col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .mapa-col .cab-col { display: flex; flex-direction: column; align-items: center; line-height: 1.15; padding-bottom: 4px;
-                       font-size: var(--t-11); color: var(--tinta-3); white-space: nowrap; }
-  .mapa-col .cab-col b { font-size: var(--t-12); font-weight: 650; color: var(--tinta-2); }
-  .baldosa {
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    height: 34px; border: 0; border-radius: 2px; cursor: pointer; padding: 0 2px;
-    background: var(--bg); color: var(--fg); line-height: 1.1;
+  /* los más claros: el favorito de cada partido con su casilla, de más a menos claro */
+  .claros { display: grid; gap: 6px; }
+  .claro {
+    display: grid; grid-template-columns: 3.375rem minmax(0, 1fr) auto; align-items: center; gap: 0 12px;
+    width: 100%; text-align: left; cursor: pointer;
+    padding: 7px 10px 7px 7px; border: 1px solid var(--linea); border-radius: var(--r-tarjeta); background: var(--panel-hondo);
   }
-  .baldosa .q { font-size: 0.625rem; font-weight: 700; font-stretch: 80%; letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; max-width: 100%; }
-  .baldosa .v { font-size: var(--t-12); font-weight: 750; font-variant-numeric: tabular-nums; }
-  .baldosa.pend { background: none; box-shadow: inset 0 0 0 1px var(--linea-viva); color: var(--tinta-3); }
-  .baldosa:hover, .baldosa:focus-visible { box-shadow: 0 0 0 2px var(--tinta); position: relative; z-index: 1; outline: none; }
+  .claro:hover { border-color: var(--linea-viva); background: var(--panel-alto); }
+  .claro .casilla { display: grid; place-items: center; height: 2.75rem; border-radius: var(--r-control);
+                    background: var(--bg); color: var(--fg);
+                    font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-20); font-weight: 800; font-variant-numeric: tabular-nums; }
+  .claro .txt { display: flex; flex-direction: column; min-width: 0; }
+  .claro .quien { font-size: var(--t-15); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .claro .contra { font-size: var(--t-13); color: var(--tinta-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .claro .cuando { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: var(--t-13); color: var(--tinta-2);
+                   white-space: nowrap; }
+  .claro .cuando .insignia { height: 1.25rem; min-width: 2rem; font-size: 0.6875rem; }
 
-  .leyenda { display: flex; align-items: flex-end; gap: 2px; margin-top: 10px; }
-  .leyenda span { flex: 1; display: flex; flex-direction: column; gap: 3px; font-size: 0.625rem; color: var(--tinta-3); font-variant-numeric: tabular-nums; }
-  .leyenda span i { display: block; height: 6px; border-radius: 1px; }
+  .fiab { display: grid; grid-template-columns: 2.75rem minmax(0, 1fr) 3rem 2.75rem; align-items: center; gap: 0 10px;
+          padding: 7px 0; font-size: var(--t-14); }
+  .fiab .insignia { height: 1.375rem; min-width: 2.25rem; }
+  .fiab .eje { position: relative; height: 12px; }
+  .fiab .eje::before { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--linea-viva); }
+  .fiab .eje i { position: absolute; top: 1px; height: 10px; border-radius: 3px; background: var(--tinta-2); }
+  .fiab .eje i.neg { background: var(--tinta-3); }
+  .fiab .val { text-align: right; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-16); font-weight: 700;
+               font-variant-numeric: tabular-nums; }
+  .fiab .acierto { text-align: right; color: var(--tinta-3); font-variant-numeric: tabular-nums; }
+  .fiab-cab { display: grid; grid-template-columns: 2.75rem minmax(0, 1fr) 3rem 2.75rem; gap: 0 10px;
+              font-size: var(--t-13); color: var(--tinta-3); padding-bottom: 6px; border-bottom: 1px solid var(--linea); }
+  .fiab-cab span:nth-child(3), .fiab-cab span:nth-child(4) { text-align: right; }
+  .m-fiab .segmentos { margin: 0 0 12px; width: max-content; max-width: 100%; }
 
-  /* histograma: una sola serie, un solo color; la escala de color vive en el mapa */
-  .histo { display: flex; align-items: flex-end; gap: 2px; height: 96px; border-bottom: 1px solid var(--linea-viva); }
+  /* histograma: el eje es probabilidad, así que cada barra lleva el oro de su tramo */
+  .histo { display: flex; align-items: flex-end; gap: 3px; height: 120px; border-bottom: 1px solid var(--linea-viva); }
   .histo button { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
                   height: 100%; border: 0; background: none; padding: 0; cursor: default; }
-  .histo button i { display: block; width: min(100%, 24px); background: var(--tinta-3); border-radius: 3px 3px 0 0; min-height: 0; }
-  .histo button.max i { background: var(--tinta-2); }
-  .histo button .etq { font-size: var(--t-11); font-weight: 650; color: var(--tinta-2); margin-bottom: 3px; font-variant-numeric: tabular-nums; }
-  .histo button:hover i, .histo button:focus-visible i { background: var(--tinta); }
-  .histo-eje { display: flex; gap: 2px; margin-top: 4px; }
-  .histo-eje span { flex: 1; font-size: 0.625rem; color: var(--tinta-3); text-align: center; font-variant-numeric: tabular-nums; }
-
-  .calendario .mes { font-size: var(--t-12); font-weight: 600; color: var(--tinta-2); margin: 0 0 6px; }
-  .calendario .mes + .rej { margin-bottom: 12px; }
-  .rej { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
-  .rej .dow { font-size: 0.625rem; color: var(--tinta-3); text-align: center; padding-bottom: 2px; }
-  .rej .d {
-    height: 32px; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    border: 0; border-radius: 2px; background: none; padding: 0;
-    font-size: var(--t-12); color: var(--tinta-3); opacity: 0.5; font-variant-numeric: tabular-nums;
-  }
-  .rej .d.con { opacity: 1; cursor: pointer; color: var(--tinta); font-weight: 600; background: var(--bgn); }
-  .rej .d.con:hover { box-shadow: inset 0 0 0 1px var(--tinta-3); }
-  .rej .d .k { font-size: 0.5625rem; font-weight: 500; color: var(--tinta-2); line-height: 1; }
-  .rej .d[aria-current="true"] { box-shadow: inset 0 0 0 1px var(--tinta); }
-  .rej .d.hoy::after { content: ""; width: 10px; height: 2px; background: var(--tinta-2); margin-top: 2px; }
+  .histo button i { display: block; width: min(100%, 26px); border-radius: 4px 4px 0 0; min-height: 0; background: var(--bg); }
+  .histo button .etq { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-14); font-weight: 800; color: var(--tinta);
+                       margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+  .histo button:hover i, .histo button:focus-visible i { box-shadow: 0 0 0 2px var(--tinta); }
+  .histo-eje { display: flex; gap: 3px; margin-top: 5px; }
+  .histo-eje span { flex: 1; font-size: var(--t-12); color: var(--tinta-3); text-align: center; font-variant-numeric: tabular-nums; }
 
   /* tooltip único, posicionado al vuelo */
   .tip {
-    position: fixed; z-index: 30; pointer-events: none; max-width: 260px;
-    background: var(--tinta); color: var(--oscura); border-radius: 4px; padding: 7px 9px;
-    font-size: var(--t-12); line-height: 1.35; white-space: pre-line; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    position: fixed; z-index: 30; pointer-events: none; max-width: 280px;
+    background: var(--tinta); color: var(--oscura); border-radius: var(--r-control); padding: 9px 11px;
+    font-size: var(--t-13); line-height: 1.4; white-space: pre-line; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   }
 
   /* ---------------- barra de estado ---------------- */
   .estado-barra {
-    align-items: stretch; background: var(--fondo); border-top: 1px solid var(--linea);
-    font-size: var(--t-12); color: var(--tinta-3); overflow: hidden; white-space: nowrap;
+    align-items: stretch; height: 2.5rem;
+    font-size: var(--t-13); color: var(--tinta-3); overflow: hidden; white-space: nowrap;
   }
-  .estado-barra > span { display: flex; align-items: center; gap: 7px; padding: 0 12px; border-right: 1px solid var(--linea); }
+  .estado-barra > span { display: flex; align-items: center; gap: 8px; padding: 0 14px; border-right: 1px solid var(--linea); }
+  .estado-barra > span:first-child { padding-left: 4px; }
   .estado-barra .der { margin-left: auto; border-right: 0; border-left: 1px solid var(--linea); }
-  .estado-barra b { color: var(--tinta-2); font-weight: 600; font-variant-numeric: tabular-nums; }
-  .estado-barra .medidor { width: 90px; height: 4px; background: var(--linea-viva); border-radius: 2px; overflow: hidden; }
+  .estado-barra b { color: var(--tinta-2); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .estado-barra .medidor { width: 100px; height: 5px; background: var(--linea-viva); border-radius: 3px; overflow: hidden; }
   .estado-barra .medidor i { display: block; height: 100%; background: var(--tinta-2); }
   .estado-barra .err { color: var(--tinta); }
   .estado-barra .err svg { color: var(--critico); }
@@ -578,30 +649,32 @@
   /* ---------------- pestañas (móvil) ---------------- */
   .pestanas {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 8;
-    display: grid; grid-template-columns: repeat(3, 1fr);
-    background: var(--fondo); border-top: 1px solid var(--linea);
-    padding-bottom: env(safe-area-inset-bottom);
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+    padding: 6px 10px calc(6px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--banda) 94%, transparent); border-top: 1px solid var(--linea);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
   }
   .pestanas button {
-    display: flex; flex-direction: column; align-items: center; gap: 3px;
-    border: 0; background: none; cursor: pointer; padding: 8px 0 9px;
-    font-size: var(--t-11); font-weight: 600; color: var(--tinta-3);
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    border: 0; border-radius: var(--r-tarjeta); background: none; cursor: pointer; padding: 8px 0 7px;
+    font-size: var(--t-13); font-weight: 600; color: var(--tinta-3);
   }
-  .pestanas button[aria-current="true"] { color: var(--tinta); }
+  .pestanas button[aria-current="true"] { color: var(--tinta); background: var(--panel-alto); }
   @media (max-width: 879px) {
-    body { padding-bottom: calc(58px + env(safe-area-inset-bottom)); }
+    body { padding-bottom: calc(78px + env(safe-area-inset-bottom)); }
     .app[data-pestana="partidos"] .lateral { display: none; }
     .app[data-pestana="panorama"] .centro,
     .app[data-pestana="ligas"] .centro { display: none; }
     .app[data-pestana="panorama"] .lateral,
-    .app[data-pestana="ligas"] .lateral { display: block; grid-area: centro; background: var(--panel); }
+    .app[data-pestana="ligas"] .lateral { display: block; grid-area: centro; }
     .app[data-pestana="panorama"] .pane-izq { display: none; }
     .app[data-pestana="ligas"] .pane-der { display: none; }
-    .grupo { --pega: var(--alto-cab-movil, 0px); }
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    .fila, .dia-celda, .prox, .liga-fila, .segmentos button, .baldosa { transition: background-color 0.15s ease, box-shadow 0.15s ease; }
+    .fila, .dia-celda, .prox, .liga-fila, .segmentos button, .claro, .tira-ligas button, .pestanas button {
+      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
   }
   @media (prefers-reduced-motion: reduce) { .punto { animation: none !important; } }
 </style>
@@ -612,26 +685,26 @@
 <div class="app" data-pestana="partidos">
   <header class="cab" id="cab">
     <a class="marca" href="#/" aria-label="Pronósticos, inicio">
-      <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true">
-        <rect x="3" y="8.5" width="7.6" height="15" rx="1.6" fill="#e8c468"></rect>
-        <rect x="12.2" y="8.5" width="7.6" height="15" rx="1.6" fill="#8b7a46"></rect>
-        <rect x="21.4" y="8.5" width="7.6" height="15" rx="1.6" fill="#575134"></rect>
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="3" y="8.5" width="7.6" height="15" rx="2" fill="#ffd24c"></rect>
+        <rect x="12.2" y="8.5" width="7.6" height="15" rx="2" fill="#a18047"></rect>
+        <rect x="21.4" y="8.5" width="7.6" height="15" rx="2" fill="#594d39"></rect>
       </svg>
       <span class="nombre">Pronósticos</span>
     </a>
+    <div class="estado-corto" id="estado-corto" data-modo="reposo"><span class="punto"></span><span class="txt">Cargando</span></div>
     <label class="buscar">
-      <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.6"></circle><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
+      <svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.6"></circle><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
       <input id="buscador" type="search" autocomplete="off" spellcheck="false" placeholder="Buscar equipo" aria-label="Buscar equipo">
       <kbd>/</kbd>
     </label>
     <div class="proximos" id="proximos" aria-label="Próximos partidos"></div>
-    <div class="estado-corto" id="estado-corto" data-modo="reposo"><span class="punto"></span><span class="txt">Cargando</span></div>
   </header>
 
   <section class="centro" aria-label="Partidos">
-    <div class="carril" id="fechas" role="toolbar" aria-label="Fechas"></div>
+    <div class="carril" id="fechas" role="toolbar" aria-label="Días"></div>
     <div class="banda" id="banda" hidden></div>
-    <div class="tira-ligas" id="tira-ligas" role="toolbar" aria-label="Competiciones"></div>
+    <div class="tira-ligas" id="tira-ligas" role="toolbar" aria-label="Ligas"></div>
     <div class="herramientas">
       <h1 class="titulo-vista" id="titulo-vista">Pronósticos</h1>
       <div id="limpiar-hueco"></div>
@@ -639,15 +712,15 @@
     </div>
     <div class="cab-tabla" aria-hidden="true">
       <span>Hora</span><span class="c-liga">Liga</span><span>Local</span><span>Visitante</span>
-      <span class="der">1</span><span class="der">X</span><span class="der">2</span>
-      <span class="der c-d">1X</span><span class="der c-d">X2</span><span class="der c-d">12</span>
-      <span class="der c-xg">Goles esp.</span><span class="der c-g">+2.5</span><span class="der c-g">Ambos</span><span class="der c-m">Muestra</span><span class="c-rep" style="padding-left:12px">Reparto</span>
+      <span class="der" data-tip="Gana el local">1</span><span class="der" data-tip="Empate">X</span><span class="der" data-tip="Gana el visitante">2</span>
+      <span class="der c-d" data-tip="Doble oportunidad: gana el local o empate">1X</span><span class="der c-d" data-tip="Doble oportunidad: empate o gana el visitante">X2</span><span class="der c-d" data-tip="Doble oportunidad: gana cualquiera de los dos, sin empate">12</span>
+      <span class="der c-xg" data-tip="Goles que el modelo espera de cada equipo">Goles esp.</span><span class="der c-g" data-tip="Más de 2.5 goles: 3 o más en el partido">+2.5</span><span class="der c-g" data-tip="Marcan los dos equipos">Ambos</span><span class="der c-m" data-tip="Partidos previos del equipo con menos historial. Con menos de 4, el número tira hacia la media de la liga">Muestra</span><span class="c-rep" data-tip="El 1 X 2 en una barra">Reparto</span>
     </div>
     <main class="vista" id="vista" tabindex="-1"></main>
   </section>
 
   <div class="lateral">
-    <aside class="pane-izq" id="pane-ligas" aria-label="Competiciones y fiabilidad"></aside>
+    <aside class="pane-izq" id="pane-ligas" aria-label="Ligas y fiabilidad"></aside>
     <aside class="pane-der" id="pane-panorama" aria-label="Panorama de la ventana"></aside>
   </div>
 
@@ -655,14 +728,14 @@
 
   <nav class="pestanas" aria-label="Secciones">
     <button data-p="partidos" aria-current="true">
-      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"></path></svg>
+      <svg width="22" height="22" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"></path></svg>
       Partidos</button>
     <button data-p="panorama" aria-current="false">
-      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1" fill="currentColor"></rect><rect x="11" y="3" width="6" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"></rect><rect x="3" y="11" width="6" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"></rect><rect x="11" y="11" width="6" height="6" rx="1" fill="currentColor"></rect></svg>
+      <svg width="22" height="22" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1.5" fill="currentColor"></rect><rect x="11" y="3" width="6" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"></rect><rect x="3" y="11" width="6" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"></rect><rect x="11" y="11" width="6" height="6" rx="1.5" fill="currentColor"></rect></svg>
       Panorama</button>
     <button data-p="ligas" aria-current="false">
-      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="3" height="3" fill="currentColor"></rect><rect x="3" y="9" width="3" height="3" fill="currentColor"></rect><rect x="3" y="14" width="3" height="3" fill="currentColor"></rect><path d="M9 5.5h8M9 10.5h8M9 15.5h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
-      Ligas y fechas</button>
+      <svg width="22" height="22" viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3.5" width="4" height="4" rx="1.2" fill="currentColor"></rect><rect x="2.5" y="12.5" width="4" height="4" rx="1.2" fill="currentColor"></rect><path d="M9.5 5.5h8M9.5 14.5h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"></path></svg>
+      Ligas</button>
   </nav>
 </div>
 
@@ -671,7 +744,6 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const app = document.querySelector(".app");
-const cab = $("cab");
 const vista = $("vista");
 const fechasEl = $("fechas");
 const bandaEl = $("banda");
@@ -700,37 +772,47 @@ let busqueda = "";
 const abiertos = new Set();
 const escudosRotos = new Set();
 
-// Identidad de liga: la SIGLA es el canal principal. El tinte acompaña solo en
-// listas de orden fijo (carril de ligas, cabeceras de grupo): ya con cuatro ligas
-// ninguna paleta pasa la prueba de todos-los-pares, así que donde cualquier liga
-// puede quedar junto a cualquier otra (tabla ordenada, mapa) no se usa color.
+// Identidad de liga: la SIGLA es el canal principal y va siempre dentro de la
+// insignia; el tono acompaña. Ninguna paleta de cuatro o más colores pasa la
+// prueba de todos-los-pares, así que donde cualquier liga puede quedar junto a
+// cualquier otra (tabla ordenada, próximos) es la sigla la que distingue.
+// "tinta": la que contrasta con el tono (todas >= 4.8:1). La Champions va primera
+// y con insignia de contorno: es un torneo, no una liga, y no gasta un tono.
 const LIGAS = {
-  PD:  { sigla: "ESP", tono: "var(--liga-PD)" },
-  PL:  { sigla: "ENG", tono: "var(--liga-PL)" },
-  FL1: { sigla: "FRA", tono: "var(--liga-FL1)" },
-  BL1: { sigla: "ALE", tono: "var(--liga-BL1)" },
-  SA:  { sigla: "ITA", tono: "var(--liga-SA)" },
-  DED: { sigla: "NED", tono: "var(--liga-DED)" },
-  PPL: { sigla: "POR", tono: "var(--liga-PPL)" },
-  ELC: { sigla: "EN2", tono: "var(--liga-ELC)" },
+  CL:  { sigla: "UCL", tono: "none",            tinta: "var(--tinta)", copa: true },
+  PD:  { sigla: "ESP", tono: "var(--liga-PD)",  tinta: "var(--oscura)" },
+  PL:  { sigla: "ENG", tono: "var(--liga-PL)",  tinta: "var(--oscura)" },
+  FL1: { sigla: "FRA", tono: "var(--liga-FL1)", tinta: "var(--oscura)" },
+  BL1: { sigla: "ALE", tono: "var(--liga-BL1)", tinta: "var(--oscura)" },
+  SA:  { sigla: "ITA", tono: "var(--liga-SA)",  tinta: "var(--oscura)" },
+  DED: { sigla: "NED", tono: "var(--liga-DED)", tinta: "var(--oscura)" },
+  PPL: { sigla: "POR", tono: "var(--liga-PPL)", tinta: "var(--oscura)" },
+  ELC: { sigla: "EN2", tono: "var(--liga-ELC)", tinta: "#ffffff" },
+  BSA: { sigla: "BRA", tono: "var(--liga-BSA)", tinta: "var(--oscura)" },
 };
 const ORDEN_LIGAS = Object.keys(LIGAS);
 function ligaDe(cod) {
-  return LIGAS[cod] || { sigla: (cod || "?").slice(0, 3).toUpperCase(), tono: "var(--tinta-3)" };
+  return LIGAS[cod] || { sigla: (cod || "?").slice(0, 3).toUpperCase(), tono: "var(--tinta-3)", tinta: "var(--oscura)" };
+}
+function htmlInsignia(cod, clase) {
+  const L = ligaDe(cod);
+  return '<span class="insignia' + (L.copa ? " copa" : "") + (clase ? " " + clase : "") + '" style="--tono:' + L.tono
+    + ";--tono-t:" + L.tinta + '">' + esc(L.sigla) + '</span>';
 }
 
-// Escala secuencial de probabilidad: un solo tono (arena), 8 tramos monótonos en
-// luminosidad y tinta elegida por contraste (todos >= 5:1). El tramo se decide
-// con el entero que se enseña, para que una celda que dice 60 caiga en 60-70.
+// Escala secuencial de probabilidad: un solo tono ámbar, 8 tramos con
+// luminosidad monótona, validada con el script de dataviz. Tinta blanca en los
+// tres primeros y oscura en el resto (todas >= 4.8:1). El tramo se decide con el
+// entero que se enseña, para que una celda que dice 60 caiga en 60-70.
 const RAMPA = [
-  { min: 0,  bg: "#1d231c", fg: "var(--tinta)" },
-  { min: 20, bg: "#2b2f23", fg: "var(--tinta)" },
-  { min: 30, bg: "#3e3e2b", fg: "var(--tinta)" },
-  { min: 40, bg: "#575134", fg: "var(--tinta)" },
-  { min: 50, bg: "#70653e", fg: "var(--tinta)" },
-  { min: 60, bg: "#a18c50", fg: "var(--oscura)" },
-  { min: 70, bg: "#c4a85c", fg: "var(--oscura)" },
-  { min: 80, bg: "#e8c468", fg: "var(--oscura)" },
+  { min: 0,  bg: "#594d39", fg: "#ffffff" },
+  { min: 20, bg: "#705d3e", fg: "#ffffff" },
+  { min: 30, bg: "#876e42", fg: "#ffffff" },
+  { min: 40, bg: "#a18047", fg: "var(--oscura)" },
+  { min: 50, bg: "#ba934a", fg: "var(--oscura)" },
+  { min: 60, bg: "#d4a64c", fg: "var(--oscura)" },
+  { min: 70, bg: "#ebbb4c", fg: "var(--oscura)" },
+  { min: 80, bg: "#ffd24c", fg: "var(--oscura)" },
 ];
 function tramo(v) {
   let t = RAMPA[0];
@@ -738,9 +820,6 @@ function tramo(v) {
   return t;
 }
 function estiloTramo(v) { const t = tramo(v); return "--bg:" + t.bg + ";--fg:" + t.fg; }
-
-// Rampa neutra para recuentos: el arena queda reservado a probabilidades.
-const RAMPA_N = ["var(--n1)", "var(--n2)", "var(--n3)", "var(--n4)"];
 
 // ==========================================
 // UTILIDADES
@@ -776,8 +855,8 @@ function aplanar(dias) {
   return out;
 }
 
-// El orden es el de LIGAS, no el de aparición en los datos: si no, el carril de
-// competiciones se reordena solo conforme van entrando partidos calculados.
+// El orden es el de LIGAS, no el de aparición en los datos: si no, la lista de
+// ligas se reordena sola conforme van entrando partidos calculados.
 function porLigas(partidos) {
   const m = new Map();
   partidos.forEach(p => {
@@ -812,7 +891,7 @@ function htmlEscudo(url, nombre) {
   const ini = esc((nombre || "?").replace(PREFIJOS, "").charAt(0).toUpperCase());
   if (url && /^https:\/\//.test(url) && !escudosRotos.has(url)) {
     return '<span class="escudo" data-ini="' + ini + '"><img src="' + esc(url)
-      + '" alt="" width="18" height="18" loading="lazy" decoding="async"></span>';
+      + '" alt="" width="24" height="24" loading="lazy" decoding="async"></span>';
   }
   return '<span class="escudo mono" aria-hidden="true">' + ini + '</span>';
 }
@@ -843,6 +922,13 @@ function veredictoDe(p) {
   return o.reduce((a, b) => (b.valor > a.valor ? b : a));
 }
 
+/** El % del favorito tal como sale en la tabla (del reparto que suma 100), para
+ *  que la casilla de los próximos y la de los más claros digan lo mismo. */
+function pctFavorito(p) {
+  const r = reparto(p), g = veredictoDe(p).signo;
+  return g === "1" ? r.l : g === "2" ? r.v : r.x;
+}
+
 /** Quién es el favorito, en tres letras: la sigla del equipo o "X" si es el empate. */
 function siglaFavorito(p) {
   const g = veredictoDe(p).signo;
@@ -865,7 +951,7 @@ function ordenar(lista) {
 // ==========================================
 // FILA DE PARTIDO
 // ==========================================
-const ICONO_AVISO = '<svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">'
+const ICONO_AVISO = '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">'
   + '<path d="M8 1.5 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"></path>'
   + '<path d="M8 6v3.4M8 11.6v.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path></svg>';
 
@@ -876,11 +962,10 @@ function muestraDe(p) {
 }
 
 function htmlFila(p, ctx, abierto) {
-  const L = ligaDe(p.liga_codigo);
   const hora = '<span class="c-hora"><span class="hh">' + esc(p.hora) + '</span>'
     + (ctx.conDia ? '<span class="dd">' + esc(diaCorto(p.dia)) + " " + fechaCorta(p.fecha) + '</span>' : "")
     + '</span>';
-  const liga = '<span class="c-liga">' + esc(L.sigla) + '</span>';
+  const liga = '<span class="c-liga">' + htmlInsignia(p.liga_codigo) + '</span>';
 
   let g = null, r = null;
   if (!p.pendiente) { g = veredictoDe(p).signo; r = reparto(p); }
@@ -891,7 +976,7 @@ function htmlFila(p, ctx, abierto) {
   let celdas, etiqueta;
   if (p.pendiente) {
     celdas = '<span class="c-p c-1 nada">—</span><span class="c-p c-x nada">—</span><span class="c-p c-2 nada">—</span>';
-    etiqueta = cortoDe(p, "local") + " contra " + cortoDe(p, "visita") + ", " + p.hora + ". Sin calcular todavía.";
+    etiqueta = p.liga + ". " + cortoDe(p, "local") + " contra " + cortoDe(p, "visita") + ", " + p.hora + ". Sin calcular todavía.";
   } else {
     const m = muestraDe(p);
     const ancho = (v) => '<i style="flex:' + v + ';background:' + tramo(v).bg + '"></i>';
@@ -904,7 +989,7 @@ function htmlFila(p, ctx, abierto) {
       + '<span class="c-g">' + (conGoles(p) ? Math.round(p.prob_ambos) : "—") + '</span>'
       + '<span class="c-m' + (m.min < 4 ? " poca" : "") + '">' + (m.min < 4 ? ICONO_AVISO : "") + (m.min >= 99 ? "—" : m.min) + '</span>'
       + '<span class="c-rep" aria-hidden="true">' + ancho(r.l) + ancho(r.x) + ancho(r.v) + '</span>';
-    etiqueta = cortoDe(p, "local") + " contra " + cortoDe(p, "visita") + ", " + p.hora + ". Local " + r.l
+    etiqueta = p.liga + ". " + cortoDe(p, "local") + " contra " + cortoDe(p, "visita") + ", " + p.hora + ". Local " + r.l
       + " %, empate " + r.x + " %, visitante " + r.v + " %."
       + (conGoles(p) ? " Más de 2.5 goles " + Math.round(p.prob_mas_25) + " %, ambos marcan " + Math.round(p.prob_ambos) + " %." : "");
   }
@@ -922,15 +1007,51 @@ function htmlDetalle(p) {
       + ' previo' + (m.min === 1 ? "" : "s") + ' en la muestra: la estimación tira hacia la media de la liga.</span></p>'
     : "";
   const dato = (t, v) => '<div><dt>' + t + '</dt><dd>' + v + '</dd></div>';
+  const ch = p.champions;
+  const muestraTxt = ch
+    ? "en su liga: " + m.l + " en casa del local, " + m.v + " fuera del visitante"
+    : m.l + " en casa del local, " + m.v + " fuera del visitante";
   return '<div class="detalle"><dl>'
     + dato("Partido", esc(p.local) + " – " + esc(p.visita))
     + dato("Competición", esc(p.liga) + ", " + esc(p.dia) + " " + fechaLarga(p.fecha) + ", " + esc(p.hora))
     + dato("1 X 2", "local " + pct(p.prob_local) + ", empate " + pct(p.prob_empate) + ", visitante " + pct(p.prob_visita))
     + dato("Doble oportunidad", "1X " + pct(p.prob_1x) + ", X2 " + pct(p.prob_x2) + ", 12 " + pct(p.prob_12))
     + dato("Goles esperados", f2(p.xg_local) + " – " + f2(p.xg_visita))
-    + dato("Muestra", m.l + " en casa del local, " + m.v + " fuera del visitante")
+    + dato("Muestra", muestraTxt)
+    + (ch ? dato("Nivel de liga", htmlNivelChampions(p)) : "")
     + (conGoles(p) ? htmlDetalleGoles(p, dato) : "")
-    + '</dl>' + aviso + (conGoles(p) ? htmlNotaGoles(p) : "") + '</div>';
+    + '</dl>' + (ch ? htmlAvisoChampions(p, m) : aviso) + (ch ? htmlNotaChampions() : "")
+    + (conGoles(p) ? htmlNotaGoles(p) : "") + '</div>';
+}
+
+/** De qué liga sale cada equipo de la Champions y con qué nivel. */
+function htmlNivelChampions(p) {
+  const uno = (lado) => {
+    const c = p.champions[lado] || {};
+    return '<span class="nw">' + esc(cortoDe(p, lado)) + ": " + (c.liga ? esc(c.nombre_liga) : "otra liga")
+      + " ×" + Number(c.factor).toFixed(2) + '</span>';
+  };
+  return uno("local") + ", " + uno("visita");
+}
+
+function htmlAvisoChampions(p, m) {
+  const sinLiga = ["local", "visita"].filter(l => !(p.champions[l] || {}).liga);
+  if (sinLiga.length) {
+    const nombres = sinLiga.map(l => cortoDe(p, l)).join(" y ");
+    const factor = Number(p.champions[sinLiga[0]].factor).toFixed(2);
+    return '<p class="aviso">' + ICONO_AVISO + '<span>' + esc(nombres) + (sinLiga.length > 1 ? " juegan" : " juega")
+      + ' en una liga que no está en el plan: sin datos de su liga, cuenta como un equipo medio de nivel ×' + factor + '.</span></p>';
+  }
+  return m.min < 4
+    ? '<p class="aviso">' + ICONO_AVISO + '<span>Solo ' + m.min + ' partido' + (m.min === 1 ? "" : "s")
+      + ' previo' + (m.min === 1 ? "" : "s") + ' en su liga: la estimación tira hacia la media de esa liga.</span></p>'
+    : "";
+}
+
+function htmlNotaChampions() {
+  return '<p class="nota-goles">En la Champions cada equipo se mide en su liga nacional (sus últimos partidos, '
+    + 'atenuados a la mitad) y se ajusta por el nivel de esa liga, medido con los cruces de la Champions 2024/25. '
+    + 'Así acertó un 7 % mejor que no saber nada, con una sola temporada de datos: tómalo como una base.</p>';
 }
 
 function htmlDetalleGoles(p, dato) {
@@ -959,7 +1080,7 @@ function htmlGraficoGoles(p) {
   const e = enterosQueSuman(rep);
   const max = Math.max(...rep);
   const etiquetas = ["0", "1", "2", "3", "4", "5+"];
-  const alto = 46;
+  const alto = 56;
   const texto = etiquetas.map((k, i) => k + (k === "1" ? " gol " : " goles ") + e[i] + " %").join(", ");
   return '<div class="goles-graf" role="img" aria-label="' + esc("Goles en el partido: " + texto) + '">'
     + rep.map((v, i) => '<div class="gb' + (v === max ? " max" : "") + '"><span class="v">' + e[i] + '</span>'
@@ -999,7 +1120,6 @@ function pintarBloques(cont, items) {
     if (el.dataset.huella !== it.huella) {
       el.dataset.huella = it.huella;
       el.className = it.clase;
-      if (it.tono) el.style.setProperty("--tono", it.tono);
       el.innerHTML = it.html;
     }
     if (cont.children[i] !== el) cont.insertBefore(el, cont.children[i] || null);
@@ -1019,13 +1139,12 @@ function bloquesDePartidos(partidos, ctx) {
   });
 }
 
-function bloqueGrupo(clave, texto, cuenta, tono, clase) {
+function bloqueGrupo(clave, texto, cuenta, codLiga, clase) {
   return {
     id: "g-" + clave,
-    huella: texto + "|" + cuenta + "|" + (tono || ""),
+    huella: texto + "|" + cuenta + "|" + (codLiga || ""),
     clase: "grupo" + (clase ? " " + clase : ""),
-    tono: tono,
-    html: '<span class="g-nom">' + (tono ? '<span class="muestra-tono"></span>' : "") + '<span>' + esc(texto) + '</span>'
+    html: '<span class="g-nom">' + (codLiga ? htmlInsignia(codLiga) : "") + '<span class="txt">' + esc(texto) + '</span>'
       + '<span class="cuenta">' + cuenta + " partido" + (cuenta === 1 ? "" : "s") + '</span></span>'
       + '<span class="g-col">1</span><span class="g-col">X</span><span class="g-col">2</span>',
   };
@@ -1046,8 +1165,8 @@ function leerRuta() {
   if (t[0] === "semana") return { vista: "semana" };
   return { vista: "inicio" };
 }
-// Se pinta en el acto: así quien navega (el mapa, la cinta) encuentra la fila ya en
-// el DOM. El hashchange que llega después ve la misma ruta y no reconstruye nada.
+// Se pinta en el acto: así quien navega (los más claros, los próximos) encuentra la
+// fila ya en el DOM. El hashchange que llega después ve la misma ruta y no reconstruye nada.
 function irA(hash) {
   if (location.hash !== hash) location.hash = hash;
   render();
@@ -1079,8 +1198,8 @@ function bloquesCentro(todos, ruta) {
     const suyos = todos.filter(p => (p.liga_codigo || p.liga) === ruta.liga);
     const sel = ruta.fecha ? suyos.filter(p => p.fecha === ruta.fecha) : suyos;
     const nombre = suyos.length ? suyos[0].liga : ruta.liga;
-    const out = { titulo: nombre, sub: ruta.fecha ? fechaLarga(ruta.fecha) : "toda la ventana", mezcla: false, bloques: [] };
-    if (!sel.length) { out.vacio = ["Nada ese día", "Esta competición no juega en la fecha elegida."]; return out; }
+    const out = { titulo: nombre, sub: ruta.fecha ? fechaLarga(ruta.fecha) : "toda la semana", mezcla: false, bloques: [] };
+    if (!sel.length) { out.vacio = ["Nada ese día", "Esta liga no juega en la fecha elegida."]; return out; }
     if (orden !== "hora" || ruta.fecha) {
       out.bloques = bloquesDePartidos(ordenar(sel), { conDia: !ruta.fecha });
       return out;
@@ -1093,7 +1212,7 @@ function bloquesCentro(todos, ruta) {
   }
 
   if (ruta.vista === "semana" || (ruta.vista === "inicio" && mqEscritorio.matches)) {
-    const out = { titulo: "Toda la ventana", sub: todos.length + " partidos", mezcla: true, bloques: [] };
+    const out = { titulo: "Toda la semana", sub: todos.length + " partidos", mezcla: true, bloques: [] };
     if (orden !== "hora") { out.bloques = bloquesDePartidos(ordenar(todos), { conDia: true }); return out; }
     porDias(todos).forEach(d => {
       out.bloques.push(bloqueGrupo(d.fecha, nombreDia(d), d.partidos.length, null, "dia"));
@@ -1102,7 +1221,7 @@ function bloquesCentro(todos, ruta) {
     return out;
   }
 
-  // un día, agrupado por competición en orden fijo (aquí el tinte de liga es legítimo)
+  // un día, agrupado por liga en orden fijo
   const fecha = ruta.vista === "dia" ? ruta.fecha : primerDia(todos);
   const delDia = todos.filter(p => p.fecha === fecha);
   const d0 = porDias(delDia)[0];
@@ -1114,21 +1233,21 @@ function bloquesCentro(todos, ruta) {
     return out;
   }
   porLigas(delDia).forEach(L => {
-    out.bloques.push(bloqueGrupo(L.codigo + "-" + fecha, L.nombre, L.partidos.length, ligaDe(L.codigo).tono, "liga"));
+    out.bloques.push(bloqueGrupo(L.codigo + "-" + fecha, L.nombre, L.partidos.length, L.codigo, "liga"));
     out.bloques.push.apply(out.bloques, bloquesDePartidos(ordenar(L.partidos), { conDia: false }));
   });
   return out;
 }
 
 // ==========================================
-// TIRA DE FECHAS
+// DÍAS: el único calendario
 // ==========================================
 function htmlForma(partidos) {
   // una barrita por partido, alto según la fuerza del favorito, de más a menos claro
   const con = partidos.filter(p => !p.pendiente).map(favorito).sort((a, b) => b - a);
   const sin = partidos.length - con.length;
   return '<span class="forma" aria-hidden="true">'
-    + con.map(v => '<i style="height:' + Math.max(3, Math.round((v - 30) / 60 * 18)) + 'px;background:'
+    + con.map(v => '<i style="height:' + Math.max(3, Math.round((v - 30) / 60 * 20)) + 'px;background:'
         + tramo(Math.round(v)).bg + '"></i>').join("")
     + Array(sin).fill('<i style="height:2px;background:var(--linea-viva)"></i>').join("")
     + '</span>';
@@ -1148,17 +1267,21 @@ function pintarFechas(todos, ruta) {
   if (busqueda) sel = null;
 
   const dias = porDias(conjunto);
-  const html = dias.map(d => {
-    const p = partes(d.fecha);
-    return '<button class="dia-celda" data-hash="' + esc(base + d.fecha) + '" aria-current="' + (sel === d.fecha) + '">'
-      + '<span class="dow">' + esc(d.etiqueta === "Hoy" || d.etiqueta === "Mañana" ? d.etiqueta : diaCorto(d.etiqueta)) + '</span>'
-      + '<span class="fecha num">' + p.d + '<small>' + MESES[p.m - 1] + '</small></span>'
-      + '<span class="cuantos num">' + d.partidos.length + '</span>'
-      + htmlForma(d.partidos) + '</button>';
-  }).join("")
-    + '<button class="dia-celda toda" data-hash="' + esc(todoHash) + '" aria-current="' + (sel === "") + '">'
-    + '<span class="dow">' + esc(todoTexto) + '</span><span class="fecha num">' + conjunto.length + '<small>partidos</small></span>'
-    + htmlForma(conjunto) + '</button>';
+  const html = '<button class="dia-celda toda" data-hash="' + esc(todoHash) + '" aria-current="' + (sel === "") + '"'
+    + ' aria-label="' + esc(todoTexto + ", " + conjunto.length + " partidos en " + dias.length + " días") + '">'
+    + '<span class="dow">' + esc(todoTexto) + '</span>'
+    + '<span class="cuantos num">' + conjunto.length + '</span>'
+    + '<span class="fecha num">' + dias.length + '<small>' + (dias.length === 1 ? "día" : "días") + '</small></span>'
+    + htmlForma(conjunto) + '</button>'
+    + dias.map(d => {
+      const p = partes(d.fecha);
+      return '<button class="dia-celda" data-hash="' + esc(base + d.fecha) + '" aria-current="' + (sel === d.fecha) + '"'
+        + ' aria-label="' + esc(nombreDia(d) + ", " + d.partidos.length + " partidos") + '">'
+        + '<span class="dow">' + esc(d.etiqueta === "Hoy" || d.etiqueta === "Mañana" ? d.etiqueta : diaCorto(d.etiqueta)) + '</span>'
+        + '<span class="cuantos num">' + d.partidos.length + '</span>'
+        + '<span class="fecha num">' + p.d + '<small>' + MESES[p.m - 1] + '</small></span>'
+        + htmlForma(d.partidos) + '</button>';
+    }).join("");
   if (fechasEl.dataset.huella === html) return;
   fechasEl.dataset.huella = html;
   fechasEl.innerHTML = html;
@@ -1166,9 +1289,9 @@ function pintarFechas(todos, ruta) {
 
 function pintarTiraLigas(todos, ruta) {
   const activa = ruta.vista === "liga" ? ruta.liga : "";
-  const html = '<button data-liga="" aria-current="' + (activa === "") + '">Todas <span class="n num">' + todos.length + '</span></button>'
-    + porLigas(todos).map(L => '<button data-liga="' + esc(L.codigo) + '" aria-current="' + (activa === L.codigo)
-      + '" style="--tono:' + ligaDe(L.codigo).tono + '"><span class="muestra-tono"></span>' + esc(L.nombre)
+  const html = '<button class="sin-insignia" data-liga="" aria-current="' + (activa === "") + '">Todas <span class="n num">' + todos.length + '</span></button>'
+    + porLigas(todos).map(L => '<button data-liga="' + esc(L.codigo) + '" aria-current="' + (activa === L.codigo) + '">'
+      + htmlInsignia(L.codigo, "redonda") + esc(L.nombre)
       + ' <span class="n num">' + L.partidos.length + '</span></button>').join("");
   if (tiraLigasEl.dataset.huella === html) return;
   tiraLigasEl.dataset.huella = html;
@@ -1184,7 +1307,7 @@ function pintarOrden() {
 }
 
 // ==========================================
-// PANEL DE LIGAS
+// TABLERO DE LIGAS
 // ==========================================
 const MERCADOS_FIAB = {
   "1x2":  { etiqueta: "1X2",   nombre: "1X2" },
@@ -1235,7 +1358,7 @@ function htmlFiabilidad() {
         const barra = m.skill >= 0
           ? '<i style="left:50%;width:' + ancho + '%"></i>'
           : '<i class="neg" style="left:' + (50 - ancho) + '%;width:' + ancho + '%"></i>';
-        return '<div class="fiab"><span class="sig">' + esc(ligaDe(x.c).sigla) + '</span>'
+        return '<div class="fiab">' + htmlInsignia(x.c)
           + '<span class="eje" role="img" data-tip="' + esc(m.tip) + '" aria-label="' + esc(m.tip.replace(/\n/g, ". ")) + '">' + barra + '</span>'
           + '<span class="val">' + (m.skill > 0 ? "+" : "") + m.skill + '</span>'
           + '<span class="acierto">' + acierto + '</span></div>';
@@ -1246,63 +1369,59 @@ function htmlFiabilidad() {
           + ' apenas se separan de la media de la liga: un skill cercano a 0 es lo esperable.') + '</p></section>';
 }
 
+const ICONO_TODAS = '<svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true">'
+  + '<rect x="2" y="2" width="5" height="5" rx="1.3" fill="currentColor"></rect><rect x="9" y="2" width="5" height="5" rx="1.3" fill="currentColor"></rect>'
+  + '<rect x="2" y="9" width="5" height="5" rx="1.3" fill="currentColor"></rect><rect x="9" y="9" width="5" height="5" rx="1.3" fill="currentColor"></rect></svg>';
+
 function pintarLigasPane(todos, ruta) {
   const activa = ruta.vista === "liga" ? ruta.liga : "";
-  const filas = porLigas(todos).map(L => {
+  const ligas = porLigas(todos);
+  const filas = ligas.map(L => {
     const i = (infoLigas || {})[L.codigo] || {};
     const stats = i.media_usada_local
-      ? "Goles: " + f2(i.media_usada_local) + " en casa, " + f2(i.media_usada_visita) + " fuera" : "";
-    const jugados = i.partidos_esta_temporada ? i.partidos_esta_temporada + " partidos jugados esta temporada" : "";
-    return '<button class="liga-fila" data-liga="' + esc(L.codigo) + '" aria-current="' + (activa === L.codigo)
-      + '" style="--tono:' + ligaDe(L.codigo).tono + '"><span class="muestra-tono"></span>'
-      + '<span class="sig">' + esc(ligaDe(L.codigo).sigla) + '</span><span class="nom">' + esc(L.nombre) + '</span>'
-      + '<span class="n">' + L.partidos.length + '</span>'
-      + (stats ? '<span class="stats" title="' + esc(jugados) + '">' + esc(stats) + '</span>' : "") + '</button>';
+      ? "Goles: " + f2(i.media_usada_local) + " casa, " + f2(i.media_usada_visita) + " fuera" : "";
+    const jugados = stats ? "Media de goles que usa el modelo: " + f2(i.media_usada_local) + " del local y "
+      + f2(i.media_usada_visita) + " del visitante"
+      + (i.partidos_esta_temporada ? ", con " + i.partidos_esta_temporada + " partidos jugados esta temporada" : "") : "";
+    return '<button class="liga-fila' + (stats ? "" : " sin-stats") + '" data-liga="' + esc(L.codigo) + '" aria-current="' + (activa === L.codigo) + '">'
+      + htmlInsignia(L.codigo, "grande") + '<span class="nom">' + esc(L.nombre) + '</span>'
+      + (stats ? '<span class="stats" title="' + esc(jugados) + '">' + esc(stats) + '</span>' : "")
+      + '<span class="n">' + L.partidos.length + '</span></button>';
   }).join("");
-  const fechaSel = busqueda ? "" : ruta.vista === "dia" ? ruta.fecha
-    : ruta.vista === "inicio" && !mqEscritorio.matches ? primerDia(todos) : "";
-  const html = '<section class="modulo m-ligas"><h2>Competiciones <span class="meta">' + todos.length + ' partidos</span></h2>'
-    + '<button class="liga-fila" data-liga="" aria-current="' + (activa === "") + '"><span class="muestra-tono" style="background:var(--tinta-3)"></span>'
-    + '<span class="sig"></span><span class="nom">Todas</span><span class="n">' + todos.length + '</span></button>'
-    + filas + '</section>' + htmlCalendario(todos, fechaSel) + htmlLeyenda();
+  const html = '<section class="modulo m-ligas"><h2>Ligas <span class="meta">' + todos.length + ' partidos</span></h2><div class="ligas">'
+    + '<button class="liga-fila" data-liga="" aria-current="' + (activa === "") + '">'
+    + '<span class="insignia grande todas">' + ICONO_TODAS + '</span><span class="nom">Todas las ligas</span>'
+    + '<span class="stats">' + ligas.length + (ligas.length === 1 ? " competición" : " competiciones") + ' esta semana</span>'
+    + '<span class="n">' + todos.length + '</span></button>'
+    + filas + '</div></section>' + htmlFiabilidad();
   if (paneLigas.dataset.huella === html) return;
   paneLigas.dataset.huella = html;
   paneLigas.innerHTML = html;
 }
 
 // ==========================================
-// PANEL PANORAMA
+// TABLERO PANORAMA
 // ==========================================
-function htmlMapa(todos) {
-  const dias = porDias(todos);
-  if (!dias.length) return "";
-  const cols = dias.map(d => {
-    const con = d.partidos.filter(p => !p.pendiente).sort((a, b) => favorito(b) - favorito(a));
-    const sin = d.partidos.filter(p => p.pendiente);
-    const p0 = partes(d.fecha);
-    const dow = d.etiqueta === "Hoy" ? "Hoy" : d.etiqueta.slice(0, 3);
-    return '<div class="mapa-col"><span class="cab-col">' + esc(dow) + '<b>' + p0.d + '</b></span>'
-      + con.map(p => {
-          const v = Math.round(favorito(p));
-          const t = tramo(v);
-          const txt = cortoDe(p, "local") + " – " + cortoDe(p, "visita") + "\n" + p.liga + ", " + p.hora
-            + "\nFavorito: " + (siglaFavorito(p) === "X" ? "empate" : (veredictoDe(p).signo === "1" ? cortoDe(p, "local") : cortoDe(p, "visita")))
-            + " " + v + " %";
-          return '<button class="baldosa" style="--bg:' + t.bg + ';--fg:' + t.fg + '" data-fecha="' + esc(p.fecha)
-            + '" data-id="' + esc(p.id) + '" data-tip="' + esc(txt) + '" aria-label="' + esc(txt.replace(/\n/g, ". ")) + '">'
-            + '<span class="q">' + esc(siglaFavorito(p)) + '</span><span class="v">' + v + '</span></button>';
-        }).join("")
-      + sin.map(p => '<button class="baldosa pend" data-fecha="' + esc(p.fecha) + '" data-id="' + esc(p.id)
-          + '" data-tip="' + esc(cortoDe(p, "local") + " – " + cortoDe(p, "visita") + "\nSin calcular todavía")
-          + '" aria-label="' + esc(cortoDe(p, "local") + " contra " + cortoDe(p, "visita") + ", sin calcular") + '">'
-          + '<span class="q">' + esc(siglaDe(p, "local")) + '</span><span class="v">—</span></button>').join("")
-      + '</div>';
-  }).join("");
-  const leyenda = RAMPA.slice(2).map((r, i) => '<span><i style="background:' + r.bg + '"></i>'
-    + (i === RAMPA.length - 3 ? "80+" : r.min) + '</span>').join("");
-  return '<section class="modulo m-mapa"><h2>Mapa de la ventana <span class="meta">favorito y su probabilidad</span></h2>'
-    + '<div class="mapa">' + cols + '</div><div class="leyenda" aria-hidden="true">' + leyenda + '</div>'
-    + '<p class="nota">Cada casilla es un partido: la sigla del favorito ("X" si es el empate) y su probabilidad. Cuanto más clara, más claro el pronóstico.</p></section>';
+/** Los ocho favoritos más claros de la ventana, de más a menos. */
+function htmlClaros(todos) {
+  const con = todos.filter(p => !p.pendiente).sort((a, b) => favorito(b) - favorito(a)).slice(0, 8);
+  if (!con.length) return "";
+  return '<section class="modulo m-claros"><h2>Los más claros <span class="meta">de la semana</span></h2><div class="claros">'
+    + con.map(p => {
+        const g = veredictoDe(p).signo;
+        const n = pctFavorito(p);
+        const quien = g === "1" ? cortoDe(p, "local") : g === "2" ? cortoDe(p, "visita") : "Empate";
+        const contra = g === "1" ? "en casa contra " + cortoDe(p, "visita")
+          : g === "2" ? "fuera, contra " + cortoDe(p, "local")
+          : cortoDe(p, "local") + " – " + cortoDe(p, "visita");
+        const cuando = (p.dia === "Hoy" || p.dia === "Mañana" ? p.dia : p.dia.slice(0, 3)) + " " + p.hora;
+        return '<button class="claro" data-fecha="' + esc(p.fecha) + '" data-id="' + esc(p.id) + '"'
+          + ' aria-label="' + esc(quien + " " + n + " %, " + contra + ". " + p.liga + ", " + cuando) + '">'
+          + '<span class="casilla" style="' + estiloTramo(n) + '">' + n + '</span>'
+          + '<span class="txt"><span class="quien">' + esc(quien) + '</span><span class="contra">' + esc(contra) + '</span></span>'
+          + '<span class="cuando">' + htmlInsignia(p.liga_codigo) + '<span>' + esc(cuando) + '</span></span></button>';
+      }).join("")
+    + '</div></section>';
 }
 
 function htmlHistograma(todos) {
@@ -1325,7 +1444,7 @@ function htmlHistograma(todos) {
     const txt = rango + "\n" + c + " partido" + (c === 1 ? "" : "s");
     return '<button class="' + (i === iMax ? "max" : "") + '" data-tip="' + esc(txt) + '" aria-label="' + esc(txt.replace("\n", ": ")) + '">'
       + (i === iMax ? '<span class="etq">' + c + '</span>' : "")
-      + '<i style="height:' + (max ? c / max * 78 : 0) + 'px"></i></button>';
+      + '<i style="--bg:' + tramo(bordes[i]).bg + ';height:' + (max ? c / max * 96 : 0) + 'px"></i></button>';
   }).join("");
   const eje = bordes.map((b, i) => '<span>' + (i % 2 === 0 ? (i === bordes.length - 1 ? "80+" : b) : "") + '</span>').join("");
   return '<section class="modulo m-confianza"><h2>Confianza del favorito <span class="meta">mediana ' + Math.round(mediana) + ' %</span></h2>'
@@ -1333,70 +1452,21 @@ function htmlHistograma(todos) {
     + '<p class="nota">Cuántos partidos tienen un favorito de cada fuerza. A la izquierda, los que son casi una moneda al aire.</p></section>';
 }
 
-function htmlLeyenda() {
-  const escala = RAMPA.slice(2).map((r, i) => '<span><i style="background:' + r.bg + '"></i>'
-    + (i === RAMPA.length - 3 ? "80+" : r.min) + '</span>').join("");
-  const fila = (dt, dd) => '<div><dt>' + dt + '</dt><dd>' + dd + '</dd></div>';
-  return '<section class="modulo m-leyenda"><h2>Cómo leer la tabla <span class="meta">probabilidad en %</span></h2>'
-    + '<div class="leyenda-escala" aria-hidden="true">' + escala + '</div>'
-    + '<dl class="leyenda-tabla">'
-    + fila("1 X 2", "Local, empate, visitante")
-    + fila("1X X2 12", "Doble oportunidad")
-    + fila("+2.5", "Más de 2.5 goles: 3 o más en el partido")
-    + fila("Ambos", "Marcan los dos equipos")
-    + fila(ICONO_AVISO + " 2", "Muestra corta: menos de 4 partidos previos")
-    + fila("—", "Sin calcular todavía")
-    + '</dl></section>';
-}
-
-const DOW = ["L", "M", "X", "J", "V", "S", "D"];
-function htmlCalendario(todos, fechaSel) {
-  const dias = porDias(todos);
-  if (!dias.length) return "";
-  const cuenta = {};
-  dias.forEach(d => { cuenta[d.fecha] = d.partidos.length; });
-  const hoy = (dias.find(d => d.etiqueta === "Hoy") || {}).fecha || "";
-  const maxN = Math.max(...Object.values(cuenta));
-  // el mes (o los dos meses) que toca la ventana
-  const meses = [];
-  dias.forEach(d => { const p = partes(d.fecha); const k = p.a + "-" + p.m; if (meses.indexOf(k) < 0) meses.push(k); });
-  return '<section class="modulo calendario m-cal"><h2>Calendario <span class="meta">partidos por día</span></h2>'
-    + meses.map(k => {
-        const [a, m] = k.split("-").map(Number);
-        const primer = (new Date(Date.UTC(a, m - 1, 1)).getUTCDay() + 6) % 7;
-        const n = new Date(Date.UTC(a, m, 0)).getUTCDate();
-        let celdas = DOW.map(x => '<span class="dow">' + x + '</span>').join("");
-        for (let i = 0; i < primer; i++) celdas += '<span></span>';
-        for (let d = 1; d <= n; d++) {
-          const iso = a + "-" + String(m).padStart(2, "0") + "-" + String(d).padStart(2, "0");
-          const c = cuenta[iso];
-          if (!c) { celdas += '<span class="d">' + d + '</span>'; continue; }
-          const paso = Math.min(RAMPA_N.length - 1, Math.floor(c / (maxN + 1) * RAMPA_N.length));
-          celdas += '<button class="d con' + (iso === hoy ? " hoy" : "") + '" style="--bgn:' + RAMPA_N[paso] + '" data-hash="#/dia/' + iso
-            + '" aria-current="' + (iso === fechaSel) + '" data-tip="' + esc(d + " de " + MESES_LARGOS[m - 1] + "\n" + c + " partido" + (c === 1 ? "" : "s"))
-            + '">' + d + '<span class="k">' + c + '</span></button>';
-        }
-        return '<p class="mes">' + esc(MESES_LARGOS[m - 1].charAt(0).toUpperCase() + MESES_LARGOS[m - 1].slice(1)) + " " + a + '</p>'
-          + '<div class="rej">' + celdas + '</div>';
-      }).join("")
-    + '</section>';
-}
-
 function pintarPanorama(todos, ruta) {
-  const html = htmlMapa(todos) + htmlHistograma(todos) + htmlFiabilidad();
+  const html = htmlClaros(todos) + htmlHistograma(todos);
   if (panePan.dataset.huella === html) return;
   panePan.dataset.huella = html;
   panePan.innerHTML = html;
 }
 
 // ==========================================
-// CINTA DE PRÓXIMOS
+// MARCADOR DE PRÓXIMOS
 // ==========================================
 function cuentaAtras(p) {
   const min = Math.round((Date.parse(p.utcDate) - Date.now()) / 60000);
   if (min < 1) return "ahora";
   if (min < 60) return "en " + min + " min";
-  if (min < 24 * 60) return "en " + Math.round(min / 60) + " h";
+  if (min < 24 * 60) return "en " + Math.round(min / 60) + " h, " + p.hora;
   return diaCorto(p.dia) + " " + p.hora;
 }
 
@@ -1404,15 +1474,20 @@ function pintarProximos(todos) {
   const ahora = Date.now();
   const prox = todos.filter(p => Date.parse(p.utcDate) > ahora)
     .sort((a, b) => a.utcDate.localeCompare(b.utcDate)).slice(0, 10);
-  const html = '<span class="rotulo-cinta">Próximos</span>' + prox.map(p => {
-    const chip = p.pendiente ? ""
-      : '<span class="c-p" style="' + estiloTramo(Math.round(favorito(p))) + ';height:20px;min-width:0;padding:0 6px">'
-        + esc(siglaFavorito(p)) + " " + Math.round(favorito(p)) + '</span>';
-    return '<button class="prox" data-fecha="' + esc(p.fecha) + '" data-id="' + esc(p.id) + '" title="'
-      + esc(cortoDe(p, "local") + " – " + cortoDe(p, "visita") + ", " + p.liga) + '">'
-      + '<span class="cuando">' + esc(cuentaAtras(p)) + '</span>'
-      + '<span class="quienes">' + esc(siglaDe(p, "local")) + "–" + esc(siglaDe(p, "visita")) + '</span>' + chip + '</button>';
-  }).join("");
+  const html = prox.length ? '<span class="rotulo-cinta">Próximos</span>' + prox.map(p => {
+    const n = p.pendiente ? null : pctFavorito(p);
+    const fav = p.pendiente
+      ? '<span class="p-fav nada" aria-hidden="true">—</span>'
+      : '<span class="p-fav" style="' + estiloTramo(n) + '"><span class="s">' + esc(siglaFavorito(p)) + '</span>'
+        + '<span class="v num">' + n + '</span></span>';
+    const etiqueta = cortoDe(p, "local") + " contra " + cortoDe(p, "visita") + ", " + p.liga + ", " + cuentaAtras(p)
+      + (p.pendiente ? ". Sin calcular todavía" : ". Favorito " + (siglaFavorito(p) === "X" ? "el empate" : siglaFavorito(p)) + ", " + n + " %");
+    return '<button class="prox" data-fecha="' + esc(p.fecha) + '" data-id="' + esc(p.id) + '" aria-label="' + esc(etiqueta) + '">'
+      + '<span class="p-cab">' + htmlInsignia(p.liga_codigo) + '<span>' + esc(cuentaAtras(p)) + '</span></span>'
+      + '<span class="p-eq">' + htmlEscudo(p.local_escudo, cortoDe(p, "local")) + '<span class="nom">' + esc(cortoDe(p, "local")) + '</span></span>'
+      + '<span class="p-eq">' + htmlEscudo(p.visita_escudo, cortoDe(p, "visita")) + '<span class="nom">' + esc(cortoDe(p, "visita")) + '</span></span>'
+      + fav + '</button>';
+  }).join("") : "";
   if (proximosEl.dataset.huella === html) return;
   proximosEl.dataset.huella = html;
   proximosEl.innerHTML = html;
@@ -1430,7 +1505,7 @@ function haceCuanto(iso) {
   return "hace " + h + " h";
 }
 
-const ICONO_PAUSA = '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="1.5" y="1" width="2.5" height="8" fill="currentColor"></rect><rect x="6" y="1" width="2.5" height="8" fill="currentColor"></rect></svg>';
+const ICONO_PAUSA = '<svg width="12" height="12" viewBox="0 0 10 10" aria-hidden="true"><rect x="1.5" y="1" width="2.5" height="8" fill="currentColor"></rect><rect x="6" y="1" width="2.5" height="8" fill="currentColor"></rect></svg>';
 
 function pintarEstado() {
   const e = datos.estado;
@@ -1502,8 +1577,8 @@ function render() {
     [fechasEl, tiraLigasEl, ordenEl, proximosEl].forEach(el => { el.innerHTML = ""; el.dataset.huella = ""; });
     vista.innerHTML = estadoVacio();
     const ph = (t) => '<section class="modulo"><h2>' + t + '</h2><p class="placeholder">Se rellena con la primera actualización.</p></section>';
-    paneLigas.innerHTML = ph("Competiciones") + ph("Calendario") + htmlLeyenda(); paneLigas.dataset.huella = "";
-    panePan.innerHTML = ph("Mapa de la ventana") + ph("Confianza del favorito") + htmlFiabilidad(); panePan.dataset.huella = "";
+    paneLigas.innerHTML = ph("Ligas") + htmlFiabilidad(); paneLigas.dataset.huella = "";
+    panePan.innerHTML = ph("Los más claros") + ph("Confianza del favorito"); panePan.dataset.huella = "";
     return;
   }
   app.classList.remove("sin-datos");
@@ -1532,15 +1607,7 @@ function render() {
   pintarLigasPane(todos, ruta);
   pintarPanorama(todos, ruta);
   pintarProximos(todos);
-  medirCabecera();
 }
-
-// En móvil la página se desplaza entera y la cabecera es pegajosa: las cabeceras de
-// grupo se anclan justo debajo, con su alto real.
-function medirCabecera() {
-  document.documentElement.style.setProperty("--alto-cab-movil", cab.offsetHeight + "px");
-}
-window.addEventListener("resize", medirCabecera);
 
 // ==========================================
 // INTERACCIÓN
@@ -1584,7 +1651,7 @@ document.addEventListener("click", (e) => {
 
   if (t.closest("#limpiar")) { limpiarBusqueda(); rutaPintada = null; render(); inputBuscar.focus(); return; }
 
-  const salto = t.closest(".baldosa, .prox");
+  const salto = t.closest(".claro, .prox");
   if (salto) { abrirPartido(salto.dataset.fecha, salto.dataset.id); return; }
 
   const fila = t.closest(".fila");

@@ -23,10 +23,15 @@ modelo Poisson de fuerzas ataque/defensa.
 - Flask + gunicorn (`gunicorn app:app`), scipy para el modelo Poisson.
 - Datos: football-data.org, plan free (10 peticiones/minuto, sin acceso a
   temporadas 2021/2022 — devuelven HTTP 403).
-- Ligas activas: PD, PL, FL1, BL1, SA, DED, PPL, ELC: todas las ligas del plan
-  free. Lo que queda en él son torneos (Champions, Mundial, Eurocopa), fuera
-  por la razón de abajo. Europa League y Conference League no están en el plan
-  free.
+- Ligas activas: PD, PL, FL1, BL1, SA, DED, PPL, ELC, BSA: todas las ligas del
+  plan free. Torneo: la Champions (CL, en `TORNEOS`), que se predice con un
+  modelo propio (ver "Champions: cómo se predice"). Mundial y Eurocopa no se
+  ponen: son de selecciones y no hay con qué medirlas. Europa League y
+  Conference League no están en el plan free.
+- El Brasileirão (BSA) va de enero a diciembre: su temporada es el año natural
+  (`LIGAS_ANO_NATURAL`). `temporada_actual(codigo)` lo tiene en cuenta para el
+  prior; sin eso, entre enero y junio se anclaría en la temporada de hace dos
+  años.
 
 ## Arquitectura
 
@@ -60,58 +65,85 @@ suspendería a ambos.
 `{{ }}`: es un shell estático con el CSS y el JS en línea que se pinta entero en
 el cliente sondeando `/api/estado` (cada 4s mientras hay cálculo en curso, cada
 30s el resto del tiempo). No hay `static/`, ni build, ni dependencias de JS; de
-fuera solo llegan la fuente Archivo (Google Fonts, con fallback del sistema) y
-los escudos (URLs de football-data.org). Al tocar la web se trabaja sobre las
-funciones `pintar*` y `html*` del `<script>`, no sobre bucles de plantilla. Cada
+fuera solo llegan las fuentes Saira y Figtree (Google Fonts, con fallback del
+sistema) y los escudos (URLs de football-data.org). Al tocar la web se trabaja
+sobre las funciones `pintar*` y `html*` del `<script>`, no sobre bucles de
+plantilla. Ojo al probar en local: fuera del modo debug, Flask guarda la
+plantilla compilada y no ve los cambios de `index.html` hasta reiniciar. Cada
 zona guarda una "huella" de lo último que pintó y solo toca el DOM si cambió
 (`pintarBloques` lo hace bloque a bloque en la lista central): sin eso la tabla
 parpadearía y perdería el scroll en cada sondeo. Los nombres de equipo vienen de
 football-data.org, así que todo lo que entra pasa por `esc()`.
 
-**Interfaz: una terminal a pantalla completa.** El objetivo es llenar la
-pantalla en vez de dejar márgenes vacíos:
+**Interfaz: marcador de estadio de noche (oct 2026).** Grande y legible, sin
+márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondeados:
 
-- Escritorio (≥1180px): tres columnas de alto fijo. Izquierda: Competiciones
-  (con la media de goles que usa el modelo en cada liga), Calendario y "Cómo
-  leer la tabla". Centro: tira de fechas + tabla. Derecha: Mapa de la ventana
-  (una casilla por partido con la sigla del favorito y su %), Confianza del
-  favorito (histograma) y Fiabilidad medida (`/api/validacion`). Arriba,
-  buscador (`/` lo enfoca, Esc lo limpia) y cinta de próximos partidos; abajo,
-  barra de estado. Entre 880 y 1179px los dos laterales se apilan en una sola
-  columna. En móvil, una columna con pestañas fijas abajo: Partidos / Panorama /
-  Ligas y fechas.
+- Escritorio (≥1180px): banda del marcador arriba (marca, buscador —`/` lo
+  enfoca, Esc lo limpia— y los 10 próximos partidos como tarjetas con escudos,
+  cuenta atrás y la casilla dorada del favorito). Debajo, tres tableros de alto
+  fijo. Izquierda: Ligas (insignia con la sigla, media de goles que usa el
+  modelo y recuento) y Fiabilidad medida (`/api/validacion`, con selector
+  1X2 / +2.5 / Ambos). Centro: tira de días + tabla. Derecha: Los más claros
+  (los 8 favoritos más fuertes de la semana; un clic abre el partido) y
+  Confianza del favorito (histograma). Abajo, barra de estado. Entre 880 y
+  1179px los laterales se apilan en una sola columna. En móvil, una columna con
+  pestañas fijas abajo: Partidos / Panorama / Ligas; la cabecera no es pegajosa
+  (se va al bajar y las cabeceras de grupo se anclan arriba del todo).
+- Un solo calendario: la tira de días. Primera tarjeta "Semana" (o "Todas" en
+  una liga) y luego un día por tarjeta, con su recuento y una barrita por
+  partido coloreada por la fuerza del favorito. Antes había además un
+  calendario mensual a la izquierda y un "mapa de la ventana" por días a la
+  derecha: se quitaron por repetir lo mismo. "Cómo leer la tabla" también se
+  quitó: cada cabecera de columna lo explica en un tooltip.
 - La tabla responde al ancho del panel central (container query `centro`), no
-  al de la ventana: <640px compacta (equipos apilados + 1 X 2), ≥640px tabla,
-  ≥800px añade 1X/X2/12, goles esperados y muestra, ≥960px más de 2.5 y ambos
-  marcan, ≥1150px la barra de reparto. Al abrir un partido sale el detalle, con
-  los mercados de goles (histograma de goles totales, más/menos 1.5-3.5, ambos
-  marcan, porterías a cero, tres marcadores) y una nota con lo que mide su liga.
-  El panel Fiabilidad tiene un selector 1X2 / +2.5 / Ambos.
-  La columna Liga solo aparece en las vistas que mezclan ligas.
+  al de la ventana. Las columnas entran por prioridad: <640px compacta (equipos
+  apilados + 1 X 2), ≥640px tabla con 1 X 2, ≥780px más de 2.5 y ambos marcan,
+  ≥940px 1X/X2/12, ≥1080px goles esperados y muestra, ≥1280px la barra de
+  reparto. Al abrir un partido sale el detalle, con los mercados de goles
+  (histograma de goles totales, más/menos 1.5-3.5, ambos marcan, porterías a
+  cero, tres marcadores) y una nota con lo que mide su liga. La columna Liga
+  solo aparece en las vistas que mezclan ligas.
 - Los % de 1/X/2 se redondean por resto mayor para que sumen 100, y la doble
   oportunidad se suma de esos mismos enteros: lo que se lee, cuadra. Igual el
   histograma de goles; "menos de" y "ambos marcan: no" se restan del número ya
-  redondeado.
+  redondeado. La casilla de los próximos y la de los más claros usan el mismo
+  entero que la tabla (`pctFavorito`).
 - Rutas por hash: `#/`, `#/semana`, `#/dia/2026-10-10`, `#/liga/PD`,
-  `#/liga/PD/2026-10-10`. `#/` es toda la ventana en escritorio y el primer día
+  `#/liga/PD/2026-10-10`. `#/` es toda la semana en escritorio y el primer día
   en móvil.
-- Color: la rampa arena es secuencial y está reservada a la probabilidad
-  (celdas 1/X/2, mapa, cinta); el calendario cuenta partidos con una rampa neutra
-  aparte. Los tonos de liga son los 8 de la paleta oscura de referencia del
-  skill dataviz, validados por pares vecinos en el orden fijo PD, PL, FL1, BL1,
-  SA, DED, PPL, ELC (`ORDEN_LIGAS`): cada vecino se separa al menos ΔE 19 en
-  visión normal y 8.7 con daltonismo. Pares que no son vecinos se parecen mucho
-  (LaLiga rojo y Bundesliga naranja, ΔE ≈ 7; Bundesliga y Eredivisie ámbar,
-  ΔE ≈ 11) y solo funcionan porque nunca salen juntos: si cambia el orden o se
-  añade una liga, hay que volver a validar la paleta. Aun así la liga la
-  identifica la sigla (ESP, ENG, FRA, ALE, ITA, NED, POR, EN2) y no el color
-  solo, y ningún texto va en color de liga.
+- Tipografía: Saira (marca, títulos y todos los números) y Figtree (nombres y
+  textos), de Google Fonts. Las dos tienen cifras tabulares, comprobadas en el
+  navegador: las columnas de números no bailan.
+- Redondeo con jerarquía: tableros 20px, tarjetas 14, controles 10, celdas 8 y
+  píldoras redondas. Sin sombras ni degradados de adorno.
+- Color: el oro es la probabilidad y nada más lo usa. La rampa es de un solo
+  tono ámbar, 8 tramos (`RAMPA`), validada con el modo `--ordinal` del script
+  de dataviz: luminosidad monótona, saltos ≥ 0.06, el tramo más bajo ≥ 2:1
+  sobre el tablero y sobre el hover, tono que varía 11°. Tinta blanca en los
+  tres primeros tramos y oscura en el resto, todas ≥ 4.8:1. La rampa anterior
+  (arena oliva) no pasaba ese validador: dos tramos casi iguales, el más bajo a
+  1.15:1 del fondo y 53° de tono. El blanco marca lo seleccionado (día, liga,
+  orden).
+- Ligas: la Champions va primera, con una insignia de contorno (UCL): es un
+  torneo y no gasta un tono. Las ligas llevan insignia con la sigla dentro (ESP,
+  ENG, FRA, ALE, ITA, NED, POR, EN2, BRA) y el tono de la liga de fondo; tinta oscura o blanca según el tono, todas
+  ≥ 4.8:1. Como la sigla va siempre dentro, las insignias pueden ir mezcladas
+  (tabla, próximos, más claros). Los tonos son los 8 de la paleta oscura de
+  referencia del skill dataviz, validados por pares vecinos en el orden fijo
+  PD, PL, FL1, BL1, SA, DED, PPL, ELC (`ORDEN_LIGAS`): cada vecino se separa al
+  menos ΔE 19 en visión normal y 8.7 con daltonismo. La novena, BSA, va en gris
+  rayado (`--liga-BSA`): la paleta validada tiene 8 tonos y un noveno inventado
+  no pasaría la prueba. Pares que no son vecinos se parecen mucho (LaLiga rojo y
+  Bundesliga naranja, ΔE ≈ 7; Bundesliga y Eredivisie ámbar, ΔE ≈ 11): si cambia
+  el orden o se añade una liga, hay que volver a validar la paleta. Ningún texto
+  va en color de liga.
 - Escudos y nombres cortos: `_ficha_base` añade `local_corto`, `local_sigla` y
   `local_escudo` (y los de visita) sacados de la misma respuesta del calendario:
   cero peticiones extra. `_escudo` solo deja pasar URLs https; si una imagen no
   carga, la web pinta un monograma, y sin esos campos abrevia el nombre largo.
-- Logo "Casilla": tres casillas 1 X 2 con el favorito encendido. El mismo SVG va
-  en la cabecera y como favicon (data URI del `<link rel="icon">`).
+- Logo "Casilla": tres casillas 1 X 2 con el favorito encendido, en tres tramos
+  de la rampa (#ffd24c, #a18047, #594d39). El mismo SVG va en la cabecera y
+  como favicon (data URI del `<link rel="icon">`).
 
 **Endpoints:** `/` (web), `/api/estado`, `/api/ligas` (qué ancla y qué media usa
 cada liga), `/salud`, `/actualizar?token=...&forzar=1`,
@@ -123,9 +155,12 @@ deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
 hasta la primera actualización, que el planificador lanza sola unos 20 s
 después de arrancar y que paga el coste completo de API (~2 peticiones/equipo)
 porque la caché está vacía; las pasadas siguientes continúan cada 5 min
-mientras queden partidos pendientes. Con 8 ligas una semana normal son unas
-180 peticiones: unas 5 pasadas de 40, y la ventana tarda del orden de 45 min
-en llenarse entera (los partidos más cercanos salen primero). `/actualizar?token=...&forzar=1` no acelera
+mientras queden partidos pendientes. Con 9 ligas y la Champions una semana
+normal son unas 220 peticiones (la Champions suma unas 25: su calendario, su
+media y la liga de los equipos que no salen en ningún calendario de liga): 5 o
+6 pasadas de 40, y la ventana tarda del orden de 55 min en llenarse entera (los
+partidos más cercanos salen primero).
+`/actualizar?token=...&forzar=1` no acelera
 esto: sirve para rehacer una pasada antes de `MIN_MINUTOS_ACTUALIZACION`
 (25 min) y para volver a bajar el calendario ignorando la caché.
 
@@ -158,17 +193,47 @@ esto: sirve para rehacer una pasada antes de `MIN_MINUTOS_ACTUALIZACION`
    y normalizado. Añadidas dobles oportunidad X2 y 12. `Cache-Control: no-store`
    para que un deploy no deje al navegador con la interfaz vieja.
 
-## Por qué la Champions se queda fuera
+## Champions: cómo se predice (oct 2026)
 
-El modelo mide la fuerza de un equipo con sus partidos en esa misma competición.
-En liga hay ~19 partidos en casa y ~19 fuera; en Champions, 4 y 4. Y la "media de
-la liga" en Champions no significa nada: mezcla al Bayern con el campeón de
-Kazajistán, así que dividir entre esa media no mide fuerza relativa. Hacerlo bien
-exige tomar las stats de cada equipo de su liga doméstica y normalizarlas entre
-ligas — proyecto aparte, no trivial. Las 8 ligas activas son la base que ese
-proyecto necesitaría (de ellas sale la mayoría de equipos de la Champions),
-pero falta la parte difícil: comparar ligas entre sí.
-Europa League y Conference League ni siquiera están en el plan free.
+El modelo de liga no sirve para la Champions: mide a cada equipo con sus
+partidos en la misma competición, y en la Champions son 4 en casa y 4 fuera
+contra rivales de niveles muy distintos; su "media de liga" mezcla al Bayern con
+el campeón de Kazajistán. Por eso la Champions va en `TORNEOS` y no en `LIGAS`,
+con su propio cálculo:
+
+- Cada equipo se mide en SU liga nacional (`fuerzas_champions`): los mismos
+  `obtener_stats_equipo` y `obtener_promedio_liga` que sus partidos de liga, así
+  que casi siempre salen de la caché. Su ataque y su defensa relativos a la
+  media de su liga se elevan a `EXPONENTE_FUERZA_CHAMPIONS` (0.5): los grandes
+  arrasan en su liga y su fuerza nacional tomada tal cual exagera.
+- Se ajusta por el nivel de su liga (`FACTOR_LIGA`): PL 1.33, PD 1.16, FL1 1.13,
+  SA 1.10, BL1 1.03, PPL 0.93, DED 0.91, y 0.72 para un equipo de una liga fuera
+  del plan (`FACTOR_OTRA_LIGA`), que cuenta como un equipo medio de ese nivel.
+- Goles esperados (`calcular_xg_champions`): media de la Champions ×
+  `ESCALA_CHAMPIONS` × ataque propio × defensa rival × nivel propio / nivel
+  rival. Luego, el mismo `calcular_poisson` y `mercados_de_goles` que en liga.
+- De qué liga es cada equipo (`liga_domestica`): primero, gratis, en los
+  calendarios de liga ya descargados; si no sale, una petición a `/teams/{id}`
+  (`runningCompetitions`). Se guarda 30 días en la caché (`liga_equipo`).
+- Los cruces de eliminatoria aún sin decidir (equipo sin id) no se pintan.
+
+Medido con `afinar_champions.py` sobre la Champions 2024/25 (188 partidos con
+resultado, datos de openfootball; 10 de los 36 equipos venían de ligas fuera del
+plan), con validación cruzada de 5 bloques. Skill del 1X2 frente a "equipo
+medio":
+
+```
+solo liga nacional                 +3.6%  (-1.1 se)
+solo nivel de liga                 +6.6%  (-1.7 se)
+liga nacional + nivel              +5.9%  (-1.3 se)
+liga nacional atenuada + nivel     +7.1%  (-1.7 se)   <- el de la app
+```
+
+El exponente sale entre 0.44 y 0.59 en los cinco bloques. Es UNA temporada: ninguna
+mejora llega a 2 errores estándar, así que es una base, no una conclusión. La
+fórmula de producción reproduce la del estudio (Brier 0.5367 frente a 0.5369 en
+la muestra). La Champions no entra en la validación de la app (`validacion.py`
+recorre solo `LIGAS`): la web explica el cálculo en el detalle de cada partido.
 
 ## Validación
 
@@ -179,10 +244,42 @@ Modelo corregido      Brier 0.6013   LogLoss 1.0072   Acierto 49.0%
 Base "equipo medio"   Brier 0.6499   LogLoss 1.0749   Acierto 44.4%
 ```
 
-Skill score del 7.5% sobre la base. Las otras siete ligas las valida la propia app
-(`validacion.py`, abajo) sobre la última temporada terminada, pero sus cifras no
-están apuntadas aquí. Para el mismo backtest de dos temporadas que LaLiga:
-`LIGA_BACKTEST=PL python backtest.py 2023 2024`, etc.
+Skill score del 7.5% sobre la base. Para el mismo backtest de dos temporadas que
+LaLiga en otra liga: `LIGA_BACKTEST=PL python backtest.py 2023 2024`, etc.
+
+**Las nueve ligas, medidas igual (oct 2026).** Resultados de openfootball (ver
+"Más temporadas de datos"), recorridos con `validacion.validar_liga`: ancla e
+historial en la temporada anterior, y cada partido predicho solo con lo de antes.
+Skill del 1X2 frente a la base "equipo medio", con el test pareado de Brier en
+errores estándar (se), y la desviación típica de puntos por partido entre
+equipos, que mide lo igualada que está la liga (más baja = más igualada):
+
+```
+Liga            2023/24              2024/25              Igualdad
+LaLiga           +7.9  (-5.2 se)      +6.9  (-3.7 se)     0.52 / 0.45
+Premier         +10.1  (-5.1 se)      +7.9  (-4.0 se)     0.52 / 0.48
+Ligue 1          +2.3  (-1.4 se)      +8.0  (-3.7 se)     0.40 / 0.46
+Bundesliga       +8.6  (-4.1 se)      +3.1  (-1.4 se)     0.54 / 0.44
+Serie A          +7.4  (-4.1 se)      +7.4  (-4.1 se)     0.48 / 0.49
+Eredivisie      +10.7  (-4.5 se)      +8.2  (-3.6 se)     0.58 / 0.49
+Primeira Liga    +9.4  (-4.5 se)     +11.2  (-5.5 se)     0.56 / 0.52
+Championship     -0.2  (+0.1 se)      +1.8  (-1.4 se)     0.35 / 0.33
+Brasileirão      2025, 2ª mitad (190 partidos): +1.7 (-0.6 se)    0.38
+```
+
+- **La Championship no mejora a la base.** No es por los equipos que cambian
+  cada año: en los 1.042 partidos en que los dos equipos tenían historial en la
+  liga, el skill es +0.7% (−0.7 se). Es la liga más igualada de las nueve, y el
+  skill va en la misma dirección que la igualdad: las más desiguales
+  (Eredivisie, Primeira) son las más previsibles.
+- **El Brasileirão no se puede medir bien con estos datos:** openfootball solo
+  tiene 2025 (falta 2024), así que se ancla en la primera mitad y se puntúa la
+  segunda. Es la segunda liga más igualada; lo esperable es un skill bajo,
+  como en la Championship. La validación de la app (`/api/validacion`) lo mide
+  con la temporada completa y la anterior de football-data.
+- En la Championship se quitan los playoffs de ascenso: no son liga, y
+  openfootball los escribe de tres formas distintas según la temporada (solo
+  vale `round` con "Matchday").
 
 `validacion.py` corre ese mismo backtest walk-forward **dentro de la app**
 (`/validar?token=...`, resultado en `/api/validacion`): importa
@@ -216,7 +313,8 @@ Bundesliga, Serie A y Ligue 1; temporadas 2023 y 2024, ancla 2022):
   óptimo demostrado.
 
 Aun con 0.3 la ganancia es pequeña: skill de +0.2% a +1.2%, frente al ~7.5% del
-1X2. Con solo goles marcados y encajados, el total de goles de un partido apenas
+1X2. En Eredivisie, Primeira, Championship y Brasileirão (medidas después, sin
+reajustar α) sale entre −0.6% y +1.8%. Con solo goles marcados y encajados, el total de goles de un partido apenas
 se predice mejor que con la media de su liga. La web lo dice en el detalle de cada
 partido y en el panel Fiabilidad. No vender estos números como el 1X2.
 
@@ -273,6 +371,10 @@ efecto se diluye solo conforme acumulan partidos.
 - `afinar_goles.py` mide `ENCOGER_GOLES` con el mismo método de train/test y test
   pareado. No necesita token: baja resultados de openfootball (ver "Más
   temporadas de datos" abajo) y los cachea en `openfootball_cache/`.
+- `afinar_champions.py` estima `FACTOR_LIGA`, `FACTOR_OTRA_LIGA`,
+  `EXPONENTE_FUERZA_CHAMPIONS` y `ESCALA_CHAMPIONS` con la Champions 2024/25 y
+  las ligas nacionales de openfootball, y compara modelos con validación
+  cruzada. Tampoco necesita token.
 
 ## Render: cómo se despliega
 
@@ -300,10 +402,18 @@ Environment).
 
 ## Pendiente (por orden de lo que más mueve la aguja)
 
-- **Apuntar la validación de las otras siete ligas:** la app ya las mide
-  (`/api/validacion`), pero sus cifras no están en este archivo y solo LaLiga
-  tiene el backtest de dos temporadas. SA, DED, PPL y ELC (añadidas en oct
-  2026) no se han medido nunca fuera de la app.
+- **Champions con más datos:** los niveles de liga salen de una sola temporada
+  (openfootball solo tiene la 2024/25). Con la 2025/26 o más, reajustar con
+  `afinar_champions.py`. Mejoras pensadas: contar también los partidos de
+  Champions y copas de cada equipo (no solo su liga), medir a los equipos de
+  ligas fuera del plan con sus propios partidos, y meter la Champions en la
+  validación de la app.
+
+- **Championship (y seguramente Brasileirão) casi no aportan:** sus
+  pronósticos valen lo que la media de la liga (tabla en "Validación"). La web
+  lo enseña en Fiabilidad, pero la tabla los pinta igual que los demás.
+  Opciones: quitarlas, marcarlas en la tabla, o probar un encogimiento propio
+  para ligas igualadas con el método de `afinar_goles.py`.
 - **Persistencia:** el disco de Render free borra `cache.json`/`data.json` en cada
   deploy. Bloquea el registro de predicciones. Variable `DATA_DIR` ya preparada
   para cuando se resuelva (¿disco persistente de pago? ¿DB externa gratuita?).
