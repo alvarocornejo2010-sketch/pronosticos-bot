@@ -44,7 +44,8 @@ LIGAS = {
     "Eredivisie": "DED",
     "Primeira Liga": "PPL",
     "Championship": "ELC",
-    # Con estas ocho ya están todas las LIGAS del plan free. Lo que queda en él son
+    "Brasileirão": "BSA",
+    # Con estas nueve ya están todas las LIGAS del plan free. Lo que queda en él son
     # torneos: Mundial ("WC"), Eurocopa ("EC") y Champions (abajo). Europa League
     # y Conference League no están en el plan free.
 
@@ -242,13 +243,21 @@ def escribir_estado(estado):
 # ==========================================
 # ANCLA POR LIGA (temporada anterior)
 # ==========================================
-def temporada_actual():
+# Ligas que juegan de enero a diciembre: su temporada es el año natural.
+LIGAS_ANO_NATURAL = {"BSA"}
+
+
+def temporada_actual(codigo_liga=None):
     """Año de inicio de la temporada en curso, como lo numera football-data.org.
 
     Las ligas europeas van de agosto a mayo, así que de julio en adelante ya
-    cuenta el año nuevo. La temporada 2026/27 es 'season=2026'.
+    cuenta el año nuevo. La temporada 2026/27 es 'season=2026'. El Brasileirão
+    va de enero a diciembre: en marzo de 2027 su temporada en curso es la 2027,
+    no la 2026, y la anterior terminada es la 2026.
     """
     a = ahora()
+    if codigo_liga in LIGAS_ANO_NATURAL:
+        return a.year
     return a.year if a.month >= 7 else a.year - 1
 
 
@@ -270,7 +279,7 @@ def obtener_prior_liga(codigo_liga, cache):
     respaldo = {"avg_local": PRIOR_AVG_LOCAL, "avg_visita": PRIOR_AVG_VISITA,
                 "origen": "constante de respaldo", "partidos": 0, "actualizado": None}
 
-    season = temporada_actual() - 1
+    season = temporada_actual(codigo_liga) - 1
     resp = get_con_pausa(f"{BASE_URL}/competitions/{codigo_liga}/matches",
                          {"season": season, "status": "FINISHED"})
     if resp.status_code != 200:

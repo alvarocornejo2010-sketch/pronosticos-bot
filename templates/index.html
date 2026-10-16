@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="description" content="Pronósticos 1X2 y doble oportunidad de LaLiga, Premier League, Ligue 1, Bundesliga, Serie A, Eredivisie, Primeira Liga y Championship con un modelo Poisson de fuerzas ataque/defensa.">
+<meta name="description" content="Pronósticos 1X2 y doble oportunidad de LaLiga, Premier League, Ligue 1, Bundesliga, Serie A, Eredivisie, Primeira Liga, Championship y Brasileirão con un modelo Poisson de fuerzas ataque/defensa.">
 <meta name="theme-color" content="#0d1210">
 <meta name="color-scheme" content="dark">
 <title>Pronósticos</title>
@@ -30,7 +30,10 @@
          Primeira Liga, Championship). Ninguna combinación de 4
          pasa cuando cualquier liga puede quedar junto a cualquier otra,
          así que la identidad de liga va SIEMPRE en texto (ESP, ENG...) y
-         el tinte solo acompaña en listas de orden fijo.
+         el tinte solo acompaña en listas de orden fijo. La novena liga
+         (Brasileirão) no tiene tono: la paleta validada tiene 8 y un noveno
+         color inventado no pasaría la prueba. Va en gris con rayado, que la
+         separa del gris liso de "Todas".
        - estado (error) con icono y texto, nunca color solo.
      ================================================================ */
   :root {
@@ -58,6 +61,7 @@
     --liga-DED: #c98500;
     --liga-PPL: #d55181;
     --liga-ELC: #008300;
+    --liga-BSA: repeating-linear-gradient(135deg, var(--tinta-2) 0 1.5px, transparent 1.5px 3px);
 
     --critico: #d03b3b;
 
@@ -713,6 +717,7 @@ const LIGAS = {
   DED: { sigla: "NED", tono: "var(--liga-DED)" },
   PPL: { sigla: "POR", tono: "var(--liga-PPL)" },
   ELC: { sigla: "EN2", tono: "var(--liga-ELC)" },
+  BSA: { sigla: "BRA", tono: "var(--liga-BSA)" },
 };
 const ORDEN_LIGAS = Object.keys(LIGAS);
 function ligaDe(cod) {

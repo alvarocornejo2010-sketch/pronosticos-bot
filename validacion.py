@@ -326,7 +326,9 @@ def correr_validacion(season=None):
     validando_ahora = True
     try:
         # La temporada evaluada por defecto es la última terminada: la actual va por
-        # la jornada 4 y no daría para nada.
+        # la jornada 4 y no daría para nada. Va con el calendario europeo para todas;
+        # al Brasileirão (año natural) también le toca una temporada terminada, solo
+        # que entre enero y junio es la penúltima en vez de la última.
         if season is None:
             season = app.temporada_actual() - 1
 

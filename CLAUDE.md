@@ -23,10 +23,14 @@ modelo Poisson de fuerzas ataque/defensa.
 - Flask + gunicorn (`gunicorn app:app`), scipy para el modelo Poisson.
 - Datos: football-data.org, plan free (10 peticiones/minuto, sin acceso a
   temporadas 2021/2022 — devuelven HTTP 403).
-- Ligas activas: PD, PL, FL1, BL1, SA, DED, PPL, ELC: todas las ligas del plan
-  free. Lo que queda en él son torneos (Champions, Mundial, Eurocopa), fuera
+- Ligas activas: PD, PL, FL1, BL1, SA, DED, PPL, ELC, BSA: todas las ligas del
+  plan free. Lo que queda en él son torneos (Champions, Mundial, Eurocopa), fuera
   por la razón de abajo. Europa League y Conference League no están en el plan
   free.
+- El Brasileirão (BSA) va de enero a diciembre: su temporada es el año natural
+  (`LIGAS_ANO_NATURAL`). `temporada_actual(codigo)` lo tiene en cuenta para el
+  prior; sin eso, entre enero y junio se anclaría en la temporada de hace dos
+  años.
 
 ## Arquitectura
 
@@ -100,12 +104,14 @@ pantalla en vez de dejar márgenes vacíos:
   aparte. Los tonos de liga son los 8 de la paleta oscura de referencia del
   skill dataviz, validados por pares vecinos en el orden fijo PD, PL, FL1, BL1,
   SA, DED, PPL, ELC (`ORDEN_LIGAS`): cada vecino se separa al menos ΔE 19 en
-  visión normal y 8.7 con daltonismo. Pares que no son vecinos se parecen mucho
+  visión normal y 8.7 con daltonismo. La novena, BSA, va en gris rayado
+  (`--liga-BSA`): la paleta validada tiene 8 tonos y un noveno inventado no
+  pasaría la prueba; el rayado la separa del gris liso de "Todas". Pares que no son vecinos se parecen mucho
   (LaLiga rojo y Bundesliga naranja, ΔE ≈ 7; Bundesliga y Eredivisie ámbar,
   ΔE ≈ 11) y solo funcionan porque nunca salen juntos: si cambia el orden o se
   añade una liga, hay que volver a validar la paleta. Aun así la liga la
-  identifica la sigla (ESP, ENG, FRA, ALE, ITA, NED, POR, EN2) y no el color
-  solo, y ningún texto va en color de liga.
+  identifica la sigla (ESP, ENG, FRA, ALE, ITA, NED, POR, EN2, BRA) y no el
+  color solo, y ningún texto va en color de liga.
 - Escudos y nombres cortos: `_ficha_base` añade `local_corto`, `local_sigla` y
   `local_escudo` (y los de visita) sacados de la misma respuesta del calendario:
   cero peticiones extra. `_escudo` solo deja pasar URLs https; si una imagen no
@@ -123,8 +129,8 @@ deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
 hasta la primera actualización, que el planificador lanza sola unos 20 s
 después de arrancar y que paga el coste completo de API (~2 peticiones/equipo)
 porque la caché está vacía; las pasadas siguientes continúan cada 5 min
-mientras queden partidos pendientes. Con 8 ligas una semana normal son unas
-180 peticiones: unas 5 pasadas de 40, y la ventana tarda del orden de 45 min
+mientras queden partidos pendientes. Con 9 ligas una semana normal son unas
+200 peticiones: 5 o 6 pasadas de 40, y la ventana tarda del orden de 50 min
 en llenarse entera (los partidos más cercanos salen primero). `/actualizar?token=...&forzar=1` no acelera
 esto: sirve para rehacer una pasada antes de `MIN_MINUTOS_ACTUALIZACION`
 (25 min) y para volver a bajar el calendario ignorando la caché.
@@ -165,7 +171,7 @@ En liga hay ~19 partidos en casa y ~19 fuera; en Champions, 4 y 4. Y la "media d
 la liga" en Champions no significa nada: mezcla al Bayern con el campeón de
 Kazajistán, así que dividir entre esa media no mide fuerza relativa. Hacerlo bien
 exige tomar las stats de cada equipo de su liga doméstica y normalizarlas entre
-ligas — proyecto aparte, no trivial. Las 8 ligas activas son la base que ese
+ligas — proyecto aparte, no trivial. Las 9 ligas activas son la base que ese
 proyecto necesitaría (de ellas sale la mayoría de equipos de la Champions),
 pero falta la parte difícil: comparar ligas entre sí.
 Europa League y Conference League ni siquiera están en el plan free.
@@ -179,10 +185,42 @@ Modelo corregido      Brier 0.6013   LogLoss 1.0072   Acierto 49.0%
 Base "equipo medio"   Brier 0.6499   LogLoss 1.0749   Acierto 44.4%
 ```
 
-Skill score del 7.5% sobre la base. Las otras siete ligas las valida la propia app
-(`validacion.py`, abajo) sobre la última temporada terminada, pero sus cifras no
-están apuntadas aquí. Para el mismo backtest de dos temporadas que LaLiga:
-`LIGA_BACKTEST=PL python backtest.py 2023 2024`, etc.
+Skill score del 7.5% sobre la base. Para el mismo backtest de dos temporadas que
+LaLiga en otra liga: `LIGA_BACKTEST=PL python backtest.py 2023 2024`, etc.
+
+**Las nueve ligas, medidas igual (oct 2026).** Resultados de openfootball (ver
+"Más temporadas de datos"), recorridos con `validacion.validar_liga`: ancla e
+historial en la temporada anterior, y cada partido predicho solo con lo de antes.
+Skill del 1X2 frente a la base "equipo medio", con el test pareado de Brier en
+errores estándar (se), y la desviación típica de puntos por partido entre
+equipos, que mide lo igualada que está la liga (más baja = más igualada):
+
+```
+Liga            2023/24              2024/25              Igualdad
+LaLiga           +7.9  (-5.2 se)      +6.9  (-3.7 se)     0.52 / 0.45
+Premier         +10.1  (-5.1 se)      +7.9  (-4.0 se)     0.52 / 0.48
+Ligue 1          +2.3  (-1.4 se)      +8.0  (-3.7 se)     0.40 / 0.46
+Bundesliga       +8.6  (-4.1 se)      +3.1  (-1.4 se)     0.54 / 0.44
+Serie A          +7.4  (-4.1 se)      +7.4  (-4.1 se)     0.48 / 0.49
+Eredivisie      +10.7  (-4.5 se)      +8.2  (-3.6 se)     0.58 / 0.49
+Primeira Liga    +9.4  (-4.5 se)     +11.2  (-5.5 se)     0.56 / 0.52
+Championship     -0.2  (+0.1 se)      +1.8  (-1.4 se)     0.35 / 0.33
+Brasileirão      2025, 2ª mitad (190 partidos): +1.7 (-0.6 se)    0.38
+```
+
+- **La Championship no mejora a la base.** No es por los equipos que cambian
+  cada año: en los 1.042 partidos en que los dos equipos tenían historial en la
+  liga, el skill es +0.7% (−0.7 se). Es la liga más igualada de las nueve, y el
+  skill va en la misma dirección que la igualdad: las más desiguales
+  (Eredivisie, Primeira) son las más previsibles.
+- **El Brasileirão no se puede medir bien con estos datos:** openfootball solo
+  tiene 2025 (falta 2024), así que se ancla en la primera mitad y se puntúa la
+  segunda. Es la segunda liga más igualada; lo esperable es un skill bajo,
+  como en la Championship. La validación de la app (`/api/validacion`) lo mide
+  con la temporada completa y la anterior de football-data.
+- En la Championship se quitan los playoffs de ascenso: no son liga, y
+  openfootball los escribe de tres formas distintas según la temporada (solo
+  vale `round` con "Matchday").
 
 `validacion.py` corre ese mismo backtest walk-forward **dentro de la app**
 (`/validar?token=...`, resultado en `/api/validacion`): importa
@@ -216,7 +254,8 @@ Bundesliga, Serie A y Ligue 1; temporadas 2023 y 2024, ancla 2022):
   óptimo demostrado.
 
 Aun con 0.3 la ganancia es pequeña: skill de +0.2% a +1.2%, frente al ~7.5% del
-1X2. Con solo goles marcados y encajados, el total de goles de un partido apenas
+1X2. En Eredivisie, Primeira, Championship y Brasileirão (medidas después, sin
+reajustar α) sale entre −0.6% y +1.8%. Con solo goles marcados y encajados, el total de goles de un partido apenas
 se predice mejor que con la media de su liga. La web lo dice en el detalle de cada
 partido y en el panel Fiabilidad. No vender estos números como el 1X2.
 
@@ -300,10 +339,11 @@ Environment).
 
 ## Pendiente (por orden de lo que más mueve la aguja)
 
-- **Apuntar la validación de las otras siete ligas:** la app ya las mide
-  (`/api/validacion`), pero sus cifras no están en este archivo y solo LaLiga
-  tiene el backtest de dos temporadas. SA, DED, PPL y ELC (añadidas en oct
-  2026) no se han medido nunca fuera de la app.
+- **Championship (y seguramente Brasileirão) casi no aportan:** sus
+  pronósticos valen lo que la media de la liga (tabla en "Validación"). La web
+  lo enseña en Fiabilidad, pero la tabla los pinta igual que los demás.
+  Opciones: quitarlas, marcarlas en la tabla, o probar un encogimiento propio
+  para ligas igualadas con el método de `afinar_goles.py`.
 - **Persistencia:** el disco de Render free borra `cache.json`/`data.json` en cada
   deploy. Bloquea el registro de predicciones. Variable `DATA_DIR` ya preparada
   para cuando se resuelva (¿disco persistente de pago? ¿DB externa gratuita?).
