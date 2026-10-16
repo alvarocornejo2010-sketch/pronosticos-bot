@@ -1,47 +1,57 @@
 """
-Mide cómo predecir la Champions con la fuerza de cada equipo en SU liga
-nacional, y estima el nivel de cada liga (FACTOR_LIGA en app.py).
+Mide cómo predecir la Champions: la fuerza de cada equipo en SU liga nacional,
+el nivel de cada liga y su historial en la propia Champions, y ajusta las
+constantes de app.py (FACTOR_LIGA, FACTOR_OTRA_LIGA, EXPONENTE_FUERZA_CHAMPIONS,
+ESCALA_CHAMPIONS y K_HISTORIAL_CHAMPIONS).
 
 El modelo de liga mide a un equipo con sus partidos en la misma competición.
-En la Champions eso no sirve: 4 partidos en casa y 4 fuera, contra rivales de
-niveles muy distintos. Aquí cada equipo se mide en su liga nacional (sus
-últimos partidos, relativos a la media de esa liga) y se ajusta por el nivel
-de la liga: dominar la Eredivisie no es dominar la Premier. Ese nivel solo se
-ve donde se cruzan ligas, en la propia Champions, y de ahí se estima.
+En la Champions eso solo no sirve: 4 partidos en casa y 4 fuera por temporada,
+contra rivales de niveles muy distintos. Aquí cada equipo se mide en su liga
+nacional (sus últimos partidos, relativos a la media de esa liga), se ajusta
+por el nivel de la liga (dominar la Eredivisie no es dominar la Premier; ese
+nivel solo se ve donde se cruzan ligas, en la propia Champions) y se corrige
+con su historial en la Champions: lo que marcó y encajó en sus partidos de esta
+temporada y la anterior frente a lo esperado de un equipo de su nivel de liga
+contra esos rivales (historial_champions en app.py).
 
-Datos: resultados de openfootball/football.json en GitHub (sin token):
-Champions 2024/25 y las ligas nacionales 2022/23 a 2024/25. Los equipos de
-ligas que no están en el plan (Bélgica, Austria, Escocia...) cuentan como un
-equipo medio de "otra liga". Usa _encoger, calcular_poisson y las constantes
-de app.py, no una copia.
+Datos: openfootball, sin token. La Champions 2022/23 a 2025/26 (628 partidos)
+del repositorio champions-league, en formato de texto, y las ligas nacionales
+2021/22 a 2025/26 de football.json. Los equipos de ligas que no están en el
+plan (Bélgica, Austria, Escocia...) cuentan como un equipo medio de "otra liga".
+Usa historial_champions, multiplicadores_historial, calcular_xg_champions,
+_encoger, calcular_poisson y las constantes de app.py, no una copia.
 
-Compara, con validación cruzada de 5 bloques (cada partido se predice con un
-ajuste que no lo ha visto):
+Compara, con validación cruzada de 5 bloques y dejando fuera una temporada
+entera cada vez (cada partido se predice con un ajuste que no lo ha visto):
   - base: equipo medio (solo la media de goles de la Champions)
-  - solo liga nacional: la fuerza de cada equipo en su liga, sin nivel de liga
   - solo nivel de liga: todos los equipos de una liga iguales
-  - liga nacional + nivel de liga
-  - liga nacional atenuada + nivel de liga: la fuerza nacional elevada a un
-    exponente < 1 (se ajusta), porque los grandes arrasan en su liga y su
-    fuerza nacional tomada tal cual exagera. Es el modelo que usa la app.
+  - liga nacional atenuada + nivel: la fuerza nacional elevada a un exponente
+    < 1, porque los grandes arrasan en su liga y tomada tal cual exagera. Es el
+    modelo que usó la app hasta octubre de 2026.
+  - + historial en la Champions: el de ahora.
+
+Lo esperado del historial usa los niveles y la escala que tiene app.py: si el
+ajuste los cambia mucho, se ponen en app.py y se corre otra vez (con los de
+ahora, una segunda vuelta mueve los niveles 0.02 como mucho).
 
 Uso:
     python afinar_champions.py
 
-Descarga ~20 ficheros la primera vez y los guarda en openfootball_cache/.
+Descarga ~30 ficheros la primera vez y los guarda en openfootball_cache/.
 """
 import json
 import math
 import os
 import random
+import re
 import sys
+import unicodedata
 from collections import defaultdict, deque
 from datetime import date, timedelta
 
 import numpy as np
 import requests
 from scipy.optimize import minimize
-from scipy.stats import poisson
 
 # app.py exige estas variables al importarse; aquí no se pide nada a football-data.
 os.environ.setdefault("FOOTBALL_DATA_TOKEN", "sin_uso_en_este_script")
@@ -49,34 +59,100 @@ os.environ.setdefault("UPDATE_SECRET", "afinar_champions_dummy_secret")
 
 import app  # noqa: E402
 
-URL = "https://raw.githubusercontent.com/openfootball/football.json/master/{t}/{l}.json"
+URL_LIGA = "https://raw.githubusercontent.com/openfootball/football.json/master/{t}/{l}.json"
+URL_CL = "https://raw.githubusercontent.com/openfootball/champions-league/master/{t}/cl.txt"
 CACHE = "openfootball_cache"
-TEMPORADA_CL = "2024-25"
-TEMPORADAS_LIGA = ["2022-23", "2023-24", "2024-25"]
+TEMPORADAS_CL = ["2022-23", "2023-24", "2024-25", "2025-26"]
+TEMPORADAS_LIGA = ["2021-22", "2022-23", "2023-24", "2024-25", "2025-26"]
 FICHERO_LIGA = {"PL": "en.1", "PD": "es.1", "SA": "it.1", "BL1": "de.1", "FL1": "fr.1", "DED": "nl.1", "PPL": "pt.1"}
 # país del sufijo "(ENG)" de openfootball -> liga del plan. Mónaco juega la Ligue 1.
 LIGA_DE_PAIS = {"ENG": "PL", "ESP": "PD", "ITA": "SA", "GER": "BL1", "FRA": "FL1", "MCO": "FL1", "NED": "DED", "POR": "PPL"}
 OTRA = "otra"
+NIVELES = list(FICHERO_LIGA) + [OTRA]
 BLOQUES = 5
 SIGMA_NIVEL = 0.30      # prior del log-factor de cada liga: a 1 sigma, ±35% de goles
 
 
-def cargar(t, l):
+# ------------------------------------------------------------------
+# Datos
+# ------------------------------------------------------------------
+def _descargar(url, ruta):
     os.makedirs(CACHE, exist_ok=True)
-    ruta = os.path.join(CACHE, f"{t}_{l}.json")
     if not os.path.exists(ruta):
-        resp = requests.get(URL.format(t=t, l=l), timeout=30)
+        resp = requests.get(url, timeout=30)
         resp.raise_for_status()
-        with open(ruta, "w") as f:
+        with open(ruta, "w", encoding="utf-8") as f:
             f.write(resp.text)
-    with open(ruta) as f:
-        return json.load(f)["matches"]
+    with open(ruta, encoding="utf-8") as f:
+        return f.read()
+
+
+def cargar_liga(t, l):
+    return json.loads(_descargar(URL_LIGA.format(t=t, l=l), os.path.join(CACHE, f"{t}_{l}.json")))["matches"]
 
 
 def marcador(m):
     sc = m.get("score")
     ft = sc if isinstance(sc, list) else (sc or {}).get("ft")
     return ft if ft and len(ft) == 2 else None
+
+
+MESES = {m: i for i, m in enumerate(["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], 1)}
+_FECHA = re.compile(r"^\s{2}(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\w{3}) (\d{1,2})(?: (\d{4}))?\s*$")
+_PARTIDO = re.compile(r"^\s+(?:\d{1,2}:\d{2}\s+)?(.+?\(\w{3}\))\s+v\s+(.+?\(\w{3}\))\s+(.+?)\s*$")
+
+
+def noventa(texto):
+    """Marcador a los 90 minutos, que es lo que predice el modelo:
+    '1-0 (0-0)' -> (1, 0); '4-2 pen. 1-0 a.e.t. (1-0, 1-0)' -> (1, 0);
+    '3-2 a.e.t. (3-0, 1-0)' -> (3, 0)."""
+    m = (re.search(r"a\.e\.t\.\s*\((\d+)-(\d+)", texto) if "a.e.t." in texto
+         else re.match(r"(\d+)-(\d+)", texto))
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def cargar_cl(t):
+    """Los partidos de una Champions (formato Football.TXT): [{fecha, local, visita, gl, gv}]."""
+    texto = _descargar(URL_CL.format(t=t), os.path.join(CACHE, f"{t}_cl.txt"))
+    anio_ini, d, out = int(t[:4]), None, []
+    for linea in texto.splitlines():
+        f = _FECHA.match(linea)
+        if f:
+            mes = MESES[f.group(1)]
+            anio = int(f.group(3)) if f.group(3) else (anio_ini if mes >= 7 else anio_ini + 1)
+            d = date(anio, mes, int(f.group(2)))
+            continue
+        p = _PARTIDO.match(linea)
+        if p and d:
+            r = noventa(p.group(3))
+            if r:
+                out.append({"fecha": d, "local": p.group(1).strip(), "visita": p.group(2).strip(),
+                            "gl": r[0], "gv": r[1]})
+    return out
+
+
+# La Champions 2022/23 de openfootball usa nombres cortos ("Real Madrid", "Inter");
+# las siguientes y las ligas, los largos ("Real Madrid CF"). Se casan por palabras.
+_RUIDO = {"fc", "cf", "ac", "as", "ssc", "sc", "afc", "club", "de", "sl", "fk", "sk", "rc", "ogc",
+          "losc", "us", "ss", "vfb", "vfl", "tsg", "bv", "rb", "gnk"}
+ALIAS = {"Inter": "FC Internazionale Milano", "Sporting CP": "Sporting Clube de Portugal"}
+
+
+def _palabras(n):
+    n = unicodedata.normalize("NFD", n.lower()).encode("ascii", "ignore").decode()
+    return {t for t in re.split(r"[^a-z0-9]+", n) if t and t not in _RUIDO}
+
+
+def casar(nombre, candidatos):
+    """El nombre equivalente entre `candidatos`, o None si no hay uno solo."""
+    if nombre in candidatos:
+        return nombre
+    if ALIAS.get(nombre) in candidatos:
+        return ALIAS[nombre]
+    a = _palabras(nombre)
+    cand = [c for c in candidatos if a and a <= _palabras(c)]
+    return cand[0] if len(cand) == 1 else None
 
 
 def temporada_de(d):
@@ -120,8 +196,8 @@ class Liga:
 
 
 def fuerza(liga, s, media, en_casa):
-    """Ataque y defensa relativos a la media de su liga: lo mismo que
-    fuerzas_champions en app.py."""
+    """Ataque y defensa relativos a la media de su liga, sin atenuar: lo mismo
+    que fuerzas_champions en app.py antes del exponente."""
     avg_l, avg_v = media["avg_local"], media["avg_visita"]
     if en_casa:
         return (app._encoger(s["gf_local"], s["n_local"], avg_l) / avg_l,
@@ -132,143 +208,243 @@ def fuerza(liga, s, media, en_casa):
 
 def preparar():
     ligas = {c: Liga() for c in FICHERO_LIGA}
+    nombres_liga = defaultdict(set)
     eventos = []
     for c, l in FICHERO_LIGA.items():
         for t in TEMPORADAS_LIGA:
-            for m in cargar(t, l):
+            for m in cargar_liga(t, l):
                 ft = marcador(m)
                 if not ft or "atchday" not in str(m.get("round")):
                     continue        # sin resultado o playoff: no es liga
-                eventos.append((date.fromisoformat(m["date"]), 1, c,
-                                {"fecha": date.fromisoformat(m["date"]), "local": m["team1"], "visita": m["team2"],
-                                 "gl": ft[0], "gv": ft[1]}))
-    for m in cargar(TEMPORADA_CL, "uefa.cl"):
-        ft = marcador(m)
-        if not ft:
-            continue            # la final viene sin marcador
-        eventos.append((date.fromisoformat(m["date"]), 0, "CL", m))
+                d = date.fromisoformat(m["date"])
+                nombres_liga[c].update((m["team1"], m["team2"]))
+                eventos.append((d, 1, c, {"fecha": d, "local": m["team1"], "visita": m["team2"],
+                                          "gl": ft[0], "gv": ft[1]}))
+    cl = {t: cargar_cl(t) for t in TEMPORADAS_CL}
+
+    # un nombre por equipo en las cuatro temporadas: el de su liga si es de una
+    # del plan; si no, el de las temporadas de nombres largos
+    largos = {n for t in TEMPORADAS_CL[1:] for m in cl[t] for n in (m["local"], m["visita"])}
+    canon, liga_de = {}, {}
+    for t in TEMPORADAS_CL:
+        for m in cl[t]:
+            for completo in (m["local"], m["visita"]):
+                if completo in canon:
+                    continue
+                nombre, pais = completo.rsplit(" (", 1)
+                pais = pais.rstrip(")")
+                liga = LIGA_DE_PAIS.get(pais)
+                en_liga = casar(nombre, nombres_liga[liga]) if liga else None
+                if en_liga:
+                    canon[completo], liga_de[en_liga] = en_liga, liga
+                else:
+                    if liga:
+                        print(f"AVISO: {completo} no casa con su liga: cuenta como otra liga.")
+                    otros = {x.rsplit(" (", 1)[0] for x in largos if x.endswith(f"({pais})")}
+                    canon[completo] = (casar(nombre, otros) or nombre) + f" ({pais})"
+                    liga_de[canon[completo]] = None
+    for t in TEMPORADAS_CL:
+        for m in cl[t]:
+            m["local"], m["visita"] = canon[m["local"]], canon[m["visita"]]
+            eventos.append((m["fecha"], 0, "CL", m))
     # mismo día: primero se predice la Champions y luego se registra la liga
     eventos.sort(key=lambda e: (e[0], e[1]))
 
-    filas, sin_casar = [], set()
+    hoy = app.ahora().isoformat()
+    liga_equipo = {n: {"liga": l, "actualizado": hoy} for n, l in liga_de.items()}
+    totales = defaultdict(lambda: [0, 0, 0])
+    historial = defaultdict(lambda: defaultdict(list))   # temporada -> equipo -> [[rival, casa, gf, gc]]
+    filas, dia, pendientes = [], None, []
+
+    def registrar_dia():
+        # los resultados de un día entran en el historial cuando ya se predijo el día entero
+        for m in pendientes:
+            s = temporada_de(m["fecha"])
+            historial[s][m["local"]].append([m["visita"], 1, m["gl"], m["gv"]])
+            historial[s][m["visita"]].append([m["local"], 0, m["gv"], m["gl"]])
+            t = totales[s]
+            t[0] += m["gl"]; t[1] += m["gv"]; t[2] += 1
+        pendientes.clear()
+
     for d, tipo, c, m in eventos:
+        if d != dia:
+            registrar_dia(); dia = d
         if tipo == 1:
             ligas[c].registrar(m)
             continue
-        fila = {"fecha": d, "gl": marcador(m)[0], "gv": marcador(m)[1]}
-        for lado, campo, en_casa in (("l", "team1", True), ("v", "team2", False)):
-            nombre, pais = m[campo].rsplit(" (", 1)
-            liga = LIGA_DE_PAIS.get(pais.rstrip(")"))
-            if liga and nombre not in ligas[liga].equipos:
-                sin_casar.add(m[campo]); liga = None
+        s = temporada_de(d)
+        # la media de la Champions como la ve la app: la temporada en curso anclada en la anterior
+        act, prev = totales[s], totales[s - 1]
+        hay_previa = prev[2] >= 100
+        ancla = (prev[0] / prev[2], prev[1] / prev[2]) if hay_previa else (app.PRIOR_AVG_LOCAL, app.PRIOR_AVG_VISITA)
+        k = app.K_LIGA
+        mu = ((act[0] + k * ancla[0]) / (act[2] + k), (act[1] + k * ancla[1]) / (act[2] + k))
+        # la caché que tendría la app ese día: el historial lo calcula app.historial_champions
+        cache = {"liga_equipo": liga_equipo, "fixtures": {},
+                 "ligas": {"CL": {"avg_local": mu[0], "avg_visita": mu[1], "historial": historial[s]}},
+                 "priors": {"CL": {"avg_local": ancla[0], "avg_visita": ancla[1], "historial": historial[s - 1]}}
+                 if hay_previa else {}}
+        fila = {"fecha": d, "temporada": s, "gl": m["gl"], "gv": m["gv"], "mu_l": mu[0], "mu_v": mu[1]}
+        for lado, campo, en_casa in (("l", "local", True), ("v", "visita", False)):
+            equipo = m[campo]
+            liga = liga_de[equipo]
             if liga:
-                a, df = fuerza(liga, ligas[liga].stats(nombre, d), ligas[liga].media(d), en_casa)
+                a, df = fuerza(liga, ligas[liga].stats(equipo, d), ligas[liga].media(d), en_casa)
             else:
                 a, df = 1.0, 1.0
+            factor = app.FACTOR_LIGA.get(liga, app.FACTOR_OTRA_LIGA)
             fila["liga_" + lado], fila["at_" + lado], fila["def_" + lado] = liga or OTRA, a, df
+            fila["h_" + lado] = app.historial_champions(equipo, factor, cache)
         filas.append(fila)
-    if sin_casar:
-        print("AVISO: equipos sin casar con su liga (cuentan como otra liga):", sorted(sin_casar))
+        pendientes.append(m)
     return filas
 
 
-NIVELES = list(FICHERO_LIGA) + [OTRA]
+# ------------------------------------------------------------------
+# Modelos
+# ------------------------------------------------------------------
+class Datos:
+    """Las columnas de las filas, en arrays, para que el coste sea una operación."""
+
+    def __init__(self, filas):
+        col = lambda k: np.array([f[k] for f in filas], dtype=float)   # noqa: E731
+        self.filas = filas
+        self.gl, self.gv, self.mu_l, self.mu_v = col("gl"), col("gv"), col("mu_l"), col("mu_v")
+        self.at_l, self.def_l, self.at_v, self.def_v = col("at_l"), col("def_l"), col("at_v"), col("def_v")
+        self.il = np.array([NIVELES.index(f["liga_l"]) for f in filas])
+        self.iv = np.array([NIVELES.index(f["liga_v"]) for f in filas])
+        h = lambda lado, k: np.array([f["h_" + lado][k] for f in filas], dtype=float)   # noqa: E731
+        self.h = {(lado, k): h(lado, k) for lado in "lv" for k in ("gf", "gc", "esperado_f", "esperado_c")}
+        self.temporada = np.array([f["temporada"] for f in filas])
+
+    def parte(self, mascara):
+        return Datos([f for f, m in zip(self.filas, mascara) if m])
 
 
-def lambdas(p, f, modo):
-    """p = [log g_local, log g_visita, exponente, nivel por liga...]. El exponente
-    solo cuenta en el modo atenuado; en los demás vale 1."""
-    s = dict(zip(NIVELES, p[3:])) if modo in ("completo", "nivel", "atenuado") else defaultdict(float)
-    usa_fuerza = modo in ("completo", "nacional", "atenuado")
-    b = p[2] if modo == "atenuado" else 1.0
-    al, dl = (f["at_l"] ** b, f["def_l"] ** b) if usa_fuerza else (1.0, 1.0)
-    av, dv = (f["at_v"] ** b, f["def_v"] ** b) if usa_fuerza else (1.0, 1.0)
-    dif = s[f["liga_l"]] - s[f["liga_v"]]
-    return (math.exp(p[0]) * al * dv * math.exp(dif),
-            math.exp(p[1]) * av * dl * math.exp(-dif))
+N = len(NIVELES)
+# p = [log escala local, log escala visita, exponente, nivel por liga..., log K]
 
 
-def ajustar(filas, modo):
+def lambdas(p, d, modo):
+    if modo == "base":
+        return d.mu_l * math.exp(p[0]), d.mu_v * math.exp(p[1])
+    s = np.asarray(p[3:3 + N])
+    b = p[2] if modo in ("atenuado", "historial") else 0.0
+    dif = s[d.il] - s[d.iv]
+    ll = d.mu_l * math.exp(p[0]) * d.at_l ** b * d.def_v ** b * np.exp(dif)
+    lv = d.mu_v * math.exp(p[1]) * d.at_v ** b * d.def_l ** b * np.exp(-dif)
+    if modo == "historial":
+        k = math.exp(p[3 + N])
+        r = lambda lado, g, e: (d.h[(lado, g)] + k) / (d.h[(lado, e)] + k)   # noqa: E731
+        ll = ll * r("l", "gf", "esperado_f") * r("v", "gc", "esperado_c")
+        lv = lv * r("v", "gf", "esperado_f") * r("l", "gc", "esperado_c")
+    return ll, lv
+
+
+def ajustar(d, modo):
     def coste(p):
-        c = 0.0
-        for f in filas:
-            ll, lv = lambdas(p, f, modo)
-            c -= poisson.logpmf(f["gl"], ll) + poisson.logpmf(f["gv"], lv)
-        if modo in ("completo", "nivel", "atenuado"):
-            c += sum(x * x for x in p[3:]) / (2 * SIGMA_NIVEL ** 2)
+        ll, lv = lambdas(p, d, modo)
+        c = -np.sum(d.gl * np.log(ll) - ll + d.gv * np.log(lv) - lv)
+        if modo != "base":
+            c += np.sum(np.asarray(p[3:3 + N]) ** 2) / (2 * SIGMA_NIVEL ** 2)
         return c
-    p0 = np.zeros(3 + len(NIVELES))
-    p0[0] = math.log(np.mean([f["gl"] for f in filas]))
-    p0[1] = math.log(np.mean([f["gv"] for f in filas]))
-    p0[2] = 1.0
-    limites = [(None, None), (None, None), (0.0, 1.5)] + [(None, None)] * len(NIVELES)
+    p0 = np.zeros(4 + N)
+    p0[2], p0[3 + N] = 0.5, math.log(30.0)
+    limites = [(None, None), (None, None), (0.0, 1.5)] + [(None, None)] * N + [(math.log(0.5), math.log(500))]
+    fijos = {"base": range(2, 4 + N), "nivel": (2, 3 + N), "atenuado": (3 + N,), "historial": ()}[modo]
+    for i in fijos:
+        limites[i] = (p0[i], p0[i])
     return minimize(coste, p0, method="L-BFGS-B", bounds=limites).x
 
 
-def brier(f, ll, lv):
-    pr = app.calcular_poisson(round(ll, 2), round(lv, 2))
+def brier(gl, gv, ll, lv):
+    pr = app.calcular_poisson(round(float(ll), 2), round(float(lv), 2))
     p = [pr["prob_local"] / 100, pr["prob_empate"] / 100, pr["prob_visita"] / 100]
-    y = 0 if f["gl"] > f["gv"] else 1 if f["gl"] == f["gv"] else 2
+    y = 0 if gl > gv else 1 if gl == gv else 2
     return sum((p[i] - (1 if i == y else 0)) ** 2 for i in range(3))
+
+
+MODOS = ["base", "nivel", "atenuado", "historial"]
+NOMBRES = {"base": "equipo medio", "nivel": "solo nivel de liga",
+           "atenuado": "liga nacional atenuada + nivel", "historial": "+ historial en la Champions"}
+
+
+def pareado(a, b):
+    dif = a - b
+    md = dif.mean()
+    se = dif.std(ddof=1) / math.sqrt(len(dif))
+    return f"{md:+.4f} ± {se:.4f} ({md / se:+.1f} se)"
+
+
+def validar(d, bloques, titulo):
+    por_partido = {m: np.zeros(len(d.gl)) for m in MODOS}
+    params = defaultdict(list)
+    for k in sorted(set(bloques.tolist())):
+        entreno, prueba = d.parte(bloques != k), bloques == k
+        dp = d.parte(prueba)
+        for modo in MODOS:
+            p = ajustar(entreno, modo)
+            params[modo].append(p)
+            ll, lv = lambdas(p, dp, modo)
+            por_partido[modo][prueba] = [brier(*x) for x in zip(dp.gl, dp.gv, ll, lv)]
+    base = por_partido["base"]
+    print(f"\n== {titulo} ==")
+    print(f"{'modelo':32} {'Brier':>7} {'skill':>7}   diferencia con la base (pareada)")
+    for modo in MODOS:
+        xs = por_partido[modo]
+        extra = pareado(xs, base) if modo != "base" else ""
+        print(f"{NOMBRES[modo]:32} {xs.mean():7.4f} {100 * (1 - xs.mean() / base.mean()):+6.1f}%   {extra}")
+    print(f"historial frente a liga nacional atenuada: {pareado(por_partido['historial'], por_partido['atenuado'])}")
+    print("exponente en cada ajuste:", " ".join(f"{p[2]:.2f}" for p in params["historial"]),
+          "| K:", " ".join(f"{math.exp(p[3 + N]):.0f}" for p in params["historial"]))
+    for t in sorted(set(d.temporada.tolist())):
+        m = d.temporada == t
+        print(f"  {t}/{(t + 1) % 100:02d} ({m.sum()} partidos): " + "  ".join(
+            f"{x} {100 * (1 - por_partido[x][m].mean() / base[m].mean()):+.1f}%" for x in ("atenuado", "historial")))
 
 
 def main():
     filas = preparar()
-    print(f"Champions {TEMPORADA_CL}: {len(filas)} partidos con resultado. "
-          f"Equipos de otra liga en {sum((f['liga_l'] == OTRA) + (f['liga_v'] == OTRA) for f in filas)} plazas.\n")
+    d = Datos(filas)
+    otras = sum((f["liga_l"] == OTRA) + (f["liga_v"] == OTRA) for f in filas)
+    print(f"Champions {TEMPORADAS_CL[0]} a {TEMPORADAS_CL[-1]}: {len(filas)} partidos con resultado. "
+          f"Equipos de otra liga en {otras} plazas.")
 
     orden = list(range(len(filas)))
     random.Random(7).shuffle(orden)
-    bloque = {i: k % BLOQUES for k, i in enumerate(orden)}
-    modos = ["base", "nacional", "nivel", "completo", "atenuado"]
-    nombres = {"base": "equipo medio", "nacional": "solo liga nacional",
-               "nivel": "solo nivel de liga", "completo": "liga nacional + nivel",
-               "atenuado": "liga nacional atenuada + nivel"}
-    exponentes = []
-    por_partido = {m: [0.0] * len(filas) for m in modos}
-    for k in range(BLOQUES):
-        entreno = [f for i, f in enumerate(filas) if bloque[i] != k]
-        for modo in modos:
-            p = ajustar(entreno, modo) if modo != "base" else None
-            if modo == "atenuado":
-                exponentes.append(p[2])
-            if modo == "base":
-                gl = np.mean([f["gl"] for f in entreno]); gv = np.mean([f["gv"] for f in entreno])
-            for i, f in enumerate(filas):
-                if bloque[i] != k:
-                    continue
-                ll, lv = (gl, gv) if modo == "base" else lambdas(p, f, modo)
-                por_partido[modo][i] = brier(f, ll, lv)
+    bloques = np.zeros(len(filas), dtype=int)
+    for k, i in enumerate(orden):
+        bloques[i] = k % BLOQUES
+    validar(d, bloques, f"validación cruzada de {BLOQUES} bloques")
+    validar(d, d.temporada, "una temporada fuera cada vez")
 
-    base = por_partido["base"]
-    b0 = sum(base) / len(base)
-    print(f"{'modelo':28} {'Brier':>7} {'skill':>7}   diferencia con la base (pareada)")
-    for modo in modos:
-        xs = por_partido[modo]
-        d = [a - b for a, b in zip(xs, base)]
-        md = sum(d) / len(d)
-        se = math.sqrt(sum((x - md) ** 2 for x in d) / (len(d) - 1) / len(d)) if modo != "base" else 0
-        extra = f"{md:+.4f} ± {se:.4f} ({md / se:+.1f} se)" if se else ""
-        print(f"{nombres[modo]:28} {sum(xs) / len(xs):7.4f} {100 * (1 - sum(xs) / len(xs) / b0):+6.1f}%   {extra}")
-    for a, b in (("atenuado", "nivel"), ("atenuado", "nacional"), ("atenuado", "completo")):
-        d = [x - y for x, y in zip(por_partido[a], por_partido[b])]
-        md = sum(d) / len(d); se = math.sqrt(sum((x - md) ** 2 for x in d) / (len(d) - 1) / len(d))
-        print(f"{nombres[a]} frente a {nombres[b]}: {md:+.4f} ± {se:.4f} ({md / se:+.1f} se)")
-    print("exponente ajustado en cada bloque:", " ".join(f"{e:.2f}" for e in exponentes))
-
-    # factores finales: ajuste con todos los partidos, centrados en el equipo medio de la Champions
-    p = ajustar(filas, "atenuado")
-    print(f"\nEXPONENTE_FUERZA_CHAMPIONS = {p[2]:.2f}")
-    s = dict(zip(NIVELES, p[3:]))
+    # constantes finales: ajuste con todos los partidos, niveles centrados en el equipo medio de la Champions
+    p = ajustar(d, "historial")
+    s = dict(zip(NIVELES, p[3:3 + N]))
     plazas = [f["liga_l"] for f in filas] + [f["liga_v"] for f in filas]
     centro = sum(s[x] for x in plazas) / len(plazas)
-    print("\nFACTOR_LIGA (equipo medio de la Champions = 1.00):")
+    print(f"\nEXPONENTE_FUERZA_CHAMPIONS = {p[2]:.2f}")
+    print(f"K_HISTORIAL_CHAMPIONS = {math.exp(p[3 + N]):.0f}")
+    print(f"ESCALA_CHAMPIONS = ({math.exp(p[0]):.2f}, {math.exp(p[1]):.2f})")
+    print("FACTOR_LIGA (equipo medio de la Champions = 1.00):")
     for c in NIVELES:
-        n = plazas.count(c)
-        print(f"  {c:5} {math.exp(s[c] - centro):.2f}   ({n} plazas)")
-    obs_l = np.mean([f["gl"] for f in filas]); obs_v = np.mean([f["gv"] for f in filas])
-    print(f"\nMedia de goles de la Champions: {obs_l:.2f} local, {obs_v:.2f} visitante. "
-          f"Escala ajustada frente a la observada: {math.exp(p[0]) / obs_l:.2f} local, {math.exp(p[1]) / obs_v:.2f} visitante.")
+        print(f"  {c:5} {math.exp(s[c] - centro):.2f}   ({plazas.count(c)} plazas)")
+
+    # la fórmula de la app, con sus constantes de ahora, sobre los mismos partidos
+    b = app.EXPONENTE_FUERZA_CHAMPIONS
+    total = 0.0
+    for f in filas:
+        lado = {}
+        for x in "lv":
+            at, de = app.multiplicadores_historial(f["h_" + x])
+            lado[x] = {"ataque": f["at_" + x] ** b, "defensa": f["def_" + x] ** b, "ataque_cl": at, "defensa_cl": de,
+                       "factor": app.FACTOR_LIGA.get(f["liga_" + x], app.FACTOR_OTRA_LIGA)}
+        xl, xv = app.calcular_xg_champions(lado["l"], lado["v"], {"avg_local": f["mu_l"], "avg_visita": f["mu_v"]})
+        total += brier(f["gl"], f["gv"], xl, xv)
+    ll, lv = lambdas(p, d, "historial")
+    ajuste = np.mean([brier(*x) for x in zip(d.gl, d.gv, ll, lv)])
+    print(f"\nLa fórmula de app.py con sus constantes: Brier {total / len(filas):.4f} "
+          f"(el ajuste con todos los partidos: {ajuste:.4f}, dentro de la muestra).")
 
 
 if __name__ == "__main__":

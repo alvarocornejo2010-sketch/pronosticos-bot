@@ -1,5 +1,6 @@
-# Nunca subas esto a GitHub:
+# Nunca subas esto a GitHub (el repo es público):
 .env
+.env.*
 cache.json
 data.json
 validacion.json
@@ -12,3 +13,10 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Cloudflare Workers:
+node_modules/
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example

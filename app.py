@@ -10,10 +10,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import numpy as np
 import requests
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request, send_from_directory
 from scipy.stats import poisson
 
-app = Flask(__name__)
+# La web vive en public/: el mismo archivo lo sirve el Worker de Cloudflare
+# (worker/, wrangler.jsonc) como archivo estático.
+app = Flask(__name__, template_folder="public")
 
 # ==========================================
 # CONFIGURACIÓN
@@ -60,23 +62,32 @@ TORNEOS = {
 
 # Nivel de cada liga frente al equipo medio de la Champions (1.00): cuánto más
 # marca y cuánto menos encaja un equipo medio de esa liga en la Champions.
-# Medido con afinar_champions.py sobre la Champions 2024/25 (188 partidos, datos
-# de openfootball), con validación cruzada: es la única temporada disponible, así
-# que el margen es amplio (ver CLAUDE.md, "Champions"). Championship y Brasileirão
-# no juegan la Champions; si algún día hiciera falta, usan FACTOR_OTRA_LIGA.
-FACTOR_LIGA = {"PL": 1.33, "PD": 1.16, "FL1": 1.13, "SA": 1.10, "BL1": 1.03, "PPL": 0.93, "DED": 0.91}
+# Medido con afinar_champions.py sobre cuatro Champions (2022/23 a 2025/26, 628
+# partidos, datos de openfootball), con validación cruzada (ver CLAUDE.md,
+# "Champions"). Championship y Brasileirão no juegan la Champions; si algún día
+# hiciera falta, usan FACTOR_OTRA_LIGA.
+FACTOR_LIGA = {"PL": 1.28, "PD": 1.09, "FL1": 1.12, "SA": 1.03, "BL1": 1.06, "PPL": 1.00, "DED": 0.83}
 # Equipos de ligas fuera del plan (Bélgica, Austria, Escocia...): sin datos de su
 # liga, cuentan como un equipo medio de este nivel.
-FACTOR_OTRA_LIGA = 0.72
+FACTOR_OTRA_LIGA = 0.76
 # La fuerza en la liga nacional se eleva a este exponente: los grandes arrasan en
-# su liga y su fuerza nacional tomada tal cual exagera (con 1.0 el modelo predice
-# peor, ver afinar_champions.py). 0.5 es lo que ajustan los datos, estable entre
-# 0.44 y 0.59 en los cinco bloques de la validación cruzada.
-EXPONENTE_FUERZA_CHAMPIONS = 0.5
+# su liga y su fuerza nacional tomada tal cual exagera. Con el historial de
+# Champions (abajo) sale 0.39 (entre 0.30 y 0.46 en los nueve ajustes de la
+# validación): parte de lo que antes salía de la liga ahora lo aporta el historial.
+EXPONENTE_FUERZA_CHAMPIONS = 0.39
 # Los goles esperados parten de la media de la Champions por este factor (local,
 # visitante): con equipos que en su liga son de los mejores, el producto de
 # ataque y defensa sale algo por encima de 1 y hay que compensarlo.
-ESCALA_CHAMPIONS = (0.91, 0.92)
+ESCALA_CHAMPIONS = (0.96, 0.97)
+# Historial en la Champions: lo que cada equipo marcó y encajó en sus partidos de
+# Champions de esta temporada y la anterior, frente a lo que se esperaba de un
+# equipo de su nivel de liga contra esos mismos rivales. Corrige la fuerza que da
+# su liga nacional, encogido hacia 1 con estos goles de pseudo-cuenta (sale
+# entre 26 y 36 en los nueve ajustes de la validación): con 31, un equipo con 16
+# partidos de Champions pesa casi a medias entre su historial y su liga, y uno
+# sin partidos queda como estaba. Sale de los mismos partidos que ya se bajan
+# para la media de la Champions.
+K_HISTORIAL_CHAMPIONS = 31
 DIAS_VALIDEZ_LIGA_EQUIPO = 30   # de qué liga es cada equipo: no cambia en la temporada
 
 # Zona horaria de referencia para decidir qué es "hoy".
@@ -275,6 +286,35 @@ def temporada_actual(codigo_liga=None):
     return a.year if a.month >= 7 else a.year - 1
 
 
+def goles_90(match):
+    """Goles de cada equipo a los 90 minutos, (None, None) si no hay resultado.
+
+    En una eliminatoria con prórroga o penaltis, fullTime es el resultado final
+    (con la prórroga y, en la v4 de la API, también la tanda de penaltis), y el
+    modelo predice los 90 minutos: ahí manda regularTime. En liga no cambia nada."""
+    score = match.get("score") or {}
+    if score.get("duration") in ("EXTRA_TIME", "PENALTY_SHOOTOUT"):
+        rt = score.get("regularTime") or {}
+        if rt.get("home") is not None and rt.get("away") is not None:
+            return rt["home"], rt["away"]
+    ft = score.get("fullTime") or {}
+    return ft.get("home"), ft.get("away")
+
+
+def historial_de_partidos(matches):
+    """{id del equipo: [[rival, en casa (1/0), goles a favor, en contra], ...]} de
+    los partidos terminados de un torneo: lo que hace falta para el historial."""
+    hist = {}
+    for m in matches:
+        gl, gv = goles_90(m)
+        loc, vis = (m.get("homeTeam") or {}).get("id"), (m.get("awayTeam") or {}).get("id")
+        if gl is None or gv is None or loc is None or vis is None:
+            continue
+        hist.setdefault(str(loc), []).append([vis, 1, gl, gv])
+        hist.setdefault(str(vis), []).append([loc, 0, gv, gl])
+    return hist
+
+
 def obtener_prior_liga(codigo_liga, cache):
     """Media de goles de la temporada ANTERIOR de ESTA liga.
 
@@ -287,13 +327,17 @@ def obtener_prior_liga(codigo_liga, cache):
     """
     priors = cache.setdefault("priors", {})
     entry = priors.get(codigo_liga)
-    if entry and esta_vigente(entry.get("actualizado"), DIAS_VALIDEZ_PRIOR):
+    season = temporada_actual(codigo_liga) - 1
+    # la temporada también cuenta: en julio la "anterior" pasa a ser otra, y un
+    # torneo guarda además su historial por equipo (ver historial_champions)
+    if (entry and esta_vigente(entry.get("actualizado"), DIAS_VALIDEZ_PRIOR)
+            and entry.get("temporada") == season
+            and (codigo_liga not in TORNEOS.values() or "historial" in entry)):
         return entry
 
     respaldo = {"avg_local": PRIOR_AVG_LOCAL, "avg_visita": PRIOR_AVG_VISITA,
                 "origen": "constante de respaldo", "partidos": 0, "actualizado": None}
 
-    season = temporada_actual(codigo_liga) - 1
     resp = get_con_pausa(f"{BASE_URL}/competitions/{codigo_liga}/matches",
                          {"season": season, "status": "FINISHED"})
     if resp.status_code != 200:
@@ -301,12 +345,13 @@ def obtener_prior_liga(codigo_liga, cache):
               f"(HTTP {resp.status_code}). Se usa la constante de respaldo.", file=sys.stderr)
         return respaldo
 
+    matches = resp.json().get("matches", [])
     gl = gv = n = 0
-    for m in resp.json().get("matches", []):
-        ft = m.get("score", {}).get("fullTime", {})
-        if ft.get("home") is None or ft.get("away") is None:
+    for m in matches:
+        a, b = goles_90(m)
+        if a is None or b is None:
             continue
-        gl += ft["home"]; gv += ft["away"]; n += 1
+        gl += a; gv += b; n += 1
 
     # Con media temporada o menos no vale la pena: sería un ancla tan ruidosa
     # como el problema que intenta resolver.
@@ -316,8 +361,10 @@ def obtener_prior_liga(codigo_liga, cache):
         return respaldo
 
     entry = {"avg_local": gl / n, "avg_visita": gv / n,
-             "origen": f"temporada {season}", "partidos": n,
+             "origen": f"temporada {season}", "partidos": n, "temporada": season,
              "actualizado": ahora().isoformat()}
+    if codigo_liga in TORNEOS.values():
+        entry["historial"] = historial_de_partidos(matches)
     priors[codigo_liga] = entry
     return entry
 
@@ -327,7 +374,8 @@ def obtener_prior_liga(codigo_liga, cache):
 # ==========================================
 def obtener_promedio_liga(codigo_liga, cache):
     entry = cache["ligas"].get(codigo_liga)
-    if entry and esta_vigente(entry.get("actualizado"), DIAS_VALIDEZ_LIGA):
+    if (entry and esta_vigente(entry.get("actualizado"), DIAS_VALIDEZ_LIGA)
+            and (codigo_liga not in TORNEOS.values() or "historial" in entry)):
         return entry
 
     prior = obtener_prior_liga(codigo_liga, cache)
@@ -338,11 +386,10 @@ def obtener_promedio_liga(codigo_liga, cache):
         return {"avg_local": prior["avg_local"], "avg_visita": prior["avg_visita"],
                 "partidos": 0, "prior": prior["origen"], "actualizado": None}
 
-    body = resp.json()
+    matches = resp.json().get("matches", [])
     goles_local, goles_visita, partidos = 0, 0, 0
-    for match in body.get("matches", []):
-        score = match.get("score", {}).get("fullTime", {})
-        gl, gv = score.get("home"), score.get("away")
+    for match in matches:
+        gl, gv = goles_90(match)
         if gl is None or gv is None:
             continue
         goles_local += gl
@@ -361,6 +408,8 @@ def obtener_promedio_liga(codigo_liga, cache):
         "prior_visita": round(prior["avg_visita"], 3),
         "actualizado": ahora().isoformat()
     }
+    if codigo_liga in TORNEOS.values():
+        promedio["historial"] = historial_de_partidos(matches)
     cache["ligas"][codigo_liga] = promedio
     return promedio
 
@@ -557,15 +606,54 @@ def liga_domestica(team_id, cache):
     return liga
 
 
+def historial_champions(team_id, factor, cache, codigo="CL"):
+    """Lo que un equipo marcó y encajó en sus partidos de Champions de esta
+    temporada y la anterior, y lo que se esperaba de él en esos partidos: la
+    media de la Champions de esa temporada por ESCALA_CHAMPIONS, por su nivel de
+    liga y entre el del rival (al revés para lo encajado). Los partidos los
+    bajaron ya obtener_promedio_liga y obtener_prior_liga; solo puede costar
+    alguna petición la liga de un rival que aún no esté en la caché."""
+    gf = gc = esperado_f = esperado_c = 0.0
+    n = 0
+    for entrada in (cache.get("ligas", {}).get(codigo), cache.get("priors", {}).get(codigo)):
+        if not entrada:
+            continue
+        mu_l, mu_v = entrada["avg_local"], entrada["avg_visita"]
+        for rival, en_casa, a_favor, en_contra in entrada.get("historial", {}).get(str(team_id), []):
+            f_rival = FACTOR_LIGA.get(liga_domestica(rival, cache), FACTOR_OTRA_LIGA)
+            if en_casa:
+                esperado_f += mu_l * ESCALA_CHAMPIONS[0] * factor / f_rival
+                esperado_c += mu_v * ESCALA_CHAMPIONS[1] * f_rival / factor
+            else:
+                esperado_f += mu_v * ESCALA_CHAMPIONS[1] * factor / f_rival
+                esperado_c += mu_l * ESCALA_CHAMPIONS[0] * f_rival / factor
+            gf += a_favor
+            gc += en_contra
+            n += 1
+    return {"partidos": n, "gf": gf, "gc": gc, "esperado_f": esperado_f, "esperado_c": esperado_c}
+
+
+def multiplicadores_historial(h, k=K_HISTORIAL_CHAMPIONS):
+    """(ataque, defensa) que aporta el historial de Champions: goles marcados y
+    encajados frente a lo esperado, encogidos hacia 1 con k goles de
+    pseudo-cuenta. Sin partidos, (1, 1): el equipo queda con su liga."""
+    return (h["gf"] + k) / (h["esperado_f"] + k), (h["gc"] + k) / (h["esperado_c"] + k)
+
+
 def fuerzas_champions(team_id, en_casa, cache):
     """Ataque y defensa de un equipo para un partido de Champions: su fuerza en
     su liga nacional, relativa a la media de esa liga (como en calcular_xg_partido),
-    atenuada con EXPONENTE_FUERZA_CHAMPIONS, y el nivel de su liga. Un equipo de
-    otra liga cuenta como un equipo medio de FACTOR_OTRA_LIGA."""
+    atenuada con EXPONENTE_FUERZA_CHAMPIONS, el nivel de su liga y su historial
+    en la Champions (historial_champions). Un equipo de otra liga cuenta como un
+    equipo medio de FACTOR_OTRA_LIGA, corregido por su historial."""
     liga = liga_domestica(team_id, cache)
+    factor = FACTOR_LIGA.get(liga, FACTOR_OTRA_LIGA)
+    h = historial_champions(team_id, factor, cache)
+    ataque_cl, defensa_cl = multiplicadores_historial(h)
+    historial = {"partidos_cl": h["partidos"], "ataque_cl": ataque_cl, "defensa_cl": defensa_cl}
     if liga is None:
         return {"liga": None, "nombre_liga": None, "factor": FACTOR_OTRA_LIGA,
-                "ataque": 1.0, "defensa": 1.0, "muestra": 0}
+                "ataque": 1.0, "defensa": 1.0, "muestra": 0, **historial}
     s = obtener_stats_equipo(team_id, liga, cache)
     prom = obtener_promedio_liga(liga, cache)
     avg_l, avg_v = prom["avg_local"], prom["avg_visita"]
@@ -579,19 +667,22 @@ def fuerzas_champions(team_id, en_casa, cache):
         n = s["n_visita"]
     b = EXPONENTE_FUERZA_CHAMPIONS
     nombre = next((k for k, v in LIGAS.items() if v == liga), liga)
-    return {"liga": liga, "nombre_liga": nombre, "factor": FACTOR_LIGA.get(liga, FACTOR_OTRA_LIGA),
-            "ataque": ataque ** b, "defensa": defensa ** b, "muestra": n}
+    return {"liga": liga, "nombre_liga": nombre, "factor": factor,
+            "ataque": ataque ** b, "defensa": defensa ** b, "muestra": n, **historial}
 
 
 def calcular_xg_champions(local, visita, promedio_cl):
     """Goles esperados de un partido de Champions. Misma forma que
     calcular_xg_partido (ataque de uno por defensa del otro por la media), con
-    la media de la Champions y el nivel de cada liga: el ataque se multiplica
-    por el nivel propio y se divide por el del rival."""
+    la media de la Champions, el nivel de cada liga (el ataque se multiplica por
+    el nivel propio y se divide por el del rival) y el historial de cada uno en
+    la Champions."""
     xg_local = (promedio_cl["avg_local"] * ESCALA_CHAMPIONS[0]
-                * local["ataque"] * visita["defensa"] * local["factor"] / visita["factor"])
+                * local["ataque"] * visita["defensa"] * local["factor"] / visita["factor"]
+                * local["ataque_cl"] * visita["defensa_cl"])
     xg_visita = (promedio_cl["avg_visita"] * ESCALA_CHAMPIONS[1]
-                 * visita["ataque"] * local["defensa"] * visita["factor"] / local["factor"])
+                 * visita["ataque"] * local["defensa"] * visita["factor"] / local["factor"]
+                 * visita["ataque_cl"] * local["defensa_cl"])
     return round(xg_local, 2), round(xg_visita, 2)
 
 
@@ -842,8 +933,12 @@ def correr_actualizacion(forzar=False):
                 f_visita = fuerzas_champions(visita_id, False, cache)
                 xg_local, xg_visita = calcular_xg_champions(f_local, f_visita, promedio_liga)
                 muestra_local, muestra_visita = f_local["muestra"], f_visita["muestra"]
-                # de qué liga sale cada equipo y con qué nivel: la web lo explica
-                extra["champions"] = {lado: {k: f[k] for k in ("liga", "nombre_liga", "factor")}
+                # de qué liga sale cada equipo, con qué nivel y qué dice su historial
+                # en la Champions: la web lo explica
+                extra["champions"] = {lado: {"liga": f["liga"], "nombre_liga": f["nombre_liga"],
+                                             "factor": f["factor"], "partidos_cl": f["partidos_cl"],
+                                             "ataque_cl": round(f["ataque_cl"], 2),
+                                             "defensa_cl": round(f["defensa_cl"], 2)}
                                       for lado, f in (("local", f_local), ("visita", f_visita))}
             else:
                 stats_local = obtener_stats_equipo(local_id, codigo_liga, cache)
@@ -890,6 +985,35 @@ def correr_actualizacion(forzar=False):
 # ==========================================
 # RUTAS WEB
 # ==========================================
+# Mudanza a Cloudflare: con REDIRIGIR_A=https://... en Render → Environment, la
+# app manda cada petición a la misma ruta en la dirección nueva y el planificador
+# no arranca, así Render deja de gastar la cuota de la API que ahora usa el
+# Worker (es el mismo token: entre los dos se pasarían de 10 por minuto).
+# 302 y no 301: si hubiera que volver atrás, los navegadores no lo recuerdan.
+REDIRIGIR_A = os.environ.get("REDIRIGIR_A", "").rstrip("/")
+
+
+@app.before_request
+def redirigir_a_cloudflare():
+    if REDIRIGIR_A:
+        consulta = request.query_string.decode()
+        return redirect(REDIRIGIR_A + request.path + ("?" + consulta if consulta else ""), code=302)
+
+
+# Lo que la web puede cargar (Content-Security-Policy). El JavaScript va en
+# public/app.js y no en línea, así que basta script-src 'self': si un nombre de
+# equipo con <script> o un onerror= se colara por un fallo de escapado, el
+# navegador no lo ejecutaría. Las mismas cabeceras van en public/_headers para
+# Cloudflare (test_paridad.py comprueba que coinciden).
+CSP_WEB = ("default-src 'none'; script-src 'self'; "
+           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+           "font-src https://fonts.gstatic.com; "
+           "img-src 'self' data: https://crests.football-data.org; "
+           "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+# El JSON no carga nada.
+CSP_API = "default-src 'none'; frame-ancestors 'none'"
+
+
 @app.after_request
 def agregar_headers_seguridad(response):
     # Básicos y sin costo: evitan que el navegador "adivine" tipos de contenido
@@ -897,6 +1021,9 @@ def agregar_headers_seguridad(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = CSP_WEB if response.mimetype == "text/html" else CSP_API
+    # Solo por HTTPS (Render ya redirige el HTTP; esto evita hasta el primer salto).
+    response.headers["Strict-Transport-Security"] = "max-age=31536000"
     # Esto es un panel en vivo: cachear el HTML solo consigue que después de un
     # deploy sigas viendo la interfaz anterior hasta que hagas Ctrl+F5. Y el JSON
     # de /api/estado cambia cada pocos segundos, así que cachearlo es peor aún.
@@ -909,6 +1036,20 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/app.js")
+def app_js():
+    return send_from_directory(app.template_folder, "app.js", mimetype="text/javascript")
+
+
+def token_valido():
+    """El ?token= de /actualizar y /validar contra UPDATE_SECRET.
+
+    hmac.compare_digest en vez de == : compara en tiempo constante, así nadie
+    puede adivinar el token midiendo milisegundos de respuesta. En bytes: con
+    str, un carácter no ASCII en el token hacía saltar un error 500."""
+    return hmac.compare_digest(request.args.get("token", "").encode(), UPDATE_SECRET.encode())
+
+
 @app.route("/api/estado")
 def api_estado():
     return jsonify(leer_estado())
@@ -917,10 +1058,7 @@ def api_estado():
 @app.route("/actualizar")
 def actualizar():
     """cron-job.org le pega a esta ruta cada cierto tiempo."""
-    token_recibido = request.args.get("token", "")
-    # hmac.compare_digest en vez de == : compara en tiempo constante,
-    # así nadie puede adivinar el token midiendo milisegundos de respuesta.
-    if not hmac.compare_digest(token_recibido, UPDATE_SECRET):
+    if not token_valido():
         return jsonify({"error": "token inválido"}), 403
 
     if actualizando_ahora:
@@ -969,7 +1107,7 @@ def validar():
     Cuesta 2 peticiones por liga y solo la primera vez: las temporadas terminadas
     no cambian, así que quedan cacheadas en disco.
     """
-    if not hmac.compare_digest(request.args.get("token", ""), UPDATE_SECRET):
+    if not token_valido():
         return jsonify({"error": "token inválido"}), 403
 
     import validacion
@@ -1038,7 +1176,7 @@ URL_PROPIA = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 # En local viene desactivado por defecto: al importar app.py para el backtest o
 # para una prueba no queremos que se ponga a gastar cuota de la API por su cuenta.
 AUTO_ACTUALIZAR = os.environ.get(
-    "AUTO_ACTUALIZAR", "1" if EN_RENDER else "0").lower() not in ("0", "false", "no")
+    "AUTO_ACTUALIZAR", "1" if EN_RENDER else "0").lower() not in ("0", "false", "no") and not REDIRIGIR_A
 
 SEGUNDOS_KEEPALIVE = int(os.environ.get("SEGUNDOS_KEEPALIVE", "540"))   # 9 min < 15 de Render
 SEGUNDOS_TICK = int(os.environ.get("SEGUNDOS_TICK", "300"))            # cada cuánto se revisa

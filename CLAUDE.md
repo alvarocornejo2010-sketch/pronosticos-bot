@@ -6,15 +6,26 @@ proyecto.
 
 ## Qué es
 
-App Flask en Render que predice resultados de fútbol (1/X/2, doble oportunidad y
-mercados de goles: más/menos, ambos marcan, porterías a cero y marcadores) con un
-modelo Poisson de fuerzas ataque/defensa.
+Web que predice resultados de fútbol (1/X/2, doble oportunidad y mercados de
+goles: más/menos, ambos marcan, porterías a cero y marcadores) con un modelo
+Poisson de fuerzas ataque/defensa. Corre en dos sitios con la misma lógica:
+
+- **Cloudflare Workers** (`worker/`, oct 2026): adonde se muda. JavaScript, base
+  D1 y un cron por minuto. Ver "Cloudflare: cómo funciona".
+- **Render** (`app.py`, Flask): la versión de siempre. Sigue siendo la
+  referencia del modelo (la usan `backtest.py`, `afinar*.py` y `validacion.py`
+  offline) y sigue desplegándose desde `main` hasta que se apague.
 
 - Repo: `pronosticos-bot`
 - Carpeta local: `C:\Users\Alvaro\Desktop\webapp`
-- URL producción: https://pronosticos-bot.onrender.com
-- Ficheros clave: `app.py`, `templates/index.html`, `validacion.py`, `backtest.py`,
-  `afinar.py`, `afinar_goles.py`, `diagnostico.py`
+- URL en Render: https://pronosticos-bot.onrender.com
+- URL en Cloudflare: `https://pronosticos-bot.<subdominio>.workers.dev` (el
+  subdominio es el de la cuenta: Workers & Pages → el Worker → Settings → Domains)
+- Ficheros clave: `app.py`, `public/index.html`, `public/app.js`,
+  `validacion.py`, `worker/`, `wrangler.jsonc`, `test_paridad.py`,
+  `backtest.py`, `afinar.py`, `afinar_goles.py`, `diagnostico.py`
+- **El repo es público**: todo lo que se sube (y su historial) lo ve cualquiera.
+  Ver "Seguridad".
 
 ## Stack
 
@@ -32,8 +43,19 @@ modelo Poisson de fuerzas ataque/defensa.
   (`LIGAS_ANO_NATURAL`). `temporada_actual(codigo)` lo tiene en cuenta para el
   prior; sin eso, entre enero y junio se anclaría en la temporada de hace dos
   años.
+- Cloudflare, plan gratis: Worker en JavaScript (módulos ES, sin build ni
+  dependencias), D1 (base `pronosticos-bot`, id
+  `ab0a2af0-6f18-4e8d-92f4-32326e651bff`, región ENAM), un Cron Trigger cada
+  minuto y la web como archivo estático (`public/`). Límites que mandan en el
+  diseño: **10 ms de CPU por ejecución** (también en el cron), 50 peticiones
+  externas por ejecución, 100.000 peticiones al día, 5 crons por cuenta; D1, 5
+  millones de filas leídas y 100.000 escritas al día (desde sept 2026 se
+  cortan al pasarse). `wrangler` va fijado en `package.json`.
 
 ## Arquitectura
+
+Lo que sigue describe `app.py`. El Worker hace lo mismo con otro ritmo y otro
+almacén: ver "Cloudflare: cómo funciona".
 
 **Actualización reanudable por presupuesto.** Cada pasada gasta como mucho
 `PRESUPUESTO_REQUESTS` (40). Al agotarse, el estado queda en `parcial` y la
@@ -61,14 +83,20 @@ En local viene desactivado por defecto (solo se activa si detecta
 `pronosticos-bot` es el único servicio del workspace — un segundo servicio free
 suspendería a ambos.
 
-**La interfaz no usa Jinja2.** `templates/index.html` no tiene ni una etiqueta
-`{{ }}`: es un shell estático con el CSS y el JS en línea que se pinta entero en
+**La interfaz no usa Jinja2.** `public/index.html` (antes `templates/`) no tiene
+ni una etiqueta `{{ }}`: Flask la sirve como plantilla (`template_folder=
+"public"`) y Cloudflare como archivo estático, con sus cabeceras en
+`public/_headers`. Es un shell estático con el CSS en línea y el JS en
+`public/app.js` (Flask lo sirve en `/app.js`), que se pinta entero en
 el cliente sondeando `/api/estado` (cada 4s mientras hay cálculo en curso, cada
 30s el resto del tiempo). No hay `static/`, ni build, ni dependencias de JS; de
 fuera solo llegan las fuentes Saira y Figtree (Google Fonts, con fallback del
 sistema) y los escudos (URLs de football-data.org). Al tocar la web se trabaja
-sobre las funciones `pintar*` y `html*` del `<script>`, no sobre bucles de
-plantilla. Ojo al probar en local: fuera del modo debug, Flask guarda la
+sobre las funciones `pintar*` y `html*` de `app.js`, no sobre bucles de
+plantilla. **Nada de JavaScript en `index.html`** (ni `<script>` en línea ni
+`onclick=`): la CSP (`script-src 'self'`) lo bloquearía y la web se quedaría en
+blanco. Para cargar algo de otro dominio hay que añadirlo a la CSP en los dos
+sitios (ver "Seguridad"). Ojo al probar en local: fuera del modo debug, Flask guarda la
 plantilla compilada y no ve los cambios de `index.html` hasta reiniciar. Cada
 zona guarda una "huella" de lo último que pintó y solo toca el DOM si cambió
 (`pintarBloques` lo hace bloque a bloque en la lista central): sin eso la tabla
@@ -164,6 +192,134 @@ partidos más cercanos salen primero).
 esto: sirve para rehacer una pasada antes de `MIN_MINUTOS_ACTUALIZACION`
 (25 min) y para volver a bajar el calendario ignorando la caché.
 
+En Cloudflare no pasa: D1 sobrevive a los despliegues y la web solo arranca
+vacía la primera vez (unos 40 min hasta llenarse). La web sabe en cuál de los
+dos está (`plataforma: "cloudflare"` en `/api/estado`) y explica cada caso.
+
+## Cloudflare: cómo funciona (oct 2026)
+
+`worker/` es `app.py` + `validacion.py` pasados a JavaScript función a función,
+con las mismas cachés, validez, orden y redondeos. **Mismos números:**
+`test_paridad.py` corre el modelo de los dos lados con miles de casos (goles
+esperados, 1X2, mercados, Champions, validación entera, redondeo) y da 0
+diferencias en 170.000 valores. Y de punta a punta, contra una API falsa
+determinista (`/api/estado` con 166 partidos y 16 de Champions, `/api/ligas`,
+`/api/validacion` de las 9 ligas): 0 diferencias entre Flask y el Worker,
+también con 1 de cada 5 peticiones respondida con 429.
+
+Ficheros: `config.js` (constantes, las mismas de `app.py`), `modelo.js` (el
+modelo y un `redondear` que imita a `round()` de Python, empates al par
+incluidos), `actualizacion.js` (la pasada), `validacion.js`, `planificador.js`
+(el cron), `almacen.js` (D1), `api.js` (football-data con su presupuesto),
+`tiempo.js` (hora de Lima) e `index.js` (rutas).
+
+**El ritmo lo marca la CPU.** El plan gratis da 10 ms por ejecución y leer el
+JSON de la API cuesta ~7 ms por MB, así que en vez de una pasada de 40
+peticiones cada 5 min hay una cada minuto con: como mucho 6 peticiones
+(`PRESUPUESTO_REQUESTS`), separadas 6.5 s también entre pasadas (la hora de la
+última va en D1), 350 KB de JSON (`MAX_BYTES_PASADA`), una sola respuesta
+grande (una temporada entera, ~400 KB) y al principio de la pasada, y 40
+partidos calculados (`MAX_CALCULOS_PASADA`). Lo que no cabe queda pendiente y el
+estado sigue en `actualizando` (no hay `parcial`: el siguiente minuto continúa).
+Medido dentro de `workerd` (el runtime de Cloudflare, en local, D1 incluido):
+3 a 9 ms por pasada, ~5 ms lo normal. Llenar la semana entera: ~40 pasadas.
+
+**Para que quepa, casi no se lee JSON.** El calendario va en la tabla
+`partidos`, cada partido con su ficha (nombres, hora, escudos) ya en JSON; las
+predicciones, en `predicciones`, también en JSON. Lo que lee la web sale de un
+solo JOIN y se monta pegando textos. La caché de la API (`cache`, por
+secciones como `cache.json`) se lee fila a fila solo cuando se usa.
+
+**Tablas de D1** (se crean solas si faltan, `ESQUEMA` en `almacen.js`):
+`cache`, `partidos`, `predicciones` (la última publicada de cada partido; no se
+borra al empezar el partido: es el registro de lo que dijo la web),
+`documentos` (`estado` que sirve `/api/estado`, `resumen`, `validacion`,
+pedidos, temporadas terminadas compactas) y `candado` (que dos pasadas no se
+pisen, hora de la última petición, pasadas muertas).
+
+**Si una pasada muere** (lo más probable, por CPU) deja el candado puesto; la
+siguiente lo nota y hace la mitad (presupuesto, bytes y cálculos), hasta un
+octavo, y recupera el ritmo de uno en uno cuando vuelven a terminar bien. El
+candado caduca a los 5 min.
+
+**La validación va por pasos de un minuto**, solo con la web `listo`: bajar
+una temporada, bajar la otra, y recorrer la liga de 25 en 25 partidos
+(`PARTIDOS_POR_PASO`) guardando por dónde iba. Unas 2 h y media la primera vez;
+las temporadas quedan en D1. Como D1 no se borra, se repite sola cuando termina
+una temporada nueva.
+
+**Cambios respecto a `app.py`** (ninguno toca el modelo):
+- un 429 de la API no se calcula a ciegas: el partido espera al minuto
+  siguiente (`app.py` lo publicaba solo con la media de liga, 24 h);
+- una petición que falla no se repite partido tras partido en la misma pasada;
+- si el calendario cambia la hora o el nombre de un partido ya calculado, la
+  ficha se corrige sin recalcular (`app.py` enseñaba la hora vieja hasta 24 h);
+- los intentos de la validación se arrastran (en `validacion.py` se perdían y
+  el tope de 3 no frenaba nada);
+- `/actualizar?forzar=1` y `/validar` dejan un pedido en D1 que el cron recoge
+  en menos de un minuto: una petición web no puede durar lo que una pasada.
+
+**En local:** `npm install`, copiar `.dev.vars.example` a `.dev.vars`, `npm run
+dev` y lanzar el cron a mano con
+`curl "http://localhost:8787/cdn-cgi/local/scheduled?cron=*+*+*+*+*"`. Con
+`API_BASE` en `.dev.vars` se apunta a una API falsa y con
+`PAUSA_ENTRE_REQUESTS=0` no espera entre peticiones.
+
+## Seguridad (revisada en oct 2026)
+
+**El repo es público.** Revisados el árbol y los 36 commits de todas las ramas
+(y las descripciones de las PRs): no hay ni una clave. Lo único que parece un
+secreto son valores de ejemplo (`tu_token`, `*_dummy_secret`) y dos
+identificadores que no dan acceso a nada sin una clave: el id de la base D1
+(`wrangler.jsonc`; Cloudflare lo pone ahí a propósito) y el del servicio de
+Render. Los commits de fusión hechos desde la web de GitHub llevan el email de
+la cuenta; para que los siguientes no lo lleven: GitHub → Settings → Emails →
+"Keep my email addresses private".
+
+**Los dos secretos** y dónde viven (nunca en el repo):
+- `FOOTBALL_DATA_TOKEN`: la clave de la API. Render → Environment y Cloudflare
+  → Settings → Variables and Secrets (tipo Secret). Viaja en la cabecera
+  `X-Auth-Token`, nunca en la URL, y no se escribe en ningún log.
+- `UPDATE_SECRET` (12 caracteres o más): protege `/actualizar` y `/validar`. Se
+  compara en tiempo constante (`hmac.compare_digest` en bytes en Python;
+  SHA-256 + `timingSafeEqual` en el Worker). Va en la URL (`?token=`), así que
+  queda en el historial del navegador y en los logs de Render y Cloudflare, que
+  solo ve el dueño de la cuenta: no pegar esa URL en ningún sitio público. Si
+  se filtra, se cambia en los dos paneles y listo (no hay nada más atado a él).
+- En local van en `.env` / `.dev.vars`, que `.gitignore` deja fuera
+  (`.dev.vars.example` sí se sube: solo lleva ejemplos).
+
+**Cabeceras** (las mismas en `app.py` y `public/_headers`; `test_paridad.py`
+comprueba que coinciden): `nosniff`, `X-Frame-Options: DENY`, `no-referrer`,
+`no-store`, HSTS de un año y una **CSP** que solo deja cargar el JS de la propia
+web (`script-src 'self'`, nada en línea), las fuentes de Google y los escudos de
+`crests.football-data.org`; un escudo de otro dominio se bloquea y la web pinta
+el monograma. Probado en Chromium en los dos sitios: la web pinta igual, sin
+violaciones, y un `<img onerror=...>` inyectado a mano no se ejecuta. Las
+respuestas JSON llevan `default-src 'none'`.
+
+**Lo demás, revisado y bien:** todo lo que llega de la API pasa por `esc()`
+antes del DOM (también los textos de error); las consultas a D1 van todas con
+parámetros (`?1`), sin pegar texto; el JSON que se monta a mano en el Worker
+sale siempre de `JSON.stringify`; los escudos solo pasan si son `https://`;
+`REDIRIGIR_A` antepone un origen fijo, así que no sirve para redirigir a otro
+sitio; un error 500 del Worker no enseña el detalle (va a los logs). En
+`wrangler.jsonc`, `preview_urls: false`: sin eso cada versión subida tendría
+una URL pública propia, con la base y los secretos de producción, para siempre.
+
+**Dependencias** (oct 2026, `pip-audit` y `npm audit` a cero): Flask 3.1.3 y
+requests 2.33.1 (los avisos de 3.1.0 y 2.32.3 no afectaban a esta app: no usa
+sesiones ni `.netrc`), wrangler 4.149.0 (la 4.146 arrastraba un `sharp`
+vulnerable, solo en local). Para repasarlo: `pip install pip-audit && pip-audit
+-r requirements.txt` y `npm audit`.
+
+**Riesgo que queda:** las rutas públicas solo leen, pero cada petición al
+Worker cuenta para las 100.000 diarias del plan gratis. Alguien que las
+machacara a propósito dejaría `/api/estado` sin servicio hasta la medianoche
+UTC (la web en sí, que es estática, seguiría cargando). En `workers.dev` no hay
+reglas de WAF; con un dominio propio en Cloudflare sí habría una regla de
+límite de peticiones gratis.
+
 ## Bugs ya encontrados y corregidos (no reabrir sin motivo nuevo)
 
 1. **Normalizador equivocado en `calcular_xg_partido`** (crítico). La defensa del
@@ -199,41 +355,73 @@ El modelo de liga no sirve para la Champions: mide a cada equipo con sus
 partidos en la misma competición, y en la Champions son 4 en casa y 4 fuera
 contra rivales de niveles muy distintos; su "media de liga" mezcla al Bayern con
 el campeón de Kazajistán. Por eso la Champions va en `TORNEOS` y no en `LIGAS`,
-con su propio cálculo:
+con su propio cálculo, que junta tres cosas:
 
-- Cada equipo se mide en SU liga nacional (`fuerzas_champions`): los mismos
-  `obtener_stats_equipo` y `obtener_promedio_liga` que sus partidos de liga, así
-  que casi siempre salen de la caché. Su ataque y su defensa relativos a la
-  media de su liga se elevan a `EXPONENTE_FUERZA_CHAMPIONS` (0.5): los grandes
-  arrasan en su liga y su fuerza nacional tomada tal cual exagera.
-- Se ajusta por el nivel de su liga (`FACTOR_LIGA`): PL 1.33, PD 1.16, FL1 1.13,
-  SA 1.10, BL1 1.03, PPL 0.93, DED 0.91, y 0.72 para un equipo de una liga fuera
-  del plan (`FACTOR_OTRA_LIGA`), que cuenta como un equipo medio de ese nivel.
+- **Su liga nacional** (`fuerzas_champions`): los mismos `obtener_stats_equipo`
+  y `obtener_promedio_liga` que sus partidos de liga, así que casi siempre
+  salen de la caché. Su ataque y su defensa relativos a la media de su liga se
+  elevan a `EXPONENTE_FUERZA_CHAMPIONS` (0.39): los grandes arrasan en su liga
+  y su fuerza nacional tomada tal cual exagera.
+- **El nivel de su liga** (`FACTOR_LIGA`): PL 1.28, FL1 1.12, PD 1.09, BL1 1.06,
+  SA 1.03, PPL 1.00, DED 0.83, y 0.76 para un equipo de una liga fuera del plan
+  (`FACTOR_OTRA_LIGA`), que cuenta como un equipo medio de ese nivel.
+- **Su historial en la Champions** (`historial_champions`): lo que marcó y
+  encajó en sus partidos de Champions de esta temporada y la anterior, frente a
+  lo esperado de un equipo de su nivel de liga contra esos mismos rivales
+  (media de la Champions × escala × nivel propio / nivel del rival). Se encoge
+  hacia 1 con `K_HISTORIAL_CHAMPIONS` (31 goles de pseudo-cuenta,
+  `multiplicadores_historial`): con 16 partidos de Champions un equipo pesa casi
+  a medias entre su historial y su liga, y sin partidos queda como estaba. Las
+  dos temporadas pesan igual (medido: la anterior aporta tanto como la actual).
+  Los partidos salen de lo que ya se baja para la media (`historial` en la
+  entrada de la Champions de `ligas` y de `priors`); solo cuesta alguna
+  petición la liga de un rival de la temporada pasada que no esté en caché
+  (`liga_domestica`, guardada 30 días): unas pocas al mes.
 - Goles esperados (`calcular_xg_champions`): media de la Champions ×
-  `ESCALA_CHAMPIONS` × ataque propio × defensa rival × nivel propio / nivel
-  rival. Luego, el mismo `calcular_poisson` y `mercados_de_goles` que en liga.
+  `ESCALA_CHAMPIONS` (0.96, 0.97) × ataque propio × defensa rival × nivel propio
+  / nivel rival × historial de ataque propio × historial de defensa rival.
+  Luego, el mismo `calcular_poisson` y `mercados_de_goles` que en liga.
+- Los goles de la Champions se cuentan a los 90 minutos (`goles_90`): con
+  prórroga o penaltis, `fullTime` es el resultado final (en la v4, con la
+  tanda sumada) y manda `regularTime`. Afecta a la media y al historial; en
+  liga no cambia nada.
 - De qué liga es cada equipo (`liga_domestica`): primero, gratis, en los
   calendarios de liga ya descargados; si no sale, una petición a `/teams/{id}`
   (`runningCompetitions`). Se guarda 30 días en la caché (`liga_equipo`).
 - Los cruces de eliminatoria aún sin decidir (equipo sin id) no se pintan.
 
-Medido con `afinar_champions.py` sobre la Champions 2024/25 (188 partidos con
-resultado, datos de openfootball; 10 de los 36 equipos venían de ligas fuera del
-plan), con validación cruzada de 5 bloques. Skill del 1X2 frente a "equipo
-medio":
+Medido con `afinar_champions.py` sobre cuatro Champions (2022/23 a 2025/26, 628
+partidos con resultado, de openfootball; las ligas nacionales de 2021/22 a
+2025/26), cada partido predicho solo con lo anterior a su fecha. Skill del 1X2
+frente a "equipo medio", dejando fuera una temporada entera cada vez (con 5
+bloques al azar sale casi igual):
 
 ```
-solo liga nacional                 +3.6%  (-1.1 se)
-solo nivel de liga                 +6.6%  (-1.7 se)
-liga nacional + nivel              +5.9%  (-1.3 se)
-liga nacional atenuada + nivel     +7.1%  (-1.7 se)   <- el de la app
+solo nivel de liga                 +7.4%  (-3.8 se)
+liga nacional atenuada + nivel    +10.2%  (-5.0 se)   <- la app hasta oct 2026
++ historial en la Champions       +12.3%  (-6.0 se)   <- la de ahora
+historial frente a la de antes: -0.0134 ± 0.0037 de Brier (-3.6 se)
 ```
 
-El exponente sale entre 0.44 y 0.59 en los cinco bloques. Es UNA temporada: ninguna
-mejora llega a 2 errores estándar, así que es una base, no una conclusión. La
-fórmula de producción reproduce la del estudio (Brier 0.5367 frente a 0.5369 en
-la muestra). La Champions no entra en la validación de la app (`validacion.py`
-recorre solo `LIGAS`): la web explica el cálculo en el detalle de cada partido.
+El historial gana en las cuatro temporadas por separado (+1.3 a +3.4 puntos de
+skill), y los parámetros salen estables: exponente entre 0.30 y 0.46, K entre
+26 y 36 en los nueve ajustes. En un estudio previo con los mismos partidos se
+probaron otras dos formas de medir el historial: frente a la media de la
+Champions sin mirar a los rivales (+11.3%) y frente a lo que decía el modelo
+completo (+11.5%); la elegida (+12.0% en ese estudio) les ganaba por unos 2 se.
+La fórmula de producción reproduce la del estudio (Brier 0.5392 frente a
+0.5391 en la muestra). Lo esperado del historial usa los niveles y la escala de
+`app.py`, así que se ajustan dando vueltas hasta que no se mueven (la escala
+tarda unas cuantas; los niveles, ninguna).
+
+Ojo con los datos: la Champions 2022/23 de openfootball usa nombres cortos
+("Real Madrid", "Inter", "Sporting CP") y las demás temporadas y las ligas, los
+largos. Sin casarlos (`casar` y `ALIAS` en `afinar_champions.py`), 8 grandes de
+2022/23 contaban como "otra liga" y el historial parecía mejor de lo que es.
+
+La Champions no entra en la validación de la app (`validacion.py` recorre solo
+`LIGAS`): la web explica el cálculo en el detalle de cada partido, con lo que
+dice el historial de cada equipo.
 
 ## Validación
 
@@ -372,9 +560,36 @@ efecto se diluye solo conforme acumulan partidos.
   pareado. No necesita token: baja resultados de openfootball (ver "Más
   temporadas de datos" abajo) y los cachea en `openfootball_cache/`.
 - `afinar_champions.py` estima `FACTOR_LIGA`, `FACTOR_OTRA_LIGA`,
-  `EXPONENTE_FUERZA_CHAMPIONS` y `ESCALA_CHAMPIONS` con la Champions 2024/25 y
-  las ligas nacionales de openfootball, y compara modelos con validación
-  cruzada. Tampoco necesita token.
+  `EXPONENTE_FUERZA_CHAMPIONS`, `ESCALA_CHAMPIONS` y `K_HISTORIAL_CHAMPIONS` con
+  cuatro Champions (2022/23 a 2025/26, del repositorio `champions-league` de
+  openfootball, en formato de texto) y las ligas nacionales de football.json, y
+  compara modelos con validación cruzada y dejando fuera una temporada entera.
+  Usa las funciones de `app.py` (`historial_champions`, `calcular_xg_champions`),
+  no una copia. Tampoco necesita token. Tarda ~1 minuto.
+
+## Cloudflare: cómo se despliega
+
+Workers Builds, conectado al repo de GitHub desde el panel (Workers & Pages →
+Create → Import a repository): **un push a `main` despliega solo**, con
+`npx wrangler deploy` (sin comando de build). El Worker del panel tiene que
+llamarse `pronosticos-bot`, como `name` en `wrangler.jsonc`, o el build falla.
+La base D1 va enlazada por su id en `wrangler.jsonc`; el cron, también ahí.
+
+Secretos, en el panel (Settings → Variables and Secrets, tipo Secret):
+`FOOTBALL_DATA_TOKEN` y `UPDATE_SECRET`, los mismos valores que en Render →
+Environment. Sin el token, la web lo dice ("Falta el secreto
+FOOTBALL_DATA_TOKEN...") y en cuanto se pone, el siguiente minuto arranca.
+
+Para ver qué pasa: Workers & Pages → `pronosticos-bot` → Deployments (qué
+versión está viva) y Logs (cada pasada escribe una línea con lo que hizo:
+`{"tarea":"actualizar","estado":...,"peticiones":6,"kb":180,"muertes":0}`).
+`muertes` mayor que 0 quiere decir que alguna pasada se pasó de CPU.
+
+**Apagar Render** cuando Cloudflare esté lleno: poner `REDIRIGIR_A=https://...
+workers.dev` en Render → Environment. Desde entonces Render manda cada
+petición a la misma ruta de Cloudflare (302) y su planificador no arranca. Hace
+falta: los dos usan el mismo token, y juntos se pasarían de 10 peticiones por
+minuto.
 
 ## Render: cómo se despliega
 
@@ -402,25 +617,25 @@ Environment).
 
 ## Pendiente (por orden de lo que más mueve la aguja)
 
-- **Champions con más datos:** los niveles de liga salen de una sola temporada
-  (openfootball solo tiene la 2024/25). Con la 2025/26 o más, reajustar con
-  `afinar_champions.py`. Mejoras pensadas: contar también los partidos de
-  Champions y copas de cada equipo (no solo su liga), medir a los equipos de
-  ligas fuera del plan con sus propios partidos, y meter la Champions en la
-  validación de la app.
+- **Champions:** ya junta liga nacional, nivel de liga e historial en la
+  Champions, medido con cuatro temporadas (ver "Champions: cómo se predice").
+  Cada verano, añadir la temporada que termina a `TEMPORADAS_CL` en
+  `afinar_champions.py` y reajustar. Ideas sin probar: contar también las copas
+  nacionales, y meter la Champions en la validación de la app.
 
 - **Championship (y seguramente Brasileirão) casi no aportan:** sus
   pronósticos valen lo que la media de la liga (tabla en "Validación"). La web
   lo enseña en Fiabilidad, pero la tabla los pinta igual que los demás.
   Opciones: quitarlas, marcarlas en la tabla, o probar un encogimiento propio
   para ligas igualadas con el método de `afinar_goles.py`.
-- **Persistencia:** el disco de Render free borra `cache.json`/`data.json` en cada
-  deploy. Bloquea el registro de predicciones. Variable `DATA_DIR` ya preparada
-  para cuando se resuelva (¿disco persistente de pago? ¿DB externa gratuita?).
 - **Registro de predicciones en vivo:** nadie mide si los pronósticos publicados
-  aciertan. Guardarlos con su resultado real cerraría el círculo y acumularía
-  datos propios que el plan free no vende — es lo único que puede sacar el `rho`
-  del empate estadístico descrito arriba.
+  aciertan. Con Cloudflare ya no lo bloquea la persistencia: la tabla
+  `predicciones` de D1 guarda la última predicción publicada de cada partido y
+  no la borra. Falta bajar los resultados (los partidos `FINISHED` de cada
+  competición, una petición por liga) y medirlos. Cerraría el círculo y
+  acumularía datos propios que el plan free no vende: es lo único que puede
+  sacar el `rho` del empate estadístico descrito arriba. En Render sigue igual
+  (disco efímero).
 - **`test_migracion.py` está desincronizado:** prueba `app._parsear_standings` y
   `app.USAR_PRIOR_PREVIA`, que no existen en `app.py`. Es de una migración a
   `/standings` que no está en el código actual, así que el archivo revienta con
@@ -447,6 +662,13 @@ Environment).
 - Cualquier cambio al modelo debe pasar por `backtest.py` sobre LaLiga 2023+2024
   como mínimo, y usar el test pareado de `afinar.py` para saber si una diferencia
   es real o ruido antes de adoptarla.
-- Antes de depurar "la web no se actualiza", mirar Render → Events primero.
+- El modelo vive dos veces: `app.py`/`validacion.py` (Python, lo que miden las
+  herramientas de afinado) y `worker/` (lo que publica Cloudflare). Un cambio
+  va en los dos y `python test_paridad.py` tiene que dar "todo igual".
+- En el Worker, cada ejecución tiene 10 ms de CPU: nada de recorrer o parsear
+  la semana entera en cada pasada sin medirlo antes (ver "Cloudflare: cómo
+  funciona").
+- Antes de depurar "la web no se actualiza", mirar primero qué versión está
+  viva: Cloudflare → Deployments (y sus Logs), o Render → Events.
 - Los hilos de fondo (keep-alive, actualizador) solo se activan si existe
   `RENDER_EXTERNAL_URL` — en local no consumen cuota de API al importar `app.py`.

@@ -1,747 +1,8 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="description" content="Pronósticos 1X2 y doble oportunidad de la Champions League, LaLiga, Premier League, Ligue 1, Bundesliga, Serie A, Eredivisie, Primeira Liga, Championship y Brasileirão con un modelo Poisson de fuerzas ataque/defensa.">
-<meta name="theme-color" content="#0b130f">
-<meta name="color-scheme" content="dark">
-<title>Pronósticos</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b130f'/%3E%3Crect x='3' y='8.5' width='7.6' height='15' rx='2' fill='%23ffd24c'/%3E%3Crect x='12.2' y='8.5' width='7.6' height='15' rx='2' fill='%23a18047'/%3E%3Crect x='21.4' y='8.5' width='7.6' height='15' rx='2' fill='%23594d39'/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400..800&family=Saira:wdth,wght@75..100,500..800&display=swap">
-<style>
-  /* ================================================================
-     MARCADOR DE ESTADIO DE NOCHE
-     La banda de arriba es el marcador: los próximos partidos en grande,
-     con su casilla dorada. Debajo, tableros redondeados sobre la noche.
-     Es lo único llamativo; el resto, sobrio.
+// La lógica de la web. Va aparte de index.html para que la política de
+// seguridad (CSP: script-src 'self') no tenga que permitir JavaScript en línea:
+// si algún día se colara HTML ajeno por un fallo de escapado, un <script> o un
+// onerror= inyectados no se ejecutarían.
 
-     Tipografía: Saira (letra de marcador, cuadrada y redondeada) para la
-     marca, los títulos y TODOS los números; Figtree para nombres y textos.
-     Las dos con cifras tabulares, comprobadas.
-
-     Color con trabajo asignado, nunca decorativo:
-       - oro = probabilidad. Escala secuencial de 8 tramos de un solo tono
-         ámbar, validada con el script de dataviz (luminosidad monótona,
-         saltos >= 0.06, el tramo más bajo >= 2:1 sobre el tablero). En las
-         celdas, tinta blanca en los 3 primeros tramos y oscura en el resto,
-         todas >= 4.8:1. Nada más usa ese tono.
-       - 8 tonos de liga, validados para pares adyacentes en orden fijo
-         (LaLiga, Premier, Ligue 1, Bundesliga, Serie A, Eredivisie,
-         Primeira Liga, Championship). Van siempre en una insignia CON la
-         sigla dentro (ESP, ENG...): la sigla identifica la liga y el color
-         acompaña, así que pueden ir mezcladas. La novena liga (Brasileirão)
-         no tiene tono: la paleta validada tiene 8 y un noveno color
-         inventado no pasaría la prueba. Va en gris rayado.
-       - blanco = lo seleccionado (día, liga, orden).
-       - estado (error) con icono y texto, nunca color solo.
-
-     Redondeo con jerarquía, no uno para todo: tableros 20, tarjetas 14,
-     controles 10, celdas 8, píldoras redondas.
-     ================================================================ */
-  :root {
-    --fondo: #070d0a;
-    --banda: #0b130f;
-    --panel: #111a15;
-    --panel-alto: #18241e;
-    --panel-hondo: #0c130f;
-    --linea: #1f2b25;
-    --linea-viva: #2d3d35;
-
-    --tinta: #f4f7f5;
-    --tinta-2: #b8c5bd;
-    --tinta-3: #87968c;
-    --oscura: #0a120e;
-
-    --oro: #ffd24c;        /* tramo alto de la escala de probabilidad */
-    --oro-medio: #a18047;  /* tramo 50-60: barras que no son la más alta */
-
-    /* paleta de liga: validada con el script de dataviz, orden adyacente */
-    --liga-PD: #e66767;
-    --liga-PL: #9085e9;
-    --liga-FL1: #199e70;
-    --liga-BL1: #d95926;
-    --liga-SA: #3987e5;
-    --liga-DED: #c98500;
-    --liga-PPL: #d55181;
-    --liga-ELC: #008300;
-    --liga-BSA: repeating-linear-gradient(135deg, #a7b3ab 0 4px, #8a978f 4px 8px);
-
-    --critico: #e5484d;
-
-    --f-disp: "Saira", "Archivo Narrow", "Arial Narrow", system-ui, sans-serif;
-    --f-txt: "Figtree", "Segoe UI", system-ui, -apple-system, sans-serif;
-
-    --t-12: 0.75rem;
-    --t-13: 0.8125rem;
-    --t-14: 0.875rem;
-    --t-15: 0.9375rem;
-    --t-16: 1rem;
-    --t-18: 1.125rem;
-    --t-20: 1.25rem;
-    --t-24: 1.5rem;
-    --t-28: 1.75rem;
-
-    --r-tablero: 20px;
-    --r-tarjeta: 14px;
-    --r-control: 10px;
-    --r-celda: 8px;
-
-    --hueco: 12px;
-    --ancho-izq: 19rem;
-    --ancho-der: clamp(20rem, 23vw, 28rem);
-    --col-liga: 3rem;
-  }
-
-  * { box-sizing: border-box; }
-  [hidden] { display: none !important; }
-  html { -webkit-text-size-adjust: 100%; }
-  /* en monitores de 27" a 2560 px todo crece un poco: las medidas están en rem */
-  @media (min-width: 2200px) { html { font-size: 112.5%; } }
-
-  body {
-    margin: 0;
-    font-family: var(--f-txt);
-    font-size: var(--t-15);
-    line-height: 1.45;
-    background: var(--fondo);
-    color: var(--tinta);
-  }
-
-  button { font: inherit; color: inherit; }
-  :focus-visible { outline: 2px solid var(--tinta); outline-offset: 2px; }
-
-  .salto { position: absolute; left: -9999px; z-index: 20; background: var(--tinta); color: var(--oscura);
-           padding: 10px 16px; font-weight: 700; border-radius: var(--r-control); }
-  .salto:focus { left: 12px; top: 10px; }
-
-  .num { font-variant-numeric: tabular-nums; }
-  .disp { font-family: var(--f-disp); font-stretch: 88%; }
-
-  /* insignia de liga: la sigla dentro de su color. Tinta oscura o blanca según
-     el tono, todas >= 4.8:1 */
-  .insignia {
-    display: inline-grid; place-items: center; flex-shrink: 0;
-    min-width: 2.25rem; height: 1.375rem; padding: 0 6px; border-radius: 6px;
-    background: var(--tono, var(--tinta-3)); color: var(--tono-t, var(--oscura));
-    font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-12); font-weight: 800;
-    letter-spacing: 0.03em; line-height: 1;
-  }
-  .insignia.grande { width: 2.75rem; height: 2.75rem; border-radius: var(--r-control); font-size: var(--t-14); }
-  .insignia.redonda { min-width: 0; width: 2rem; height: 2rem; padding: 0; border-radius: 50%; font-size: 0.6875rem; }
-  .insignia.todas { background: var(--panel-hondo); color: var(--tinta-2); box-shadow: inset 0 0 0 1px var(--linea-viva); }
-  /* la Champions: torneo, insignia de contorno en la tinta del texto */
-  .insignia.copa { background: none; box-shadow: inset 0 0 0 1.5px currentColor; }
-  .tira-ligas button[aria-current="true"] .insignia.copa { color: var(--oscura); }
-
-  /* ================================================================
-     ESQUELETO
-     Escritorio: aplicación de altura fija; cada tablero con su propio
-     desplazamiento. Móvil: documento normal y pestañas abajo, que en el
-     teléfono se desplaza mejor la página que un panel.
-     ================================================================ */
-  .app {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "cab" "centro";
-    min-height: 100dvh;
-  }
-  .cab { grid-area: cab; }
-  .centro { grid-area: centro; min-width: 0; --sup: var(--fondo); }
-  .lateral { display: none; }
-  .pane-izq, .pane-der { min-width: 0; }
-  .estado-barra { display: none; }
-
-  @media (min-width: 880px) {
-    .app {
-      height: 100dvh;
-      grid-template-columns: minmax(0, 1fr) var(--ancho-der);
-      grid-template-rows: auto minmax(0, 1fr) auto;
-      grid-template-areas: "cab cab" "centro lat" "estado estado";
-      column-gap: var(--hueco);
-      padding: 0 var(--hueco);
-    }
-    .cab { margin: 0 calc(-1 * var(--hueco)) var(--hueco); }
-    .centro { display: flex; flex-direction: column; min-height: 0; --sup: var(--panel);
-              background: var(--panel); border-radius: var(--r-tablero); overflow: hidden; }
-    .lateral { display: flex; flex-direction: column; grid-area: lat; overflow-y: auto; min-height: 0; scrollbar-width: thin;
-               background: var(--panel); border-radius: var(--r-tablero); }
-    .pane-izq, .pane-der { display: contents; }
-    .m-ligas { order: 1; } .m-claros { order: 2; } .m-confianza { order: 3; } .m-fiab { order: 4; }
-    .estado-barra { display: flex; grid-area: estado; }
-    .pestanas { display: none !important; }
-  }
-  @media (min-width: 1180px) {
-    .app {
-      grid-template-columns: var(--ancho-izq) minmax(0, 1fr) var(--ancho-der);
-      grid-template-areas: "cab cab cab" "izq centro der" "estado estado estado";
-    }
-    /* el envoltorio desaparece y cada panel ocupa su propia columna */
-    .lateral { display: contents; }
-    .pane-izq, .pane-der { display: block; overflow-y: auto; min-height: 0; scrollbar-width: thin;
-                           background: var(--panel); border-radius: var(--r-tablero); }
-    .pane-izq { grid-area: izq; }
-    .pane-der { grid-area: der; }
-  }
-
-  /* ---------------- banda del marcador ---------------- */
-  .cab {
-    display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap;
-    padding: 14px 16px 16px; background: var(--banda); border-bottom: 1px solid var(--linea);
-  }
-  @media (min-width: 880px) {
-    .cab { flex-wrap: nowrap; gap: 22px; min-height: 6rem; padding: 10px var(--hueco) 10px 22px; }
-  }
-
-  .marca { display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--tinta); flex-shrink: 0; }
-  .marca svg { display: block; width: 34px; height: 34px; }
-  .marca .nombre { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-24); font-weight: 800; letter-spacing: -0.02em; }
-  @media (min-width: 880px) {
-    .marca svg { width: 42px; height: 42px; }
-    .marca .nombre { font-size: 1.875rem; }
-  }
-
-  .buscar {
-    order: 3; flex: 1 1 100%;
-    display: flex; align-items: center; gap: 10px;
-    background: var(--panel); border: 1px solid var(--linea-viva); border-radius: 999px;
-    padding: 0 14px 0 18px; height: 3rem; color: var(--tinta-3);
-  }
-  .buscar:focus-within { border-color: var(--tinta-2); background: var(--panel-alto); }
-  .buscar input {
-    flex: 1; min-width: 0; background: none; border: 0; color: var(--tinta);
-    font: inherit; font-size: var(--t-16); outline: none; height: 100%;
-  }
-  .buscar input::placeholder { color: var(--tinta-3); }
-  .buscar input::-webkit-search-cancel-button { filter: invert(0.6); }
-  kbd {
-    font-family: var(--f-disp); font-size: var(--t-13); font-weight: 700; color: var(--tinta-2);
-    border: 1px solid var(--linea-viva); border-radius: 6px; padding: 1px 7px; line-height: 18px;
-  }
-  .buscar kbd { display: none; }
-  @media (min-width: 880px) {
-    .buscar { order: 0; flex: 0 1 20rem; }
-    .buscar kbd { display: inline-block; }
-  }
-
-  /* próximos: tarjetas de marcador con su cuenta atrás y la casilla del favorito */
-  .proximos {
-    order: 4; flex: 1 1 100%; min-width: 0;
-    display: flex; align-items: center; gap: 10px;
-    overflow-x: auto; scrollbar-width: none;
-    margin: 2px -16px 0; padding: 0 16px;
-  }
-  .proximos::-webkit-scrollbar { display: none; }
-  .proximos:empty { display: none; }
-  @media (min-width: 880px) {
-    .proximos {
-      order: 0; flex: 1 1 auto; margin: 0; padding: 0;
-      -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 48px), transparent);
-      mask-image: linear-gradient(90deg, #000 calc(100% - 48px), transparent);
-    }
-  }
-  .rotulo-cinta { display: none; }
-  @media (min-width: 880px) { .rotulo-cinta { display: block; } }
-  .rotulo-cinta {
-    flex-shrink: 0; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-18); font-weight: 700;
-    color: var(--tinta-3); padding-right: 2px;
-  }
-  .prox {
-    flex: 0 0 auto; width: 15.5rem;
-    display: grid; grid-template-columns: minmax(0, 1fr) 3.5rem; grid-template-rows: auto auto auto; gap: 3px 12px;
-    align-items: center; text-align: left; cursor: pointer;
-    padding: 9px 9px 9px 14px; border: 1px solid var(--linea); border-radius: var(--r-tarjeta); background: var(--panel);
-  }
-  .prox:hover { background: var(--panel-alto); border-color: var(--linea-viva); }
-  .prox .p-cab { grid-column: 1; display: flex; align-items: center; gap: 8px; min-width: 0;
-                 font-size: var(--t-13); color: var(--tinta-2); white-space: nowrap; }
-  .prox .p-cab .insignia { height: 1.25rem; min-width: 2rem; font-size: 0.6875rem; }
-  .prox .p-eq { grid-column: 1; display: flex; align-items: center; gap: 8px; min-width: 0;
-                font-size: var(--t-15); font-weight: 600; line-height: 1.25; }
-  .prox .p-eq .nom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .prox .escudo, .prox .escudo img { width: 18px; height: 18px; }
-  .prox .p-fav {
-    grid-column: 2; grid-row: 1 / 4; align-self: stretch;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    border-radius: var(--r-control); background: var(--bg); color: var(--fg); line-height: 1;
-  }
-  .prox .p-fav .s { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-12); font-weight: 700; letter-spacing: 0.03em; }
-  .prox .p-fav .v { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-28); font-weight: 800; }
-  .prox .p-fav.nada { background: var(--panel-alto); color: var(--tinta-3); font-size: var(--t-20); }
-
-  .estado-corto {
-    order: 2; margin-left: auto; display: flex; align-items: center; gap: 8px;
-    padding: 6px 12px; border: 1px solid var(--linea-viva); border-radius: 999px;
-    font-size: var(--t-13); font-weight: 600; color: var(--tinta-2);
-  }
-  @media (min-width: 880px) { .estado-corto { display: none; } }
-
-  .punto { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--tinta-3); }
-  [data-modo="trabajando"] .punto { background: var(--tinta); animation: latido 1.6s ease-in-out infinite; }
-  [data-modo="pausa"] .punto { background: none; box-shadow: inset 0 0 0 1.5px var(--tinta-2); }
-  [data-modo="reposo"] .punto { background: var(--tinta-3); }
-  [data-modo="error"] .punto { background: var(--critico); }
-  @keyframes latido { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
-
-  /* ---------------- centro ---------------- */
-  .centro { container-type: inline-size; container-name: centro; }
-
-  /* el único calendario: un día por tarjeta, con cuántos partidos tiene y, con
-     una barrita por partido, cómo de claros son */
-  .carril { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 14px 16px 6px; }
-  .carril::-webkit-scrollbar { display: none; }
-  .dia-celda {
-    flex: 0 0 auto; width: 6.5rem;
-    display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto auto;
-    align-items: center; gap: 2px 8px; text-align: left; min-width: 0; overflow: hidden;
-    padding: 10px 12px 10px; border: 1px solid var(--linea); border-radius: var(--r-tarjeta);
-    background: var(--panel-alto); cursor: pointer; color: var(--tinta-2);
-  }
-  .dia-celda:hover { border-color: var(--linea-viva); color: var(--tinta); }
-  .dia-celda[aria-current="true"] { background: var(--tinta); border-color: var(--tinta); color: var(--oscura); }
-  .dia-celda .dow { grid-column: 1; grid-row: 1; font-size: var(--t-13); font-weight: 600;
-                    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .dia-celda .cuantos { grid-column: 2; grid-row: 1; justify-self: end;
-                        font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-15); font-weight: 700; }
-  .dia-celda .fecha { grid-column: 1 / -1; grid-row: 2; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-28);
-                      font-weight: 800; line-height: 1.05; letter-spacing: -0.01em; color: var(--tinta); white-space: nowrap; }
-  .dia-celda[aria-current="true"] .fecha { color: var(--oscura); }
-  .dia-celda .fecha small { font-family: var(--f-txt); font-size: var(--t-13); font-weight: 600; margin-left: 4px; letter-spacing: 0; opacity: 0.75; }
-  .dia-celda .forma { grid-column: 1 / -1; grid-row: 3; display: flex; align-items: flex-end; gap: 1px;
-                      height: 16px; min-width: 0; overflow: hidden; margin-top: 4px; }
-  .dia-celda .forma i { display: block; flex: 0 0 3px; border-radius: 1.5px 1.5px 0 0; }
-  .dia-celda.toda { width: 7.25rem; }
-  @container centro (min-width: 720px) {
-    .dia-celda { flex: 1 1 0; width: auto; min-width: 6.25rem; max-width: 10rem; }
-    .dia-celda.toda { flex-grow: 1.1; min-width: 7.25rem; max-width: 11rem; }
-  }
-
-  .herramientas {
-    display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap;
-    padding: 12px 16px 14px;
-  }
-  .titulo-vista { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-28); font-weight: 800;
-                  margin: 0; letter-spacing: -0.015em; line-height: 1.1; }
-  .titulo-vista small { font-family: var(--f-txt); font-size: var(--t-15); font-weight: 500; color: var(--tinta-3);
-                        margin-left: 10px; letter-spacing: 0; }
-  @media (max-width: 879px) {
-    .titulo-vista { flex: 1 1 100%; font-size: var(--t-24); min-width: 0; }
-    .titulo-vista small { font-size: var(--t-14); }
-    .herramientas .segmentos { margin-left: 0; }
-  }
-
-  .segmentos {
-    display: flex; gap: 2px; margin-left: auto; padding: 3px;
-    background: var(--panel-hondo); border: 1px solid var(--linea); border-radius: 999px;
-  }
-  .segmentos button {
-    border: 0; background: none; cursor: pointer; padding: 7px 15px; border-radius: 999px;
-    font-size: var(--t-14); font-weight: 600; color: var(--tinta-3); white-space: nowrap;
-  }
-  .segmentos button:hover { color: var(--tinta); }
-  .segmentos button[aria-pressed="true"] { background: var(--tinta); color: var(--oscura); }
-  @media (max-width: 879px) { .segmentos button { padding: 7px 12px; } }
-
-  .segmentos:empty { display: none; }
-  .app.sin-datos .cab-tabla, .app.sin-datos .carril { display: none; }
-  .app.sin-datos .buscar { visibility: hidden; }
-
-  #limpiar-hueco:empty { display: none; }
-  .limpiar { border: 1px solid var(--linea-viva); border-radius: 999px; background: none; cursor: pointer;
-             padding: 7px 14px; font-size: var(--t-14); font-weight: 600; color: var(--tinta-2); }
-  .limpiar:hover { color: var(--tinta); border-color: var(--tinta-3); }
-
-  /* ligas en píldoras: solo en móvil, donde no hay tablero lateral */
-  .tira-ligas { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 8px 16px 4px; }
-  .tira-ligas::-webkit-scrollbar { display: none; }
-  @media (min-width: 880px) { .tira-ligas { display: none; } }
-  .tira-ligas button {
-    flex: 0 0 auto; display: flex; align-items: center; gap: 9px;
-    height: 2.75rem; padding: 0 16px 0 6px; border: 1px solid var(--linea-viva); border-radius: 999px;
-    background: var(--panel-alto); cursor: pointer; font-size: var(--t-15); font-weight: 600; color: var(--tinta);
-    white-space: nowrap;
-  }
-  .tira-ligas button.sin-insignia { padding-left: 16px; }
-  .tira-ligas button[aria-current="true"] { background: var(--tinta); border-color: var(--tinta); color: var(--oscura); }
-  .tira-ligas .n { font-family: var(--f-disp); font-stretch: 88%; font-weight: 700; opacity: 0.7; }
-
-  .centro:not(.mezcla) { --col-liga: 0px; }
-  .centro:not(.mezcla) .c-liga { visibility: hidden; }
-
-  .banda {
-    display: flex; gap: 10px; align-items: flex-start; margin: 8px 16px 4px; padding: 12px 14px;
-    border-radius: var(--r-tarjeta); background: var(--panel-alto);
-    font-size: var(--t-14); color: var(--tinta-2);
-  }
-  .banda b { color: var(--tinta); font-weight: 700; }
-  .banda svg { flex-shrink: 0; margin-top: 3px; }
-  .banda.error svg { color: var(--critico); }
-  @media (min-width: 880px) { .banda { display: none; } }
-
-  /* ---------------- tabla ---------------- */
-  .vista { min-height: 0; }
-  @media (min-width: 880px) { .vista { flex: 1; overflow-y: auto; scrollbar-width: thin; } }
-
-  .cab-tabla { display: none; }
-
-  .grupo {
-    position: sticky; top: 0; z-index: 2;
-    display: flex; align-items: center; gap: 10px;
-    padding: 14px 16px 10px; background: var(--sup);
-    border-bottom: 1px solid var(--linea);
-    font-size: var(--t-16); font-weight: 700; color: var(--tinta);
-  }
-  .grupo .g-nom { display: flex; align-items: center; gap: 10px; min-width: 0; }
-  .grupo .g-nom .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .grupo .cuenta { font-size: var(--t-14); font-weight: 500; color: var(--tinta-3); white-space: nowrap; }
-  .grupo.dia .g-nom .txt { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-20); font-weight: 800; letter-spacing: -0.01em; }
-  /* en compacto la cabecera usa la rejilla de la fila para rotular 1 X 2 encima de las celdas */
-  @container centro (max-width: 639px) {
-    .grupo { display: grid; grid-template-columns: 3.25rem minmax(0, 1fr) 2.875rem 2.875rem 2.875rem; gap: 0 4px; }
-    .grupo .g-nom { grid-column: 1 / 3; }
-    .grupo .cuenta { display: none; }
-    .grupo .g-col { text-align: center; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-14); font-weight: 700; color: var(--tinta-3); }
-  }
-  @container centro (min-width: 640px) {
-    .grupo .g-nom { flex: 1; }
-    .grupo .g-col { display: none; }
-  }
-
-  .partido { border-bottom: 1px solid var(--linea); }
-
-  /* ---- fila compacta (por defecto: el panel central es estrecho) ---- */
-  /* la tira 1 X 2 a la derecha y centrada entre los dos equipos: dos líneas por
-     partido en vez de tres */
-  .fila {
-    display: grid; width: 100%; text-align: left; cursor: pointer;
-    grid-template-columns: 3.25rem minmax(0, 1fr) 2.875rem 2.875rem 2.875rem;
-    grid-template-areas:
-      "hora local  p1 px p2"
-      "liga visita p1 px p2";
-    gap: 5px 4px; align-items: center;
-    padding: 12px 16px; border: 0; background: none;
-  }
-  .fila:hover { background: color-mix(in srgb, var(--sup), #fff 3.5%); }
-  .fila:focus-visible { outline-offset: -2px; }
-  .fila[aria-expanded="true"] { background: color-mix(in srgb, var(--sup), #fff 3.5%); }
-  .c-hora { grid-area: hora; display: flex; flex-direction: column; align-self: start; padding-top: 1px; }
-  .c-hora .hh { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-16); font-weight: 700; color: var(--tinta-2);
-                font-variant-numeric: tabular-nums; }
-  .c-hora .dd { font-size: var(--t-12); color: var(--tinta-3); white-space: nowrap; }
-  .c-liga { grid-area: liga; align-self: start; display: flex; }
-  .c-liga .insignia { height: 1.25rem; min-width: 2.125rem; font-size: 0.6875rem; }
-  .c-local { grid-area: local; }
-  .c-visita { grid-area: visita; }
-  .c-1 { grid-area: p1; }
-  .c-x { grid-area: px; }
-  .c-2 { grid-area: p2; }
-  .c-d, .c-xg, .c-g, .c-m, .c-rep { display: none; }
-
-  .c-eq { display: flex; align-items: center; gap: 10px; min-width: 0; padding-right: 8px; }
-  .partido.pendiente .c-eq .nom { color: var(--tinta-3); }
-  .c-eq .nom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-               font-size: var(--t-16); font-weight: 500; color: var(--tinta-2); }
-  .c-eq.gana .nom { color: var(--tinta); font-weight: 700; }
-
-  .escudo { flex-shrink: 0; width: 24px; height: 24px; display: grid; place-items: center; }
-  .escudo img { width: 24px; height: 24px; object-fit: contain; display: block; }
-  .escudo.mono { border-radius: 50%; background: var(--linea-viva); color: var(--tinta-2);
-                 font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-12); font-weight: 700; }
-
-  /* celda de probabilidad: fondo del tramo de la escala, tinta elegida por luminancia */
-  .c-p {
-    display: grid; place-items: center; height: 2.625rem; border-radius: var(--r-celda);
-    background: var(--bg); color: var(--fg);
-    font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-18); font-weight: 600; font-variant-numeric: tabular-nums;
-  }
-  .c-p.gana { font-weight: 800; }
-  .c-p.nada { background: var(--panel-alto); color: var(--tinta-3); font-weight: 500; }
-
-  /* ---- tabla: el panel central ya tiene ancho para una línea por partido.
-     Las columnas entran por prioridad: 1X2, luego más de 2.5 y ambos marcan,
-     luego la doble oportunidad, luego goles esperados y muestra, y al final
-     la barra de reparto ---- */
-  @container centro (min-width: 640px) {
-    .cab-tabla, .fila {
-      grid-template-areas: none;
-      grid-template-columns: 4rem var(--col-liga) minmax(0, 1fr) minmax(0, 1fr) 3.375rem 3.375rem 3.375rem;
-      gap: 0 6px; align-items: center;
-    }
-    .cab-tabla {
-      display: grid; padding: 0 16px; background: var(--sup); border-bottom: 1px solid var(--linea);
-      font-size: var(--t-13); font-weight: 600; color: var(--tinta-3);
-    }
-    .cab-tabla span { padding: 8px 0; font: inherit; color: inherit; }
-    .cab-tabla .der { text-align: center; }
-    .cab-tabla [data-tip] { cursor: help; }
-    .fila { padding: 0 16px; min-height: 3.875rem; }
-    .fila > *, .cab-tabla > * { grid-area: auto; }
-    .c-hora, .c-liga { align-self: center; padding-top: 0; }
-    .c-hora { flex-direction: row; align-items: baseline; gap: 6px; }
-    .c-eq { padding-right: 12px; }
-  }
-  @container centro (min-width: 780px) {
-    .cab-tabla, .fila {
-      grid-template-columns: 4rem var(--col-liga) minmax(0, 1fr) minmax(0, 1fr) 3.375rem 3.375rem 3.375rem
-                             3.25rem 3.25rem;
-    }
-    .c-g { display: grid; place-items: center; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-16);
-           font-weight: 600; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
-  }
-  @container centro (min-width: 940px) {
-    .cab-tabla, .fila {
-      grid-template-columns: 4rem var(--col-liga) minmax(0, 1fr) minmax(0, 1fr) 3.375rem 3.375rem 3.375rem
-                             3rem 3rem 3rem 3.25rem 3.25rem;
-    }
-    .c-d { display: grid; place-items: center; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-16);
-           font-weight: 600; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
-  }
-  @container centro (min-width: 1080px) {
-    .cab-tabla, .fila {
-      grid-template-columns: 4rem var(--col-liga) minmax(0, 1fr) minmax(0, 1fr) 3.375rem 3.375rem 3.375rem
-                             3rem 3rem 3rem 5.75rem 3.25rem 3.25rem 4.25rem;
-    }
-    .c-xg, .c-m { display: grid; place-items: center; font-size: var(--t-14); color: var(--tinta-3); font-variant-numeric: tabular-nums; }
-    .c-m.poca { display: flex; justify-content: center; align-items: center; gap: 5px; color: var(--tinta); }
-  }
-  @container centro (min-width: 1280px) {
-    .cab-tabla, .fila {
-      grid-template-columns: 4rem var(--col-liga) minmax(0, 1fr) minmax(0, 1fr) 3.375rem 3.375rem 3.375rem
-                             3rem 3rem 3rem 5.75rem 3.25rem 3.25rem 4.25rem 10rem;
-    }
-    .c-rep { display: flex; align-items: center; gap: 2px; height: 10px; padding-left: 14px; }
-    .c-rep i { display: block; height: 10px; min-width: 2px; }
-    .c-rep i:first-child { border-radius: 5px 0 0 5px; }
-    .c-rep i:last-child { border-radius: 0 5px 5px 0; }
-    .cab-tabla .c-rep { display: block; height: auto; padding-left: 14px; }
-  }
-
-  /* ---- detalle desplegado ---- */
-  .detalle { margin: 0 12px 14px; padding: 16px 18px 18px; background: var(--panel-hondo);
-             border: 1px solid var(--linea); border-radius: var(--r-tarjeta); }
-  .detalle dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px 28px; margin: 0; }
-  .detalle dt { font-size: var(--t-13); font-weight: 600; color: var(--tinta-3); }
-  .detalle dd { margin: 3px 0 0; font-size: var(--t-15); color: var(--tinta); font-variant-numeric: tabular-nums; }
-  .aviso { display: flex; gap: 8px; align-items: flex-start; margin: 14px 0 0; font-size: var(--t-14); color: var(--tinta-2); }
-  .aviso svg { flex-shrink: 0; margin-top: 3px; }
-  .detalle .ou { border-collapse: collapse; font-size: var(--t-14); font-variant-numeric: tabular-nums; }
-  .detalle .ou th { font-weight: 600; color: var(--tinta-3); text-align: right; padding: 0 0 3px 16px; }
-  .detalle .ou th:first-child, .detalle .ou td:first-child { text-align: left; padding-left: 0; }
-  .detalle .ou td { text-align: right; padding: 2px 0 2px 16px; color: var(--tinta); }
-  .detalle .ou td:first-child { color: var(--tinta-3); }
-  /* goles totales del partido: una barra por resultado, la más probable en oro pleno */
-  .goles-graf { display: flex; align-items: flex-end; gap: 3px; margin-top: 8px; }
-  .goles-graf .gb { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 2rem; }
-  .goles-graf .gb i { display: block; width: 100%; border-radius: 4px 4px 0 0; background: var(--oro-medio); }
-  .goles-graf .gb.max i { background: var(--oro); }
-  .goles-graf .v { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-13); font-weight: 600; color: var(--tinta-2);
-                   font-variant-numeric: tabular-nums; }
-  .goles-graf .gb.max .v { color: var(--tinta); font-weight: 800; }
-  .goles-graf .k { width: 100%; padding-top: 3px; border-top: 1px solid var(--linea-viva);
-                   text-align: center; font-size: var(--t-12); color: var(--tinta-3); }
-  .detalle .nw { white-space: nowrap; }
-  .detalle .nota-goles { margin: 14px 0 0; max-width: 72ch; font-size: var(--t-13); color: var(--tinta-3); }
-
-  .vacio { padding: 40px 20px; max-width: 600px; }
-  .vacio h2 { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-28); font-weight: 800; margin: 0 0 10px; letter-spacing: -0.015em; }
-  .vacio p { margin: 0 0 8px; color: var(--tinta-2); font-size: var(--t-16); max-width: 62ch; }
-  .vacio .pasos { margin: 18px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
-  .vacio .pasos li { display: flex; gap: 14px; padding: 12px 14px; border-radius: var(--r-tarjeta); background: var(--panel-alto);
-                     font-size: var(--t-14); color: var(--tinta-2); }
-  .vacio .pasos b { color: var(--tinta); font-weight: 700; min-width: 96px; }
-
-  /* ---------------- tableros laterales ---------------- */
-  .modulo { padding: 20px 18px 22px; border-bottom: 1px solid var(--linea); }
-  .modulo h2 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 14px;
-               font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-20); font-weight: 800; letter-spacing: -0.01em; }
-  .modulo h2 .meta { margin-left: auto; font-family: var(--f-txt); font-size: var(--t-13); font-weight: 500; color: var(--tinta-3);
-                     letter-spacing: 0; }
-  .modulo .nota { margin: 14px 0 0; font-size: var(--t-13); color: var(--tinta-3); }
-  .placeholder { margin: 0; font-size: var(--t-14); color: var(--tinta-3); }
-  @media (min-width: 1180px) { .pane-izq .modulo:last-child, .pane-der .modulo:last-child { border-bottom: 0; } }
-
-  .ligas { display: grid; gap: 4px; }
-  .liga-fila {
-    display: grid; grid-template-columns: 2.75rem minmax(0, 1fr) auto; grid-template-rows: auto auto;
-    align-items: center; gap: 0 12px; width: 100%; text-align: left; cursor: pointer;
-    padding: 9px 10px; border: 1px solid transparent; border-radius: var(--r-tarjeta); background: none;
-  }
-  .liga-fila:hover { background: var(--panel-alto); }
-  .liga-fila[aria-current="true"] { background: var(--panel-alto); border-color: var(--tinta-2); }
-  .liga-fila .insignia { grid-row: 1 / 3; }
-  .liga-fila .nom { grid-column: 2; grid-row: 1; align-self: end; font-size: var(--t-16); font-weight: 700;
-                    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .liga-fila .stats { grid-column: 2 / -1; grid-row: 2; align-self: start; font-size: var(--t-13); color: var(--tinta-3);
-                      font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .liga-fila .n { grid-column: 3; grid-row: 1; align-self: end; min-width: 2.25rem; padding: 2px 8px; border-radius: 999px; text-align: center;
-                  background: var(--panel-hondo); font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-15); font-weight: 700;
-                  color: var(--tinta-2); }
-  .liga-fila[aria-current="true"] .n { background: var(--tinta); color: var(--oscura); }
-  .liga-fila.sin-stats .nom, .liga-fila.sin-stats .n { grid-row: 1 / 3; align-self: center; }
-
-  /* los más claros: el favorito de cada partido con su casilla, de más a menos claro */
-  .claros { display: grid; gap: 6px; }
-  .claro {
-    display: grid; grid-template-columns: 3.375rem minmax(0, 1fr) auto; align-items: center; gap: 0 12px;
-    width: 100%; text-align: left; cursor: pointer;
-    padding: 7px 10px 7px 7px; border: 1px solid var(--linea); border-radius: var(--r-tarjeta); background: var(--panel-hondo);
-  }
-  .claro:hover { border-color: var(--linea-viva); background: var(--panel-alto); }
-  .claro .casilla { display: grid; place-items: center; height: 2.75rem; border-radius: var(--r-control);
-                    background: var(--bg); color: var(--fg);
-                    font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-20); font-weight: 800; font-variant-numeric: tabular-nums; }
-  .claro .txt { display: flex; flex-direction: column; min-width: 0; }
-  .claro .quien { font-size: var(--t-15); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .claro .contra { font-size: var(--t-13); color: var(--tinta-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .claro .cuando { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: var(--t-13); color: var(--tinta-2);
-                   white-space: nowrap; }
-  .claro .cuando .insignia { height: 1.25rem; min-width: 2rem; font-size: 0.6875rem; }
-
-  .fiab { display: grid; grid-template-columns: 2.75rem minmax(0, 1fr) 3rem 2.75rem; align-items: center; gap: 0 10px;
-          padding: 7px 0; font-size: var(--t-14); }
-  .fiab .insignia { height: 1.375rem; min-width: 2.25rem; }
-  .fiab .eje { position: relative; height: 12px; }
-  .fiab .eje::before { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--linea-viva); }
-  .fiab .eje i { position: absolute; top: 1px; height: 10px; border-radius: 3px; background: var(--tinta-2); }
-  .fiab .eje i.neg { background: var(--tinta-3); }
-  .fiab .val { text-align: right; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-16); font-weight: 700;
-               font-variant-numeric: tabular-nums; }
-  .fiab .acierto { text-align: right; color: var(--tinta-3); font-variant-numeric: tabular-nums; }
-  .fiab-cab { display: grid; grid-template-columns: 2.75rem minmax(0, 1fr) 3rem 2.75rem; gap: 0 10px;
-              font-size: var(--t-13); color: var(--tinta-3); padding-bottom: 6px; border-bottom: 1px solid var(--linea); }
-  .fiab-cab span:nth-child(3), .fiab-cab span:nth-child(4) { text-align: right; }
-  .m-fiab .segmentos { margin: 0 0 12px; width: max-content; max-width: 100%; }
-
-  /* histograma: el eje es probabilidad, así que cada barra lleva el oro de su tramo */
-  .histo { display: flex; align-items: flex-end; gap: 3px; height: 120px; border-bottom: 1px solid var(--linea-viva); }
-  .histo button { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
-                  height: 100%; border: 0; background: none; padding: 0; cursor: default; }
-  .histo button i { display: block; width: min(100%, 26px); border-radius: 4px 4px 0 0; min-height: 0; background: var(--bg); }
-  .histo button .etq { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-14); font-weight: 800; color: var(--tinta);
-                       margin-bottom: 4px; font-variant-numeric: tabular-nums; }
-  .histo button:hover i, .histo button:focus-visible i { box-shadow: 0 0 0 2px var(--tinta); }
-  .histo-eje { display: flex; gap: 3px; margin-top: 5px; }
-  .histo-eje span { flex: 1; font-size: var(--t-12); color: var(--tinta-3); text-align: center; font-variant-numeric: tabular-nums; }
-
-  /* tooltip único, posicionado al vuelo */
-  .tip {
-    position: fixed; z-index: 30; pointer-events: none; max-width: 280px;
-    background: var(--tinta); color: var(--oscura); border-radius: var(--r-control); padding: 9px 11px;
-    font-size: var(--t-13); line-height: 1.4; white-space: pre-line; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  }
-
-  /* ---------------- barra de estado ---------------- */
-  .estado-barra {
-    align-items: stretch; height: 2.5rem;
-    font-size: var(--t-13); color: var(--tinta-3); overflow: hidden; white-space: nowrap;
-  }
-  .estado-barra > span { display: flex; align-items: center; gap: 8px; padding: 0 14px; border-right: 1px solid var(--linea); }
-  .estado-barra > span:first-child { padding-left: 4px; }
-  .estado-barra .der { margin-left: auto; border-right: 0; border-left: 1px solid var(--linea); }
-  .estado-barra b { color: var(--tinta-2); font-weight: 700; font-variant-numeric: tabular-nums; }
-  .estado-barra .medidor { width: 100px; height: 5px; background: var(--linea-viva); border-radius: 3px; overflow: hidden; }
-  .estado-barra .medidor i { display: block; height: 100%; background: var(--tinta-2); }
-  .estado-barra .err { color: var(--tinta); }
-  .estado-barra .err svg { color: var(--critico); }
-
-  /* ---------------- pestañas (móvil) ---------------- */
-  .pestanas {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 8;
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
-    padding: 6px 10px calc(6px + env(safe-area-inset-bottom));
-    background: color-mix(in srgb, var(--banda) 94%, transparent); border-top: 1px solid var(--linea);
-    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
-  }
-  .pestanas button {
-    display: flex; flex-direction: column; align-items: center; gap: 4px;
-    border: 0; border-radius: var(--r-tarjeta); background: none; cursor: pointer; padding: 8px 0 7px;
-    font-size: var(--t-13); font-weight: 600; color: var(--tinta-3);
-  }
-  .pestanas button[aria-current="true"] { color: var(--tinta); background: var(--panel-alto); }
-  @media (max-width: 879px) {
-    body { padding-bottom: calc(78px + env(safe-area-inset-bottom)); }
-    .app[data-pestana="partidos"] .lateral { display: none; }
-    .app[data-pestana="panorama"] .centro,
-    .app[data-pestana="ligas"] .centro { display: none; }
-    .app[data-pestana="panorama"] .lateral,
-    .app[data-pestana="ligas"] .lateral { display: block; grid-area: centro; }
-    .app[data-pestana="panorama"] .pane-izq { display: none; }
-    .app[data-pestana="ligas"] .pane-der { display: none; }
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .fila, .dia-celda, .prox, .liga-fila, .segmentos button, .claro, .tira-ligas button, .pestanas button {
-      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-    }
-  }
-  @media (prefers-reduced-motion: reduce) { .punto { animation: none !important; } }
-</style>
-</head>
-<body>
-<a class="salto" href="#vista">Saltar a los partidos</a>
-
-<div class="app" data-pestana="partidos">
-  <header class="cab" id="cab">
-    <a class="marca" href="#/" aria-label="Pronósticos, inicio">
-      <svg viewBox="0 0 32 32" aria-hidden="true">
-        <rect x="3" y="8.5" width="7.6" height="15" rx="2" fill="#ffd24c"></rect>
-        <rect x="12.2" y="8.5" width="7.6" height="15" rx="2" fill="#a18047"></rect>
-        <rect x="21.4" y="8.5" width="7.6" height="15" rx="2" fill="#594d39"></rect>
-      </svg>
-      <span class="nombre">Pronósticos</span>
-    </a>
-    <div class="estado-corto" id="estado-corto" data-modo="reposo"><span class="punto"></span><span class="txt">Cargando</span></div>
-    <label class="buscar">
-      <svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.6"></circle><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
-      <input id="buscador" type="search" autocomplete="off" spellcheck="false" placeholder="Buscar equipo" aria-label="Buscar equipo">
-      <kbd>/</kbd>
-    </label>
-    <div class="proximos" id="proximos" aria-label="Próximos partidos"></div>
-  </header>
-
-  <section class="centro" aria-label="Partidos">
-    <div class="carril" id="fechas" role="toolbar" aria-label="Días"></div>
-    <div class="banda" id="banda" hidden></div>
-    <div class="tira-ligas" id="tira-ligas" role="toolbar" aria-label="Ligas"></div>
-    <div class="herramientas">
-      <h1 class="titulo-vista" id="titulo-vista">Pronósticos</h1>
-      <div id="limpiar-hueco"></div>
-      <div class="segmentos" id="orden" role="group" aria-label="Ordenar: por hora, más claros primero o más reñidos primero"></div>
-    </div>
-    <div class="cab-tabla" aria-hidden="true">
-      <span>Hora</span><span class="c-liga">Liga</span><span>Local</span><span>Visitante</span>
-      <span class="der" data-tip="Gana el local">1</span><span class="der" data-tip="Empate">X</span><span class="der" data-tip="Gana el visitante">2</span>
-      <span class="der c-d" data-tip="Doble oportunidad: gana el local o empate">1X</span><span class="der c-d" data-tip="Doble oportunidad: empate o gana el visitante">X2</span><span class="der c-d" data-tip="Doble oportunidad: gana cualquiera de los dos, sin empate">12</span>
-      <span class="der c-xg" data-tip="Goles que el modelo espera de cada equipo">Goles esp.</span><span class="der c-g" data-tip="Más de 2.5 goles: 3 o más en el partido">+2.5</span><span class="der c-g" data-tip="Marcan los dos equipos">Ambos</span><span class="der c-m" data-tip="Partidos previos del equipo con menos historial. Con menos de 4, el número tira hacia la media de la liga">Muestra</span><span class="c-rep" data-tip="El 1 X 2 en una barra">Reparto</span>
-    </div>
-    <main class="vista" id="vista" tabindex="-1"></main>
-  </section>
-
-  <div class="lateral">
-    <aside class="pane-izq" id="pane-ligas" aria-label="Ligas y fiabilidad"></aside>
-    <aside class="pane-der" id="pane-panorama" aria-label="Panorama de la ventana"></aside>
-  </div>
-
-  <footer class="estado-barra" id="estado-barra" data-modo="reposo"></footer>
-
-  <nav class="pestanas" aria-label="Secciones">
-    <button data-p="partidos" aria-current="true">
-      <svg width="22" height="22" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"></path></svg>
-      Partidos</button>
-    <button data-p="panorama" aria-current="false">
-      <svg width="22" height="22" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1.5" fill="currentColor"></rect><rect x="11" y="3" width="6" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"></rect><rect x="3" y="11" width="6" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"></rect><rect x="11" y="11" width="6" height="6" rx="1.5" fill="currentColor"></rect></svg>
-      Panorama</button>
-    <button data-p="ligas" aria-current="false">
-      <svg width="22" height="22" viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3.5" width="4" height="4" rx="1.2" fill="currentColor"></rect><rect x="2.5" y="12.5" width="4" height="4" rx="1.2" fill="currentColor"></rect><path d="M9.5 5.5h8M9.5 14.5h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"></path></svg>
-      Ligas</button>
-  </nav>
-</div>
-
-<div class="tip" id="tip" role="tooltip" hidden></div>
-
-<script>
 const $ = (id) => document.getElementById(id);
 const app = document.querySelector(".app");
 const vista = $("vista");
@@ -1019,6 +280,7 @@ function htmlDetalle(p) {
     + dato("Goles esperados", f2(p.xg_local) + " – " + f2(p.xg_visita))
     + dato("Muestra", muestraTxt)
     + (ch ? dato("Nivel de liga", htmlNivelChampions(p)) : "")
+    + (ch && ch.local && ch.local.partidos_cl !== undefined ? dato("En la Champions, frente a lo esperado", htmlHistorialChampions(p)) : "")
     + (conGoles(p) ? htmlDetalleGoles(p, dato) : "")
     + '</dl>' + (ch ? htmlAvisoChampions(p, m) : aviso) + (ch ? htmlNotaChampions() : "")
     + (conGoles(p) ? htmlNotaGoles(p) : "") + '</div>';
@@ -1034,13 +296,32 @@ function htmlNivelChampions(p) {
   return uno("local") + ", " + uno("visita");
 }
 
+// Un multiplicador como porcentaje frente a lo esperado: 1.18 -> "+18 %", 0.85 -> "−15 %".
+function frenteAEsperado(x) {
+  const v = Math.round((Number(x) - 1) * 100);
+  return (v > 0 ? "+" : v < 0 ? "−" : "±") + Math.abs(v) + " %";
+}
+
+/** El historial de cada equipo en la Champions (esta temporada y la anterior), uno por línea. */
+function htmlHistorialChampions(p) {
+  const uno = (lado) => {
+    const c = p.champions[lado] || {};
+    const n = c.partidos_cl || 0;
+    return esc(cortoDe(p, lado)) + ": "
+      + (n ? n + " partido" + (n === 1 ? "" : "s") + ', marca <span class="nw">' + frenteAEsperado(c.ataque_cl)
+        + '</span> y encaja <span class="nw">' + frenteAEsperado(c.defensa_cl) + '</span>' : "sin partidos");
+  };
+  return uno("local") + "<br>" + uno("visita");
+}
+
 function htmlAvisoChampions(p, m) {
   const sinLiga = ["local", "visita"].filter(l => !(p.champions[l] || {}).liga);
   if (sinLiga.length) {
     const nombres = sinLiga.map(l => cortoDe(p, l)).join(" y ");
     const factor = Number(p.champions[sinLiga[0]].factor).toFixed(2);
     return '<p class="aviso">' + ICONO_AVISO + '<span>' + esc(nombres) + (sinLiga.length > 1 ? " juegan" : " juega")
-      + ' en una liga que no está en el plan: sin datos de su liga, cuenta como un equipo medio de nivel ×' + factor + '.</span></p>';
+      + ' en una liga que no está en el plan: sin datos de su liga, cuenta como un equipo medio de nivel ×' + factor
+      + ', corregido con lo que haya jugado en la Champions.</span></p>';
   }
   return m.min < 4
     ? '<p class="aviso">' + ICONO_AVISO + '<span>Solo ' + m.min + ' partido' + (m.min === 1 ? "" : "s")
@@ -1050,8 +331,10 @@ function htmlAvisoChampions(p, m) {
 
 function htmlNotaChampions() {
   return '<p class="nota-goles">En la Champions cada equipo se mide en su liga nacional (sus últimos partidos, '
-    + 'atenuados a la mitad) y se ajusta por el nivel de esa liga, medido con los cruces de la Champions 2024/25. '
-    + 'Así acertó un 7 % mejor que no saber nada, con una sola temporada de datos: tómalo como una base.</p>';
+    + 'atenuados), se ajusta por el nivel de esa liga y se corrige con sus partidos de Champions de esta temporada y '
+    + 'la anterior: lo que marcó y encajó frente a lo esperado de un equipo de su liga contra esos mismos rivales. '
+    + 'Medido con cuatro Champions (2022/23 a 2025/26, 628 partidos): acierta un 12 % mejor que no saber nada, y el '
+    + 'historial suma 2 puntos a lo que daba la liga sola.</p>';
 }
 
 function htmlDetalleGoles(p, dato) {
@@ -1158,9 +441,11 @@ function bloqueGrupo(clave, texto, cuenta, codLiga, clase) {
 //   #/liga/PD             una liga entera
 //   #/liga/PD/2026-09-12  una liga, un día
 // ==========================================
+// Un enlace mal escrito (#/liga/%E0) no tiene que tumbar la página.
+function decodificar(s) { try { return decodeURIComponent(s); } catch (e) { return s; } }
 function leerRuta() {
   const t = (location.hash || "#/").replace(/^#\/?/, "").split("/").filter(Boolean);
-  if (t[0] === "liga" && t[1]) return { vista: "liga", liga: decodeURIComponent(t[1]), fecha: t[2] || null };
+  if (t[0] === "liga" && t[1]) return { vista: "liga", liga: decodificar(t[1]), fecha: t[2] || null };
   if (t[0] === "dia" && t[1]) return { vista: "dia", fecha: t[1] };
   if (t[0] === "semana") return { vista: "semana" };
   return { vista: "inicio" };
@@ -1525,7 +810,7 @@ function pintarEstado() {
     + '<span class="punto"></span>' + esc(texto) + (e === "parcial" ? ", faltan " + pend : "") + '</span>';
   if (e === "error") {
     seg += '<span class="err">' + ICONO_AVISO + esc("La última actualización falló: " + (datos.error || "sin detalle")
-      + ". Se ven los números de la pasada anterior.") + '</span>';
+      + (total ? ". Se ven los números de la pasada anterior." : ".")) + '</span>';
   }
   if (total) {
     seg += '<span><b>' + hechos + '</b> de <b>' + total + '</b> calculados'
@@ -1543,7 +828,7 @@ function pintarEstado() {
   let banda = "";
   if (e === "parcial") {
     banda = ICONO_PAUSA + '<span><b>Faltan ' + pend + ' por calcular.</b> Entran en la próxima pasada.</span>';
-  } else if (e === "error") {
+  } else if (e === "error" && total) {   // sin ningún partido, el error ya ocupa el centro
     banda = ICONO_AVISO + '<span><b>La última actualización falló.</b> ' + esc(datos.error || "sin detalle") + '. Se ven los números de la pasada anterior.</span>';
   }
   bandaEl.hidden = !banda;
@@ -1555,13 +840,24 @@ function pintarEstado() {
 // RENDER
 // ==========================================
 function estadoVacio() {
+  // un error antes de tener ningún partido (en Cloudflare, casi siempre un secreto sin poner)
+  if (datos.estado === "error") {
+    return '<div class="vacio"><h2>No se pudo actualizar</h2><p>' + esc(datos.error || "Sin detalle.") + '</p>'
+      + '<p>La página lo vuelve a intentar sola cada pocos minutos.</p></div>';
+  }
   const sinDatos = datos.estado === "sin_datos";
+  // el mismo HTML lo sirven Render (app.py) y Cloudflare (worker/), que se llenan distinto
+  const cloudflare = datos.plataforma === "cloudflare";
+  const pasos = cloudflare
+    ? '<p>Es la primera vez: la base de datos está vacía y hay que bajarlo todo de football-data.org. Después se guarda y los despliegues ya no la borran.</p>'
+      + '<ul class="pasos"><li><b>Ahora</b><span>Un cron de Cloudflare lanza la actualización cada minuto, sin que nadie abra la página.</span></li>'
+      + '<li><b>Cada minuto</b><span>Hace como mucho 6 peticiones a la API (el plan gratis da 10 por minuto) y deja el resto para el minuto siguiente.</span></li>'
+    : '<p>Cada despliegue en Render borra el disco, así que la caché arranca vacía y la primera pasada tiene que bajarlo todo de nuevo.</p>'
+      + '<ul class="pasos"><li><b>Ahora</b><span>El planificador interno lanza la actualización sola, sin esperar al siguiente turno.</span></li>'
+      + '<li><b>Cada pasada</b><span>Calcula hasta agotar 40 peticiones a la API y deja el resto para la siguiente.</span></li>';
   return '<div class="vacio"><h2>' + (sinDatos ? "Todavía no hay datos" : "No hay partidos en los próximos días") + '</h2>'
     + (sinDatos
-      ? '<p>Cada despliegue en Render borra el disco, así que la caché arranca vacía y la primera pasada tiene que bajarlo todo de nuevo.</p>'
-        + '<ul class="pasos"><li><b>Ahora</b><span>El planificador interno lanza la actualización sola, sin esperar al siguiente turno.</span></li>'
-        + '<li><b>Cada pasada</b><span>Calcula hasta agotar 40 peticiones a la API y deja el resto para la siguiente.</span></li>'
-        + '<li><b>Esta página</b><span>Se actualiza sola: los partidos aparecen en cuanto haya números.</span></li></ul>'
+      ? pasos + '<li><b>Esta página</b><span>Se actualiza sola: los partidos aparecen en cuanto haya números.</span></li></ul>'
       : '<p>Ninguna de las ligas juega en la ventana consultada. Es lo normal en parones de selecciones.</p>')
     + '</div>';
 }
@@ -1570,7 +866,7 @@ function render() {
   if (!datos) return;
   pintarEstado();
 
-  if (datos.estado === "sin_datos" || datos.estado === "sin_partidos") {
+  if (datos.estado === "sin_datos" || datos.estado === "sin_partidos" || (datos.estado === "error" && !datos.total)) {
     rutaPintada = null;
     app.classList.add("sin-datos");
     tituloEl.innerHTML = "Pronósticos";
@@ -1752,6 +1048,3 @@ async function bucle() { await refrescar(); setTimeout(bucle, periodo); }
 bucle();
 cargarLigas();
 cargarValidacion();
-</script>
-</body>
-</html>

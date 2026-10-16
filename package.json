@@ -1,0 +1,13 @@
+{
+  "name": "pronosticos-bot",
+  "private": true,
+  "description": "Pronósticos de fútbol en Cloudflare Workers (worker/) con la misma lógica que app.py",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --test-scheduled",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.149.0"
+  }
+}
