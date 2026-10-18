@@ -11,15 +11,16 @@ goles: más/menos, ambos marcan, porterías a cero y marcadores) con un modelo
 Poisson de fuerzas de ataque y defensa ajustadas por rival (ver "El modelo").
 Corre en dos sitios con la misma lógica:
 
-- **Cloudflare Workers** (`worker/`, oct 2026): adonde se muda. JavaScript, base
-  D1 y un cron por minuto. Ver "Cloudflare: cómo funciona".
-- **Render** (`app.py`, Flask): la versión de siempre. Sigue siendo la
-  referencia del modelo (la usan `afinar_liga.py`, `afinar_champions.py` y
-  `validacion.py` offline) y sigue desplegándose desde `main` hasta que se apague.
+- **Cloudflare Workers** (`worker/`, oct 2026): la web pública desde el 18 oct
+  2026. JavaScript, base D1 y un cron por minuto. Ver "Cloudflare: cómo funciona".
+- **Render** (`app.py`, Flask): la versión de siempre, **suspendida desde el 18
+  oct 2026**. Sigue siendo la referencia del modelo: la usan `afinar_liga.py`,
+  `afinar_champions.py`, `validacion.py` y `test_paridad.py`, en local.
 
 - Repo: `pronosticos-bot`
 - Carpeta local: `C:\Users\Alvaro\Desktop\webapp`
-- URL en Render: https://pronosticos-bot.onrender.com
+- URL en Render: https://pronosticos-bot.onrender.com (suspendido: no responde;
+  ver "Render: cómo se despliega").
 - URL en Cloudflare: https://pronosticos-bot.alvarocornejo2010.workers.dev
   (funcionando desde el 18 oct 2026). En Settings → Domains sale también
   `*-pronosticos-bot.alvarocornejo2010.workers.dev`: es el patrón de las URLs de
@@ -773,13 +774,19 @@ versión está viva) y Logs (cada pasada escribe una línea con lo que hizo:
 `{"tarea":"actualizar","estado":...,"peticiones":6,"kb":180,"muertes":0}`).
 `muertes` mayor que 0 quiere decir que alguna pasada se pasó de CPU.
 
-**Apagar Render** cuando Cloudflare esté lleno: poner `REDIRIGIR_A=https://...
-workers.dev` en Render → Environment. Desde entonces Render manda cada
-petición a la misma ruta de Cloudflare (302) y su planificador no arranca. Hace
-falta: los dos usan el mismo token, y juntos se pasarían de 10 peticiones por
-minuto.
+**Render y Cloudflare no pueden ir los dos a la vez**: usan el mismo token y
+juntos se pasarían de 10 peticiones por minuto. Render está suspendido desde el
+18 oct 2026. Si algún día se reanuda (por ejemplo, para que quien entre por la
+dirección vieja llegue a la nueva), antes hay que poner
+`REDIRIGIR_A=https://pronosticos-bot.alvarocornejo2010.workers.dev` en Render →
+Environment: así manda cada petición a la misma ruta de Cloudflare (302) y su
+planificador no arranca.
 
 ## Render: cómo se despliega
+
+**Suspendido desde el 18 oct 2026**: un push a `main` ya no despliega nada ahí
+y la dirección de Render no responde. Lo que sigue es cómo funcionaba, por si
+se reanuda (con `REDIRIGIR_A`, ver "Cloudflare: cómo se despliega").
 
 Configuración del servicio `pronosticos-bot` (`srv-da749a2d0e5s73d8iuvg`),
 consultada en la API de Render (sept 2026):
