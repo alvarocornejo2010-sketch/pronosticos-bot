@@ -1,7 +1,7 @@
 // Backtest walk-forward del modelo desplegado, como validacion.py: para cada
 // liga, la temporada anterior hace de ancla e historial y la última se recorre
-// partido a partido prediciendo cada uno SOLO con lo ocurrido antes. Usa las
-// mismas funciones que publica la web (modelo.js), no una copia.
+// día a día prediciendo cada partido SOLO con lo ocurrido en días anteriores.
+// Usa las mismas funciones que publica la web (modelo.js), no una copia.
 //
 // Lo que cambia es el ritmo. Cada ejecución del cron tiene 10 ms de CPU, y una
 // temporada entera no cabe: ni bajarla (~400 KB de JSON) junto a otra cosa, ni
@@ -10,200 +10,91 @@
 // en D1 por dónde iba. Las temporadas terminadas no cambian: se guardan y la
 // próxima validación no las vuelve a pedir.
 
-import { K_LIGA, LIGAS, MAX_PARTIDOS_EQUIPO, PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA } from "./config.js";
-import { Suma, calcularPoisson, calcularXgPartido, mercadosDeGoles, redondear } from "./modelo.js";
+import { K_LIGA, LIGAS, LIGA_DE_ARRIBA, PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA, VERSION_MODELO } from "./config.js";
+import { ajustarFuerzas, calcularPoisson, calcularXgPartido, fuerzaEquipo, mercadosDeGoles, redondear } from "./modelo.js";
+import { Acumulador, Binario, MERCADOS, resultado, resumenMercado } from "./metricas.js";
+import { diaDe } from "./actualizacion.js";
 
-// Medido en frío (el primer paso en un isolate recién creado es el más caro,
-// porque V8 aún no ha compilado nada): así ningún paso pasa de unos pocos ms.
-export const PARTIDOS_POR_PASO = 25;
+// Cada día con partidos es un ajuste de fuerzas (unos 0.2 ms ya compilado, más
+// en un isolate recién creado, que aún no ha compilado nada): con 15 partidos,
+// que son 2 o 3 días, un paso va de 1 a 4 ms en caliente.
+export const PARTIDOS_POR_PASO = 15;
 
 // ==========================================
 // ESTADO INCREMENTAL
 // ==========================================
-// Sabe responder "qué se sabía justo antes de este partido": por equipo, los
-// últimos MAX_PARTIDOS_EQUIPO, igual que obtenerStatsEquipo en producción.
+// Sabe responder "qué se sabía justo antes de este partido" (_Historial en
+// validacion.py): las fuerzas de todos los equipos (ajustarFuerzas, como en
+// producción) y la media de la temporada en curso anclada en la anterior. Se
+// recalculan al cambiar de día, arrancando de las del día anterior.
+// el día de cada fecha se recuerda: en cada paso se compactan las dos temporadas
+const DIAS = new Map();
+const diaDeFecha = (fecha) => {
+  const k = fecha.slice(0, 10);
+  let d = DIAS.get(k);
+  if (d === undefined) { d = diaDe(k); DIAS.set(k, d); }
+  return d;
+};
+const compacto = (m) => [diaDeFecha(m.fecha), m.local, m.visita, m.gl, m.gv];
+
 class Historial {
-  constructor(ventana, guardado = null) {
-    this.ventana = ventana;
-    this.equipos = new Map(guardado ? guardado.equipos : []);
+  // al retomar, actual son los partidos ya recorridos y guardado lo demás
+  constructor(previa, ancla, k, actual = [], guardado = null, codigo = null, deArriba = []) {
+    this.previa = previa.map(compacto);
+    this.actual = actual.map(compacto);
+    this.ancla = ancla;
+    this.k = k;
+    this.codigo = codigo;
+    this.deArriba = deArriba;
     this.gl = guardado ? guardado.gl : 0;
     this.gv = guardado ? guardado.gv : 0;
     this.n = guardado ? guardado.n : 0;
+    this.dia = guardado ? guardado.dia : null;
+    this.fuerzas = guardado ? guardado.fuerzas : null;
+    this.media = guardado ? guardado.media : null;
   }
 
-  stats(id) {
-    const s = { gf_local: 0, gc_local: 0, n_local: 0, gf_visita: 0, gc_visita: 0, n_visita: 0 };
-    for (const [enCasa, gf, gc] of this.equipos.get(id) || []) {
-      if (enCasa) { s.gf_local += gf; s.gc_local += gc; s.n_local += 1; }
-      else { s.gf_visita += gf; s.gc_visita += gc; s.n_visita += 1; }
+  antesDe(m) {
+    const dia = diaDe(m.fecha);
+    if (dia !== this.dia) {
+      const k = this.k;
+      this.media = { avg_local: (this.gl + k * this.ancla.avg_local) / (this.n + k),
+        avg_visita: (this.gv + k * this.ancla.avg_visita) / (this.n + k) };
+      this.fuerzas = ajustarFuerzas(this.previa, this.actual, this.media,
+        this.fuerzas ? this.fuerzas.equipos : null, this.codigo, this.deArriba);
+      this.dia = dia;
     }
-    return s;
-  }
-
-  mediaLiga(ancla, k) {
-    return { avg_local: (this.gl + k * ancla.avg_local) / (this.n + k),
-      avg_visita: (this.gv + k * ancla.avg_visita) / (this.n + k) };
-  }
-
-  apuntar(id, x) {
-    let d = this.equipos.get(id);
-    if (!d) this.equipos.set(id, (d = []));
-    d.push(x);
-    if (d.length > this.ventana) d.shift();
+    return [this.fuerzas, this.media];
   }
 
   registrar(m) {
-    this.apuntar(m.local, [true, m.gl, m.gv]);
-    this.apuntar(m.visita, [false, m.gv, m.gl]);
+    this.actual.push(compacto(m));
     this.gl += m.gl; this.gv += m.gv; this.n += 1;
   }
 
   toJSON() {
-    return { equipos: [...this.equipos], gl: this.gl, gv: this.gv, n: this.n };
+    return { gl: this.gl, gv: this.gv, n: this.n, dia: this.dia, fuerzas: this.fuerzas, media: this.media };
   }
-}
-
-// ==========================================
-// MÉTRICAS
-// ==========================================
-// Las sumas van con Suma (compensada, como sum() de Python): llevarlas de paso
-// en paso da lo mismo que sumar la lista entera al final, y no hay que guardar
-// la lista.
-const resultado = (m) => (m.gl > m.gv ? 0 : m.gl === m.gv ? 1 : 2);
-const tramo = (v) => Math.min(Math.trunc(v * 10), 9);
-
-function brier(p, y) {
-  const s = new Suma();
-  for (let i = 0; i < 3; i++) s.add((p[i] - (i === y ? 1 : 0)) ** 2);
-  return s.valor();
-}
-
-const logloss = (p, y) => -Math.log(Math.max(p[y], 1e-15));
-
-const suma = (g) => (g ? new Suma(g[0], g[1]) : new Suma());
-const guardarSuma = (s) => [s.s, s.c];
-
-class Acumulador {
-  constructor(g = null) {
-    this.b = suma(g && g.b); this.l = suma(g && g.l);
-    this.aciertos = g ? g.aciertos : 0;
-    this.n = g ? g.n : 0;
-    this.bins = new Map(g ? g.bins : []);
-  }
-
-  add(p, y) {
-    this.b.add(brier(p, y)); this.l.add(logloss(p, y));
-    let mejor = 0;
-    for (let i = 1; i < 3; i++) if (p[i] > p[mejor]) mejor = i;
-    this.aciertos += mejor === y ? 1 : 0;
-    this.n += 1;
-    for (let i = 0; i < 3; i++) {
-      const k = tramo(p[i]);
-      const b = this.bins.get(k) ?? [0.0, 0, 0];
-      b[0] += p[i]; b[1] += i === y ? 1 : 0; b[2] += 1;
-      this.bins.set(k, b);
-    }
-  }
-
-  resumen() {
-    if (!this.n) return null;
-    return { brier: redondear(this.b.valor() / this.n, 4), logloss: redondear(this.l.valor() / this.n, 4),
-      acierto: redondear(100 * this.aciertos / this.n, 1), n: this.n };
-  }
-
-  calibracion(minimo = 25) {
-    return calibracion(this.bins, minimo);
-  }
-
-  toJSON() {
-    return { b: guardarSuma(this.b), l: guardarSuma(this.l), aciertos: this.aciertos, n: this.n, bins: [...this.bins] };
-  }
-}
-
-// Lo mismo para un mercado de sí o no (más de 2.5, ambos marcan), con la media
-// predicha y la frecuencia real.
-class Binario {
-  constructor(g = null) {
-    this.b = suma(g && g.b); this.l = suma(g && g.l);
-    this.aciertos = g ? g.aciertos : 0;
-    this.n = g ? g.n : 0;
-    this.sumaP = g ? g.sumaP : 0.0;
-    this.si = g ? g.si : 0;
-    this.bins = new Map(g ? g.bins : []);
-  }
-
-  add(p, y) {
-    this.b.add((p - y) ** 2);
-    this.l.add(-Math.log(Math.max(y ? p : 1 - p, 1e-15)));
-    this.aciertos += (p >= 0.5) === Boolean(y) ? 1 : 0;
-    this.n += 1; this.sumaP += p; this.si += y;
-    const k = tramo(p);
-    const b = this.bins.get(k) ?? [0.0, 0, 0];
-    b[0] += p; b[1] += y; b[2] += 1;
-    this.bins.set(k, b);
-  }
-
-  resumen() {
-    if (!this.n) return null;
-    return { brier: redondear(this.b.valor() / this.n, 4), logloss: redondear(this.l.valor() / this.n, 4),
-      acierto: redondear(100 * this.aciertos / this.n, 1),
-      predicho: redondear(100 * this.sumaP / this.n, 1), real: redondear(100 * this.si / this.n, 1), n: this.n };
-  }
-
-  calibracion(minimo = 25) {
-    return calibracion(this.bins, minimo);
-  }
-
-  toJSON() {
-    return { b: guardarSuma(this.b), l: guardarSuma(this.l), aciertos: this.aciertos, n: this.n,
-      sumaP: this.sumaP, si: this.si, bins: [...this.bins] };
-  }
-}
-
-function calibracion(bins, minimo) {
-  const filas = [];
-  for (const b of [...bins.keys()].sort((x, y) => x - y)) {
-    const [total, ac, n] = bins.get(b);
-    if (n < minimo) continue;
-    const pred = 100 * total / n, real = 100 * ac / n;
-    const se = 100 * Math.sqrt(Math.max(pred / 100 * (1 - pred / 100), 1e-9) / n);
-    filas.push({ rango: `${b * 10}-${b * 10 + 10}%`, casos: n, predicho: redondear(pred, 1),
-      real: redondear(real, 1), desvio: redondear(real - pred, 1), se: redondear(se, 1),
-      significativo: Math.abs(real - pred) > 2 * se });
-  }
-  return filas;
-}
-
-// Mercados de goles que se validan además del 1X2: clave de mercadosDeGoles y
-// qué cuenta como "sí" con el marcador real.
-const MERCADOS = {
-  mas_25: ["prob_mas_25", (m) => m.gl + m.gv > 2.5],
-  ambos: ["prob_ambos", (m) => m.gl > 0 && m.gv > 0],
-};
-
-function resumenMercado(modelo, base) {
-  const m = modelo.resumen(), b = base.resumen();
-  const skill = redondear(100 * (1 - m.brier / b.brier), 1);
-  return { modelo: m, base_equipo_medio: b, skill_score: skill,
-    aporta_valor: skill > 0 && m.logloss < b.logloss, calibracion: modelo.calibracion() };
 }
 
 // ==========================================
 // VALIDACIÓN DE UNA LIGA, POR TRAMOS
 // ==========================================
 export class ValidacionLiga {
-  // previa hace falta solo al empezar (ancla e historial); al retomar, todo lo
-  // que se sabía de ella ya está en lo guardado.
-  constructor(codigo, nombre, season, previa, ultima, guardado = null) {
+  // previa hace falta siempre: entra en las fuerzas de cada día. deArriba, los
+  // equipos de la temporada anterior de la liga de arriba (LIGA_DE_ARRIBA).
+  constructor(codigo, nombre, season, previa, ultima, guardado = null, deArriba = []) {
     this.codigo = codigo;
     this.nombre = nombre;
     this.season = season;
     this.ultima = ultima;
     const g = guardado;
+    this.deArriba = g ? g.de_arriba || [] : deArriba;
     if (g) {
       this.i = g.i;
       this.ancla = g.ancla;
-      this.hist = new Historial(MAX_PARTIDOS_EQUIPO, g.hist);
+      this.hist = new Historial(previa.length >= 100 ? previa : [], this.ancla, K_LIGA, ultima.slice(0, g.i), g.hist,
+        codigo, this.deArriba);
       this.conteo = g.conteo;
       this.error = null;
     } else {
@@ -218,8 +109,9 @@ export class ValidacionLiga {
       } else {
         this.ancla = { avg_local: PRIOR_AVG_LOCAL, avg_visita: PRIOR_AVG_VISITA, origen: "constante de respaldo" };
       }
-      this.hist = new Historial(MAX_PARTIDOS_EQUIPO);
-      for (const m of previa) this.hist.registrar(m);   // historial de arranque, no se puntúa
+      // la temporada anterior entra en las fuerzas, no se puntúa
+      this.hist = new Historial(previa.length >= 100 ? previa : [], this.ancla, K_LIGA, [], null,
+        codigo, this.deArriba);
     }
     this.modelo = new Acumulador(g && g.modelo);
     this.baseLiga = new Acumulador(g && g.baseLiga);
@@ -240,10 +132,10 @@ export class ValidacionLiga {
 
   paso(m) {
     const y = resultado(m);
-    const media = this.hist.mediaLiga(this.ancla, K_LIGA);
+    const [fuerzas, media] = this.hist.antesDe(m);
 
     // el modelo real, el mismo que publica la web
-    const [xl, xv] = calcularXgPartido(this.hist.stats(m.local), this.hist.stats(m.visita), media);
+    const [xl, xv] = calcularXgPartido(fuerzaEquipo(fuerzas, m.local), fuerzaEquipo(fuerzas, m.visita), media);
     const pr = calcularPoisson(xl, xv);
     this.modelo.add([pr.prob_local / 100, pr.prob_empate / 100, pr.prob_visita / 100], y);
 
@@ -295,14 +187,15 @@ export class ValidacionLiga {
   }
 
   toJSON() {
-    return { temporada: this.season, i: this.i, ancla: this.ancla, hist: this.hist, conteo: this.conteo,
-      modelo: this.modelo, baseLiga: this.baseLiga, baseFrec: this.baseFrec, mercados: this.mercados };
+    return { temporada: this.season, i: this.i, ancla: this.ancla, de_arriba: this.deArriba, hist: this.hist,
+      conteo: this.conteo, modelo: this.modelo, baseLiga: this.baseLiga, baseFrec: this.baseFrec,
+      mercados: this.mercados };
   }
 }
 
 // La liga entera de una vez (lo que usa test_paridad.py).
-export function validarLiga(codigo, nombre, season, previa, ultima) {
-  const v = new ValidacionLiga(codigo, nombre, season, previa, ultima);
+export function validarLiga(codigo, nombre, season, previa, ultima, deArriba = []) {
+  const v = new ValidacionLiga(codigo, nombre, season, previa, ultima, null, deArriba);
   v.avanzar();
   return v.resultado();
 }
@@ -328,12 +221,13 @@ const PROGRESO = "validacion_progreso:";
 
 // El documento que sirve /api/validacion y, aparte, lo poco que necesita el
 // cron para decidir: en qué estado está, qué temporadas fallaron en esta
-// ejecución (para no pedirlas en cada paso) y cuántas veces seguidas falló.
+// ejecución (para no pedirlas en cada paso), cuántas veces seguidas falló y con
+// qué versión del modelo (una de otra versión no mide lo que se publica: se repite).
 function escribirValidacion(almacen, doc, { fallidas = {}, intentos = 0 } = {}) {
   return [
     almacen.sentenciaDoc("validacion", doc),
     almacen.sentenciaDoc("validacion_resumen", { estado: doc.estado, temporada: doc.temporada ?? null,
-      fallidas, intentos }),
+      fallidas, intentos, version_modelo: VERSION_MODELO }),
   ];
 }
 
@@ -363,9 +257,9 @@ export async function pasoValidacion(ctx, almacen, resumen, escala = 1) {
     let guardado = await almacen.leerDoc(PROGRESO + codigo);
     if (guardado && guardado.temporada !== season) guardado = null;
 
-    // al retomar solo hace falta la temporada evaluada; al empezar, también la anterior
+    // las dos temporadas: la anterior entra en las fuerzas de cada día
     const temporadas = {};
-    for (const s of guardado ? [season] : [season - 1, season]) {
+    for (const s of [season - 1, season]) {
       const clave = `temporada:${codigo}:${s}`;
       if (fallidas[clave]) { temporadas[s] = []; continue; }
       const texto = await almacen.leerDocTexto(clave);
@@ -382,9 +276,18 @@ export async function pasoValidacion(ctx, almacen, resumen, escala = 1) {
       return false;
     }
 
+    // los que bajan de la liga de arriba parten de su propia fuerza: su temporada
+    // anterior ya la guardó la validación de esa liga, que va antes
+    let deArriba = [];
+    if (!guardado && codigo in LIGA_DE_ARRIBA) {
+      const texto = await almacen.leerDocTexto(`temporada:${LIGA_DE_ARRIBA[codigo]}:${season - 1}`);
+      if (texto !== null) deArriba = JSON.parse(texto).flatMap((f) => [f[1], f[2]]);
+    }
+
     let v = null;
     try {
-      v = new ValidacionLiga(codigo, nombre, season, temporadas[season - 1] || [], temporadas[season], guardado);
+      v = new ValidacionLiga(codigo, nombre, season, temporadas[season - 1] || [], temporadas[season], guardado,
+        deArriba);
       v.avanzar(Math.max(5, Math.round(PARTIDOS_POR_PASO * escala)));
       if (!v.terminada()) {
         await almacen.escribir([almacen.sentenciaDoc(PROGRESO + codigo, v)]);
@@ -404,6 +307,7 @@ export async function pasoValidacion(ctx, almacen, resumen, escala = 1) {
   const final = {
     estado: "listo",
     temporada: season,
+    version_modelo: VERSION_MODELO,
     hora: ahoraIso,
     resumen: Object.fromEntries(ok.map((r) => [r.codigo, {
       skill_score: r.skill_score,
@@ -421,5 +325,6 @@ export async function pasoValidacion(ctx, almacen, resumen, escala = 1) {
 
 export function sentenciasError(almacen, mensaje, intentosPrevios) {
   const intentos = intentosPrevios + 1;
-  return escribirValidacion(almacen, { estado: "error", error: mensaje, intentos }, { intentos });
+  return escribirValidacion(almacen, { estado: "error", error: mensaje, intentos, version_modelo: VERSION_MODELO },
+    { intentos });
 }

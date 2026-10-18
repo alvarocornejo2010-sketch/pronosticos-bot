@@ -4,6 +4,7 @@
 //   /api/estado       los partidos con sus números (lo que pinta la web)
 //   /api/ligas        qué ancla y qué media usa cada liga
 //   /api/validacion   el resultado del backtest
+//   /api/registro     el registro en vivo: lo publicado contra lo que pasó
 //   /salud            estado de un vistazo
 //   /actualizar?token=...&forzar=1   rehacer la pasada sin esperar
 //   /validar?token=...[&temporada=N] lanzar el backtest
@@ -14,6 +15,7 @@ import { COMPETICIONES, ajustes } from "./config.js";
 import { Almacen } from "./almacen.js";
 import { redondear } from "./modelo.js";
 import { SIN_EJECUTAR } from "./validacion.js";
+import { REGISTRO_VACIO } from "./registro.js";
 import { tick, tocaActualizar } from "./planificador.js";
 import { Reloj } from "./tiempo.js";
 
@@ -133,6 +135,8 @@ export default {
       "/api/ligas": async (almacen) => json(await apiLigas(almacen)),
       "/api/validacion": async (almacen) =>
         respuesta((await almacen.leerDocTexto("validacion")) ?? JSON.stringify(SIN_EJECUTAR)),
+      "/api/registro": async (almacen) =>
+        respuesta((await almacen.leerDocTexto("registro_publico")) ?? JSON.stringify(REGISTRO_VACIO)),
       "/salud": async (almacen) => json(await salud(almacen, env)),
       "/actualizar": (almacen) => actualizar(url, env, almacen),
       "/validar": (almacen) => validar(url, env, almacen),

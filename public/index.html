@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="description" content="Pronósticos 1X2 y doble oportunidad de la Champions League, LaLiga, Premier League, Ligue 1, Bundesliga, Serie A, Eredivisie, Primeira Liga, Championship y Brasileirão con un modelo Poisson de fuerzas ataque/defensa.">
+<meta name="description" content="Pronósticos 1X2 y doble oportunidad de la Champions League, LaLiga, Premier League, Ligue 1, Bundesliga, Serie A, Eredivisie, Primeira Liga, Championship y Brasileirão con un modelo Poisson de fuerzas de ataque y defensa ajustadas por rival.">
 <meta name="theme-color" content="#0b130f">
 <meta name="color-scheme" content="dark">
 <title>Pronósticos</title>
@@ -169,7 +169,7 @@
     .lateral { display: flex; flex-direction: column; grid-area: lat; overflow-y: auto; min-height: 0; scrollbar-width: thin;
                background: var(--panel); border-radius: var(--r-tablero); }
     .pane-izq, .pane-der { display: contents; }
-    .m-ligas { order: 1; } .m-claros { order: 2; } .m-confianza { order: 3; } .m-fiab { order: 4; }
+    .m-ligas { order: 1; } .m-claros { order: 2; } .m-confianza { order: 3; } .m-fiab { order: 4; } .m-resultados { order: 5; }
     .estado-barra { display: flex; grid-area: estado; }
     .pestanas { display: none !important; }
   }
@@ -589,15 +589,21 @@
     padding: 7px 10px 7px 7px; border: 1px solid var(--linea); border-radius: var(--r-tarjeta); background: var(--panel-hondo);
   }
   .claro:hover { border-color: var(--linea-viva); background: var(--panel-alto); }
-  .claro .casilla { display: grid; place-items: center; height: 2.75rem; border-radius: var(--r-control);
+  /* resultados: lo mismo, ya jugado; no se abre (el partido salió de la ventana) */
+  .res { display: grid; grid-template-columns: 3.375rem minmax(0, 1fr) auto; align-items: center; gap: 0 12px;
+         padding: 7px 10px 7px 7px; border: 1px solid var(--linea); border-radius: var(--r-tarjeta); background: var(--panel-hondo); }
+  .claro .casilla, .res .casilla { display: grid; place-items: center; height: 2.75rem; border-radius: var(--r-control);
                     background: var(--bg); color: var(--fg);
                     font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-20); font-weight: 800; font-variant-numeric: tabular-nums; }
-  .claro .txt { display: flex; flex-direction: column; min-width: 0; }
-  .claro .quien { font-size: var(--t-15); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .claro .contra { font-size: var(--t-13); color: var(--tinta-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .claro .cuando { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: var(--t-13); color: var(--tinta-2);
+  .claro .txt, .res .txt { display: flex; flex-direction: column; min-width: 0; }
+  .claro .quien, .res .quien { font-size: var(--t-15); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .claro .contra, .res .contra { font-size: var(--t-13); color: var(--tinta-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .claro .cuando, .res .cuando { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: var(--t-13); color: var(--tinta-2);
                    white-space: nowrap; }
-  .claro .cuando .insignia { height: 1.25rem; min-width: 2rem; font-size: 0.6875rem; }
+  .claro .cuando .insignia, .res .cuando .insignia { height: 1.25rem; min-width: 2rem; font-size: 0.6875rem; }
+  .res .marcador { display: flex; gap: 6px; }
+  .res .marcador .eq { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .res .marcador b { flex: none; font-family: var(--f-disp); font-stretch: 88%; font-weight: 800; font-variant-numeric: tabular-nums; }
 
   .fiab { display: grid; grid-template-columns: 2.75rem minmax(0, 1fr) 3rem 2.75rem; align-items: center; gap: 0 10px;
           padding: 7px 0; font-size: var(--t-14); }
@@ -613,6 +619,7 @@
               font-size: var(--t-13); color: var(--tinta-3); padding-bottom: 6px; border-bottom: 1px solid var(--linea); }
   .fiab-cab span:nth-child(3), .fiab-cab span:nth-child(4) { text-align: right; }
   .m-fiab .segmentos { margin: 0 0 12px; width: max-content; max-width: 100%; }
+  .m-fiab .segmentos + .segmentos { margin-top: -4px; }
 
   /* histograma: el eje es probabilidad, así que cada barra lleva el oro de su tramo */
   .histo { display: flex; align-items: flex-end; gap: 3px; height: 120px; border-bottom: 1px solid var(--linea-viva); }
@@ -714,7 +721,7 @@
       <span>Hora</span><span class="c-liga">Liga</span><span>Local</span><span>Visitante</span>
       <span class="der" data-tip="Gana el local">1</span><span class="der" data-tip="Empate">X</span><span class="der" data-tip="Gana el visitante">2</span>
       <span class="der c-d" data-tip="Doble oportunidad: gana el local o empate">1X</span><span class="der c-d" data-tip="Doble oportunidad: empate o gana el visitante">X2</span><span class="der c-d" data-tip="Doble oportunidad: gana cualquiera de los dos, sin empate">12</span>
-      <span class="der c-xg" data-tip="Goles que el modelo espera de cada equipo">Goles esp.</span><span class="der c-g" data-tip="Más de 2.5 goles: 3 o más en el partido">+2.5</span><span class="der c-g" data-tip="Marcan los dos equipos">Ambos</span><span class="der c-m" data-tip="Partidos previos del equipo con menos historial. Con menos de 4, el número tira hacia la media de la liga">Muestra</span><span class="c-rep" data-tip="El 1 X 2 en una barra">Reparto</span>
+      <span class="der c-xg" data-tip="Goles que el modelo espera de cada equipo">Goles esp.</span><span class="der c-g" data-tip="Más de 2.5 goles: 3 o más en el partido">+2.5</span><span class="der c-g" data-tip="Marcan los dos equipos">Ambos</span><span class="der c-m" data-tip="Partidos de liga (esta temporada y la anterior) del equipo con menos. Con menos de 4, el número tira hacia un equipo medio">Muestra</span><span class="c-rep" data-tip="El 1 X 2 en una barra">Reparto</span>
     </div>
     <main class="vista" id="vista" tabindex="-1"></main>
   </section>

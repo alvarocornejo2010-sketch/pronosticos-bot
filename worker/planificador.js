@@ -3,7 +3,7 @@
 // llama a tick() cada minuto. Cada vez decide si hay algo que hacer: primero
 // actualizar la web, y solo con la web al día, avanzar la validación.
 
-import { MAX_INTENTOS_VALIDACION, ajustes } from "./config.js";
+import { MAX_INTENTOS_VALIDACION, VERSION_MODELO, ajustes } from "./config.js";
 import { Almacen } from "./almacen.js";
 import { ClienteAPI, SinPresupuesto } from "./api.js";
 import { Reloj } from "./tiempo.js";
@@ -52,16 +52,24 @@ export function tocaActualizar(resumen, aj, ahora) {
   return min >= aj.minMinutosActualizacion ? `última hace ${Math.trunc(min)} min` : null;
 }
 
+// Una validación hecha (o empezada) con otra versión del modelo no mide lo que
+// se publica. Las de antes de que existiera la versión cuentan como la 1.
+export const deOtroModelo = (val) => Boolean(val) && (val.version_modelo ?? 1) !== VERSION_MODELO;
+
 // ¿Toca validar? Como _toca_validar: solo con el calendario al día, porque las
 // dos cosas compiten por las mismas 10 peticiones por minuto. Una validación
-// empezada se sigue, y una pedida con /validar no espera a que esté "listo".
-// En Render se repetía en cada despliegue porque el disco se borraba; aquí se
-// guarda, así que se repite sola cuando termina una temporada nueva.
+// empezada se sigue (si es de otro modelo, se empieza de cero), y una pedida con
+// /validar no espera a que esté "listo". En Render se repetía en cada despliegue
+// porque el disco se borraba; aquí se guarda, así que se repite sola cuando
+// termina una temporada nueva o cambia el modelo (VERSION_MODELO).
 export function tocaValidar(resumen, val, pedido, aj, ultimaTerminada) {
-  if (val && val.estado === "calculando") return "continuar la validación";
+  if (val && val.estado === "calculando") {
+    return deOtroModelo(val) ? "modelo nuevo: se empieza de cero" : "continuar la validación";
+  }
   if (pedido) return "pedida con /validar";
   if (!aj.autoValidar || !resumen || resumen.estado !== "listo") return null;
   if (!val || val.estado === "sin_ejecutar") return "nunca se ha ejecutado";
+  if ((val.estado === "listo" || val.estado === "error") && deOtroModelo(val)) return "modelo nuevo";
   if (val.estado === "listo" && val.temporada < ultimaTerminada) return `ya terminó la temporada ${ultimaTerminada}`;
   if (val.estado === "error" && (val.intentos ?? 0) < MAX_INTENTOS_VALIDACION) {
     return `reintento ${(val.intentos ?? 0) + 1} de ${MAX_INTENTOS_VALIDACION} tras un error`;
@@ -138,11 +146,12 @@ export async function tick(env, { fetchFn = null } = {}) {
       return { tarea, motivo, estado: final, peticiones: api.gastadas, kb: Math.round(api.bytes / 1024), muertes };
     }
 
-    if (!val || val.estado !== "calculando") {
+    if (!val || val.estado !== "calculando" || deOtroModelo(val)) {
       // la temporada evaluada por defecto es la última terminada, como en validacion.py
       const pedido = leer(pedidoValidar) || {};
       const season = Number.isInteger(pedido.temporada) ? pedido.temporada : temporadaActual(reloj) - 1;
-      const intentos = !pedidoValidar && val && val.estado === "error" ? val.intentos ?? 0 : 0;
+      // los fallos de otro modelo no cuentan contra este
+      const intentos = !pedidoValidar && val && val.estado === "error" && !deOtroModelo(val) ? val.intentos ?? 0 : 0;
       const inicio = sentenciasInicio(almacen, ctx.ahoraIso(), season, intentos);
       if (pedidoValidar) inicio.push(almacen.sentenciaBorrarDoc("pedido_validar", pedidoValidar.actualizado));
       await almacen.escribir(inicio);

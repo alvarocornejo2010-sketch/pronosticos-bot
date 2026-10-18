@@ -5,7 +5,7 @@ import json
 import time
 import threading
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import numpy as np
@@ -66,28 +66,30 @@ TORNEOS = {
 # partidos, datos de openfootball), con validación cruzada (ver CLAUDE.md,
 # "Champions"). Championship y Brasileirão no juegan la Champions; si algún día
 # hiciera falta, usan FACTOR_OTRA_LIGA.
-FACTOR_LIGA = {"PL": 1.28, "PD": 1.09, "FL1": 1.12, "SA": 1.03, "BL1": 1.06, "PPL": 1.00, "DED": 0.83}
+FACTOR_LIGA = {"PL": 1.25, "PD": 1.06, "FL1": 1.08, "SA": 1.01, "BL1": 1.06, "PPL": 0.86, "DED": 0.73}
 # Equipos de ligas fuera del plan (Bélgica, Austria, Escocia...): sin datos de su
 # liga, cuentan como un equipo medio de este nivel.
-FACTOR_OTRA_LIGA = 0.76
-# La fuerza en la liga nacional se eleva a este exponente: los grandes arrasan en
-# su liga y su fuerza nacional tomada tal cual exagera. Con el historial de
-# Champions (abajo) sale 0.39 (entre 0.30 y 0.46 en los nueve ajustes de la
-# validación): parte de lo que antes salía de la liga ahora lo aporta el historial.
-EXPONENTE_FUERZA_CHAMPIONS = 0.39
+FACTOR_OTRA_LIGA = 0.87
+# La fuerza en la liga nacional (la de obtener_fuerzas_liga) se eleva a este
+# exponente: los grandes arrasan en su liga y su fuerza nacional tomada tal cual
+# exagera. Sale 0.82 (entre 0.71 y 0.90 en los nueve ajustes de la validación):
+# las fuerzas ya vienen ajustadas por rival y encogidas, así que hay que
+# atenuarlas mucho menos que las de antes (0.39).
+EXPONENTE_FUERZA_CHAMPIONS = 0.82
 # Los goles esperados parten de la media de la Champions por este factor (local,
 # visitante): con equipos que en su liga son de los mejores, el producto de
-# ataque y defensa sale algo por encima de 1 y hay que compensarlo.
-ESCALA_CHAMPIONS = (0.96, 0.97)
+# ataque y defensa sale por encima de 1 y hay que compensarlo.
+ESCALA_CHAMPIONS = (0.90, 0.89)
 # Historial en la Champions: lo que cada equipo marcó y encajó en sus partidos de
 # Champions de esta temporada y la anterior, frente a lo que se esperaba de un
 # equipo de su nivel de liga contra esos mismos rivales. Corrige la fuerza que da
 # su liga nacional, encogido hacia 1 con estos goles de pseudo-cuenta (sale
-# entre 26 y 36 en los nueve ajustes de la validación): con 31, un equipo con 16
-# partidos de Champions pesa casi a medias entre su historial y su liga, y uno
-# sin partidos queda como estaba. Sale de los mismos partidos que ya se bajan
+# entre 44 y 78 en los nueve ajustes de la validación): con 54, un equipo con 16
+# partidos de Champions pesa algo menos de un tercio su historial, y uno sin
+# partidos queda como estaba. Con la fuerza nacional de ahora, mejor medida, el
+# historial aporta menos que antes. Sale de los mismos partidos que ya se bajan
 # para la media de la Champions.
-K_HISTORIAL_CHAMPIONS = 31
+K_HISTORIAL_CHAMPIONS = 54
 DIAS_VALIDEZ_LIGA_EQUIPO = 30   # de qué liga es cada equipo: no cambia en la temporada
 
 # Zona horaria de referencia para decidir qué es "hoy".
@@ -117,14 +119,16 @@ MIN_INTERVALO_ACTUALIZACION = timedelta(
 # duerme el servicio. Si algún día contratas un disco persistente, apúntalo con
 # la variable DATA_DIR y la caché sobrevivirá a los reinicios.
 DATA_DIR = os.environ.get("DATA_DIR", ".")
-CACHE_FILE = os.path.join(DATA_DIR, "cache.json")   # sumas crudas por equipo y medias de liga
+CACHE_FILE = os.path.join(DATA_DIR, "cache.json")   # partidos y medias de cada liga, fuerzas de sus equipos
 DATA_FILE = os.path.join(DATA_DIR, "data.json")     # lo que ve la página web, se va llenando poco a poco
 
-CACHE_VERSION = 3               # subir esto invalida cachés con formato viejo
-                                # (v3: priors por liga; las medias de v2 se
-                                #  calcularon con el prior español para todas)
-DIAS_VALIDEZ_EQUIPO = int(os.environ.get("DIAS_VALIDEZ_EQUIPO", "3"))
-DIAS_VALIDEZ_LIGA = 7
+CACHE_VERSION = 4               # subir esto invalida cachés con formato viejo
+                                # (v4: listas de partidos por liga y fuerzas
+                                #  ajustadas por rival; ya no hay stats por equipo)
+# Cada cuánto se vuelven a pedir los partidos ya jugados de la temporada en
+# curso de cada liga: de ahí sale la fuerza de TODOS sus equipos, con una sola
+# petición por liga (antes eran dos por equipo, cada 3 días).
+HORAS_VALIDEZ_LIGA = 12
 PAUSA_ENTRE_REQUESTS = 6.5      # 10 requests/min en el plan free
 MAX_DIAS_BUSQUEDA = int(os.environ.get("DIAS_ADELANTE", "7"))
                                 # cuántos días hacia delante mostrar. Con el endpoint por
@@ -153,14 +157,47 @@ HORAS_VALIDEZ_PREDICCION = 24
 DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 # --- Parámetros del modelo ---
-VENTANA_DIAS = 400              # cuántos días atrás mirar para las stats de un equipo.
-                                # Más de un año a propósito: al inicio de temporada
-                                # arrastra datos de la anterior en vez de quedarse a ciegas.
-MAX_PARTIDOS_EQUIPO = 20        # se usan los N más recientes dentro de esa ventana
-PSEUDO_PARTIDOS = 6             # regularización: cuánto pesa la media de liga frente a los
-                                # datos propios del equipo. Con 8-10 partidos por lado, sin
-                                # esto un par de goleadas te descuadran toda la fuerza.
-K_LIGA = 50                     # mismo truco para la media de la propia liga
+# La fuerza de cada equipo (ajustar_fuerzas): un ataque y una defensa por
+# equipo, con TODOS sus partidos de liga de esta temporada y la anterior (en
+# casa y fuera), cada uno medido frente al rival que tuvo y pesado por su
+# antigüedad. Medido con afinar_liga.py en 8 ligas y 15 temporadas de
+# openfootball: los valores se eligieron mirando 2010/11 a 2020/21 (19.753
+# partidos) y se juzgaron en 2021/22 a 2025/26 (14.706), que no se usaron para
+# elegir. Frente al modelo de antes (últimos 20 partidos, casa y fuera por
+# separado, sin mirar al rival): skill del 1X2 de +6.1% a +8.9%, mejor en las
+# 9 ligas y en todas las temporadas. Detalle en CLAUDE.md ("El modelo").
+FACTOR_DIARIO = 0.998           # peso de un partido de hace un día frente a uno de hoy:
+                                # a los 347 días pesa la mitad. Se multiplica día a día
+                                # (no con exp) para que Python y JavaScript den lo mismo.
+PSEUDO_GOLES_ATAQUE = 6         # encogimiento hacia el equipo medio, en goles esperados:
+PSEUDO_GOLES_DEFENSA = 8        # con pocos partidos un equipo queda cerca de 1
+ATAQUE_RECIEN_LLEGADO = 0.8     # un equipo que no estaba la temporada pasada (un
+                                # ascendido) parte de un ataque un 20% peor que el medio.
+                                # Su defensa, como la de un equipo medio...
+DEFENSA_RECIEN_LLEGADO = {"PL": 1.3}   # ...salvo en la Premier, donde el que sube de la
+                                # Championship encaja mucho más (su primera temporada, un 13%
+                                # más que el medio). Medido con afinar_liga.py descensos: Brier
+                                # de la Premier -0.0008 en ajuste y -0.0011 en prueba (-1.6 y
+                                # -1.7 se). En las demás ligas, 1.1 o 1.2 no se distinguen de 1
+                                # en las temporadas de ajuste.
+# Los que bajan de la liga de arriba (de la Premier a la Championship) no son
+# ascendidos: son de los fuertes de su nueva liga (su primera temporada marcan un
+# 12% más que el medio y encajan un 13% menos), así que parten de su propio ataque
+# y defensa. En la Championship, Brier -0.0016 en ajuste y en prueba (-2.2 y -1.9
+# se). Las combinaciones de ataque y defensa con la misma fuerza neta dan casi lo
+# mismo; esta es la del reparto medido.
+LIGA_DE_ARRIBA = {"ELC": "PL"}
+ATAQUE_DESCENDIDO = 1.2
+DEFENSA_DESCENDIDO = 0.85
+VERSION_MODELO = 2              # subirlo al cambiar el modelo: las fuerzas guardadas se
+                                # recalculan, cada ficha dice con cuál se calculó y en
+                                # Cloudflare (donde D1 guarda la validación) esta se repite
+TOLERANCIA_FUERZAS = 1e-4       # el ajuste se repite hasta que nada cambia más que esto:
+                                # con 1e-6 harían falta el doble de vueltas y los goles
+                                # esperados (con dos decimales) salen iguales salvo algún
+                                # 0.01 suelto en el borde de un redondeo
+MAX_ITER_FUERZAS = 300
+K_LIGA = 50                     # cuánto pesa el ancla en la media de la propia liga
 
 # Ancla de ÚLTIMO RECURSO, solo si no se puede leer la temporada anterior de la liga.
 # Antes estas dos constantes (sacadas de LaLiga) se usaban para TODAS las ligas, y
@@ -172,17 +209,22 @@ PRIOR_AVG_VISITA = 1.15
 DIAS_VALIDEZ_PRIOR = 30         # la temporada pasada ya no cambia: se cachea de sobra
 LIMITE_GOLES = 10               # rejilla de Poisson (antes 5, que perdía hasta 6.5% de masa)
 
+# Corrección de Dixon-Coles para los marcadores bajos (0-0, 1-0, 0-1, 1-1): con
+# dos Poisson independientes salían menos empates de los que hay (24.3% frente a
+# 25.4% reales en 19.753 partidos). Con -0.05 cuadran, y el 1X2 mejora poco pero
+# de verdad (Brier -0.0002 y LogLoss -0.0006 en los partidos de prueba, unos -2 y
+# -3 errores estándar). Era la hipótesis pendiente desde sept 2026: con LaLiga
+# sola no se distinguía del ruido. Se aplica también a los mercados de goles.
+RHO_EMPATES = -0.05
+
 # Cuánto de la diferencia con la media de liga se conserva en los goles esperados
 # al calcular los mercados de GOLES (más/menos, ambos marcan, porterías a cero,
-# marcadores). El 1X2 no lo usa. Con los goles esperados tal cual, el modelo
-# exagera las diferencias entre partidos: donde daba 27% de "más de 2.5" pasaba
-# un 42%, y donde daba 74% pasaba un 62%. Así perdía contra la simple media de la
-# liga. Medido sobre 3.484 partidos reales (5 ligas, 2023 y 2024, datos de
-# openfootball): ajustando en una temporada y probando en la otra, cualquier
-# valor entre 0.2 y 0.4 gana a la media de liga en las dos y el valor 1 (sin
-# encoger) pierde. 0.3 es el centro de esa franja, no un óptimo demostrado.
-# Detalle en CLAUDE.md ("Mercados de goles").
-ENCOGER_GOLES = 0.3
+# marcadores). El 1X2 no lo usa. Los goles esperados tal cual exageran las
+# diferencias de goles entre partidos, así que se acercan a la media de la liga
+# en escala logarítmica. Con las fuerzas ajustadas por rival el mejor valor sube
+# de 0.3 a 0.5 (más de 2.5: skill +1.1% en los partidos de prueba, ambos marcan
+# +0.7%; con el modelo de antes, +0.5% y +0.2%). Detalle en CLAUDE.md.
+ENCOGER_GOLES = 0.5
 
 actualizando_ahora = False      # evita que dos actualizaciones corran a la vez
 
@@ -212,7 +254,7 @@ def cargar_cache():
             print("Caché con formato viejo, se descarta y se reconstruye.", file=sys.stderr)
         except (json.JSONDecodeError, OSError) as e:
             print(f"Caché ilegible ({e}), se reconstruye.", file=sys.stderr)
-    return {"version": CACHE_VERSION, "ligas": {}, "equipos": {}}
+    return {"version": CACHE_VERSION, "ligas": {}, "partidos_liga": {}, "fuerzas": {}}
 
 
 def guardar_cache(cache):
@@ -315,6 +357,35 @@ def historial_de_partidos(matches):
     return hist
 
 
+_EPOCA = date(1970, 1, 1)
+
+
+def dia_de(utc_date):
+    """Número de día (desde el 1/1/1970) de una fecha de la API: para pesar cada
+    partido por su antigüedad basta con el día."""
+    return (date.fromisoformat(utc_date[:10]) - _EPOCA).days
+
+
+def partidos_compactos(matches):
+    """[[día, local, visita, goles local, goles visita], ...] de los partidos con
+    resultado, por fecha: lo que necesita ajustar_fuerzas, ~25 bytes por partido
+    en vez del ~1 KB de cada partido de la API."""
+    out = []
+    for m in sorted(matches, key=lambda m: m.get("utcDate") or ""):
+        gl, gv = goles_90(m)
+        loc, vis = (m.get("homeTeam") or {}).get("id"), (m.get("awayTeam") or {}).get("id")
+        if gl is None or gv is None or loc is None or vis is None or not m.get("utcDate"):
+            continue
+        out.append([dia_de(m["utcDate"]), loc, vis, gl, gv])
+    return out
+
+
+def _lista_vigente(cache, clave, temporada):
+    """La lista de partidos guardada de una liga, si es de esa temporada."""
+    e = cache.get("partidos_liga", {}).get(clave)
+    return e if e and e.get("temporada") == temporada else None
+
+
 def obtener_prior_liga(codigo_liga, cache):
     """Media de goles de la temporada ANTERIOR de ESTA liga.
 
@@ -323,16 +394,19 @@ def obtener_prior_liga(codigo_liga, cache):
     del orden del 9% en ligas con ritmo goleador distinto.
 
     Cuesta una petición por liga y se cachea un mes: la temporada pasada ya no
-    va a cambiar.
+    va a cambiar. De una liga se guardan además sus partidos (partidos_liga), con
+    los que ajustar_fuerzas mide a cada equipo al empezar la temporada.
     """
     priors = cache.setdefault("priors", {})
     entry = priors.get(codigo_liga)
     season = temporada_actual(codigo_liga) - 1
     # la temporada también cuenta: en julio la "anterior" pasa a ser otra, y un
     # torneo guarda además su historial por equipo (ver historial_champions)
+    es_torneo = codigo_liga in TORNEOS.values()
     if (entry and esta_vigente(entry.get("actualizado"), DIAS_VALIDEZ_PRIOR)
             and entry.get("temporada") == season
-            and (codigo_liga not in TORNEOS.values() or "historial" in entry)):
+            and ("historial" in entry if es_torneo
+                 else _lista_vigente(cache, codigo_liga + ":previa", season))):
         return entry
 
     respaldo = {"avg_local": PRIOR_AVG_LOCAL, "avg_visita": PRIOR_AVG_VISITA,
@@ -363,8 +437,12 @@ def obtener_prior_liga(codigo_liga, cache):
     entry = {"avg_local": gl / n, "avg_visita": gv / n,
              "origen": f"temporada {season}", "partidos": n, "temporada": season,
              "actualizado": ahora().isoformat()}
-    if codigo_liga in TORNEOS.values():
+    if es_torneo:
         entry["historial"] = historial_de_partidos(matches)
+    else:
+        cache.setdefault("partidos_liga", {})[codigo_liga + ":previa"] = {
+            "temporada": season, "partidos": partidos_compactos(matches),
+            "actualizado": entry["actualizado"]}
     priors[codigo_liga] = entry
     return entry
 
@@ -373,9 +451,15 @@ def obtener_prior_liga(codigo_liga, cache):
 # PROMEDIO DE GOLES POR LIGA
 # ==========================================
 def obtener_promedio_liga(codigo_liga, cache):
+    """Media de goles en casa y fuera de la temporada en curso, anclada en la
+    anterior. De una liga guarda además sus partidos ya jugados (partidos_liga),
+    de los que salen las fuerzas de todos sus equipos: una petición por liga
+    cada HORAS_VALIDEZ_LIGA."""
     entry = cache["ligas"].get(codigo_liga)
-    if (entry and esta_vigente(entry.get("actualizado"), DIAS_VALIDEZ_LIGA)
-            and (codigo_liga not in TORNEOS.values() or "historial" in entry)):
+    es_torneo = codigo_liga in TORNEOS.values()
+    if (entry and esta_vigente(entry.get("actualizado"), HORAS_VALIDEZ_LIGA / 24)
+            and ("historial" in entry if es_torneo
+                 else _lista_vigente(cache, codigo_liga + ":actual", temporada_actual(codigo_liga)))):
         return entry
 
     prior = obtener_prior_liga(codigo_liga, cache)
@@ -408,97 +492,206 @@ def obtener_promedio_liga(codigo_liga, cache):
         "prior_visita": round(prior["avg_visita"], 3),
         "actualizado": ahora().isoformat()
     }
-    if codigo_liga in TORNEOS.values():
+    if es_torneo:
         promedio["historial"] = historial_de_partidos(matches)
+    else:
+        cache.setdefault("partidos_liga", {})[codigo_liga + ":actual"] = {
+            "temporada": temporada_actual(codigo_liga), "partidos": partidos_compactos(matches),
+            "actualizado": promedio["actualizado"]}
     cache["ligas"][codigo_liga] = promedio
     return promedio
 
 
 # ==========================================
-# STATS POR EQUIPO (sumas crudas, sin normalizar)
+# FUERZAS: ataque y defensa de cada equipo, ajustados por el rival
 # ==========================================
-STATS_VACIAS = {"gf_local": 0, "gc_local": 0, "n_local": 0,
-                "gf_visita": 0, "gc_visita": 0, "n_visita": 0, "actualizado": None}
+def prior_recien_llegado(codigo_liga, team_id, de_arriba):
+    """(ataque, defensa) de los que parte un equipo que no estaba en la liga la
+    temporada anterior: el de un descendido si viene de la liga de arriba
+    (de_arriba: los equipos que la jugaron, ver LIGA_DE_ARRIBA) y si no, el de
+    un ascendido de esa liga."""
+    if team_id in de_arriba:
+        return ATAQUE_DESCENDIDO, DEFENSA_DESCENDIDO
+    return ATAQUE_RECIEN_LLEGADO, DEFENSA_RECIEN_LLEGADO.get(codigo_liga, 1.0)
 
 
-def obtener_stats_equipo(team_id, codigo_liga, cache):
-    """Devuelve goles marcados/encajados y partidos jugados, separados por local y visitante.
+def ajustar_fuerzas(previa, actual, media, inicio=None, codigo_liga=None, de_arriba=()):
+    """Ataque y defensa de todos los equipos de una liga.
 
-    Se guardan SUMAS CRUDAS a propósito: la normalización y el encogimiento hacia
-    la media de liga se hacen luego en calcular_xg_partido. Así, si cambia la media
-    de la liga, no hay que invalidar la caché de todos los equipos.
+    previa y actual son las listas de partidos_compactos de la temporada
+    anterior y la actual (lo jugado hasta hoy); media, la de obtener_promedio_liga.
+    Los goles esperados de un partido son media x ataque propio x defensa rival,
+    y cada fuerza se elige para que cuadren con lo que pasó:
+
+        ataque = (goles marcados + k·a0) / (goles que habría marcado un equipo
+                  medio contra esas mismas defensas + k)
+
+    y lo mismo con la defensa. Como cada una depende de las de los rivales, se
+    repite hasta que no cambian (TOLERANCIA_FUERZAS). Cada partido pesa
+    FACTOR_DIARIO^días (días contados hasta el último partido de la lista), y
+    k (PSEUDO_GOLES_*) son goles esperados de un equipo de prior: con pocos
+    partidos, la fuerza queda cerca de a0, que es 1 o, para un equipo que no
+    estaba la temporada anterior, lo que diga prior_recien_llegado (de_arriba:
+    los equipos de la temporada anterior de la liga de arriba).
+
+    Mismas operaciones y en el mismo orden que ajustarFuerzas en
+    worker/modelo.js: test_paridad.py comprueba que dan lo mismo. inicio (unas
+    fuerzas anteriores) solo acelera la convergencia; lo usa validacion.py.
+
+    Devuelve {"equipos": {id: [ataque, defensa, partidos]}, "con_previa",
+    "codigo", "de_arriba", "dia", "iteraciones"}; los equipos sin ningún
+    partido no salen (fuerza_equipo).
     """
-    key = f"{team_id}:{codigo_liga}"
-    entry = cache["equipos"].get(key)
-    if entry and esta_vigente(entry.get("actualizado"), DIAS_VALIDEZ_EQUIPO):
-        return entry
+    todos = list(previa) + list(actual)
+    con_previa = len(previa) > 0
+    de_arriba = list(dict.fromkeys(de_arriba))
+    if not todos:
+        return {"equipos": {}, "con_previa": con_previa, "codigo": codigo_liga, "de_arriba": de_arriba,
+                "dia": None, "iteraciones": 0}
+    ref = max(p[0] for p in todos)
+    ids, idx = [], {}
+    for p in todos:
+        for t in (p[1], p[2]):
+            if t not in idx:
+                idx[t] = len(ids)
+                ids.append(t)
+    T = len(ids)
+    previos = set()
+    for p in previa:
+        previos.add(p[1]); previos.add(p[2])
+    arriba = set(de_arriba)
+    a0, d0 = [], []
+    for t in ids:
+        a, d = (prior_recien_llegado(codigo_liga, t, arriba) if con_previa and t not in previos
+                else (1.0, 1.0))
+        a0.append(a)
+        d0.append(d)
+    # pesos por antigüedad, multiplicando día a día: el mismo double en los dos lenguajes
+    pesos = [1.0]
+    for _ in range(ref - min(p[0] for p in todos)):
+        pesos.append(pesos[-1] * FACTOR_DIARIO)
+    ml, mv = media["avg_local"], media["avg_visita"]
+    k_at, k_de = PSEUDO_GOLES_ATAQUE, PSEUDO_GOLES_DEFENSA
+    num_at = [k_at * a for a in a0]
+    num_de = [k_de * d for d in d0]
+    jugados = [0] * T
+    # peso total de cada cruce (i en casa contra j): lo único que hace falta de
+    # cada partido en las vueltas del ajuste, que así cuestan T² y no lo que
+    # tenga la lista (24 equipos: 576 cruces frente a ~1.100 partidos)
+    cruce = [[0.0] * T for _ in range(T)]
+    for d, loc, vis, gl, gv in todos:
+        i, j, w = idx[loc], idx[vis], pesos[ref - d]
+        num_at[i] += w * gl
+        num_at[j] += w * gv
+        num_de[i] += w * gv
+        num_de[j] += w * gl
+        jugados[i] += 1
+        jugados[j] += 1
+        cruce[i][j] += w
+    # lo que pesa la defensa de j en los goles esperados de i (en casa, media
+    # local; fuera, media visitante), y el ataque de j en los que encaja i
+    pesa_de = [[ml * cruce[i][j] + mv * cruce[j][i] for j in range(T)] for i in range(T)]
+    pesa_at = [[mv * cruce[i][j] + ml * cruce[j][i] for j in range(T)] for i in range(T)]
+    ataque = list(a0)
+    defensa = list(d0)
+    if inicio:
+        for x, t in enumerate(ids):
+            e = inicio.get(str(t))
+            if e:
+                ataque[x], defensa[x] = e[0], e[1]
+    it = 0
+    while it < MAX_ITER_FUERZAS:
+        it += 1
+        nuevo_at = [0.0] * T
+        for i in range(T):
+            fila, den = pesa_de[i], float(k_at)
+            for j in range(T):
+                den += fila[j] * defensa[j]
+            nuevo_at[i] = num_at[i] / den
+        nueva_de = [0.0] * T
+        for i in range(T):
+            fila, den = pesa_at[i], float(k_de)
+            for j in range(T):
+                den += fila[j] * nuevo_at[j]
+            nueva_de[i] = num_de[i] / den
+        cambio = 0.0
+        for x in range(T):
+            cambio = max(cambio, abs(nuevo_at[x] - ataque[x]), abs(nueva_de[x] - defensa[x]))
+        ataque, defensa = nuevo_at, nueva_de
+        if cambio < TOLERANCIA_FUERZAS:
+            break
+    return {"equipos": {str(t): [ataque[x], defensa[x], jugados[x]] for x, t in enumerate(ids)},
+            "con_previa": con_previa, "codigo": codigo_liga, "de_arriba": de_arriba,
+            "dia": ref, "iteraciones": it}
 
-    hasta = ahora().date()
-    desde = hasta - timedelta(days=VENTANA_DIAS)
-    resp = get_con_pausa(f"{BASE_URL}/teams/{team_id}/matches", {
-        "status": "FINISHED",
-        "competitions": codigo_liga,   # sin esto se colaban Copa del Rey, Champions y amistosos
-        "dateFrom": desde.isoformat(),
-        "dateTo": hasta.isoformat(),
-    })
-    if resp.status_code != 200:
-        print(f"Equipo {team_id}: HTTP {resp.status_code}, se usa solo el prior de liga.", file=sys.stderr)
-        return dict(STATS_VACIAS)
 
-    matches = resp.json().get("matches", [])
-    # La API no garantiza el orden, así que ordenamos aquí y nos quedamos con los
-    # N más recientes. Antes, 'limit=20' podía estar devolviendo los más ANTIGUOS.
-    matches.sort(key=lambda m: m.get("utcDate", ""))
-    matches = matches[-MAX_PARTIDOS_EQUIPO:]
-
-    s = {"gf_local": 0, "gc_local": 0, "n_local": 0,
-         "gf_visita": 0, "gc_visita": 0, "n_visita": 0}
-
-    for match in matches:
-        score = match.get("score", {}).get("fullTime", {})
-        gl, gv = score.get("home"), score.get("away")
-        if gl is None or gv is None:
-            continue
-        if match.get("homeTeam", {}).get("id") == team_id:
-            s["gf_local"] += gl; s["gc_local"] += gv; s["n_local"] += 1
-        else:
-            s["gf_visita"] += gv; s["gc_visita"] += gl; s["n_visita"] += 1
-
-    s["actualizado"] = ahora().isoformat()
-    # Se cachea aunque venga con pocos partidos: el encogimiento ya se encarga
-    # de que un equipo con 2 partidos no dispare la predicción.
-    cache["equipos"][key] = s
-    return s
+def fuerza_equipo(fuerzas, team_id):
+    """Ataque, defensa y partidos de un equipo. Uno sin partidos todavía (un
+    ascendido o un descendido antes de debutar) parte de la fuerza de un recién
+    llegado."""
+    e = fuerzas["equipos"].get(str(team_id))
+    if e:
+        return {"ataque": e[0], "defensa": e[1], "partidos": e[2]}
+    if not fuerzas["con_previa"]:
+        return {"ataque": 1.0, "defensa": 1.0, "partidos": 0}
+    a, d = prior_recien_llegado(fuerzas.get("codigo"), team_id, fuerzas.get("de_arriba", ()))
+    return {"ataque": a, "defensa": d, "partidos": 0}
 
 
-def _encoger(total, n, prior, k=PSEUDO_PARTIDOS):
-    """Media regularizada: con n=0 devuelve el prior, y con muchos partidos converge al dato real."""
-    return (total + k * prior) / (n + k)
+def equipos_de_partidos(partidos):
+    """Los equipos de una lista de partidos_compactos, en orden de aparición."""
+    return list(dict.fromkeys(t for p in partidos for t in (p[1], p[2])))
 
 
-def calcular_xg_partido(stats_local, stats_visita, promedio_liga):
-    avg_l = promedio_liga["avg_local"]
-    avg_v = promedio_liga["avg_visita"]
+def obtener_fuerzas_liga(codigo_liga, cache):
+    """Las fuerzas de todos los equipos de una liga, con los partidos que ya
+    bajaron obtener_prior_liga y obtener_promedio_liga (y, en una liga con
+    LIGA_DE_ARRIBA, la temporada anterior de la de arriba, que esa liga ya baja
+    para sus propios partidos). No pide nada más: se recalculan solo cuando
+    cambia alguna lista."""
+    promedio = obtener_promedio_liga(codigo_liga, cache)
+    season = temporada_actual(codigo_liga)
+    previa = _lista_vigente(cache, codigo_liga + ":previa", season - 1) or {}
+    actual = _lista_vigente(cache, codigo_liga + ":actual", season) or {}
+    version = (f"{VERSION_MODELO}|{previa.get('actualizado')}|{actual.get('actualizado')}"
+               f"|{promedio.get('actualizado')}")
+    arriba = {}
+    if codigo_liga in LIGA_DE_ARRIBA:
+        sup = LIGA_DE_ARRIBA[codigo_liga]
+        obtener_prior_liga(sup, cache)
+        arriba = _lista_vigente(cache, sup + ":previa", temporada_actual(sup) - 1) or {}
+        version += f"|{arriba.get('actualizado')}"
+    guardadas = cache.setdefault("fuerzas", {}).get(codigo_liga)
+    if guardadas and guardadas.get("version") == version:
+        return guardadas
+    fuerzas = ajustar_fuerzas(previa.get("partidos", []), actual.get("partidos", []), promedio,
+                              codigo_liga=codigo_liga,
+                              de_arriba=equipos_de_partidos(arriba.get("partidos", [])))
+    fuerzas["version"] = version
+    cache["fuerzas"][codigo_liga] = fuerzas
+    return fuerzas
 
-    # Tasas por partido, encogidas hacia la media de liga del lado que corresponde.
-    # Ojo: los goles que ENCAJA un equipo en casa son goles de visitante -> prior avg_v,
-    # y los que encaja fuera son goles de local -> prior avg_l.
-    for_local      = _encoger(stats_local["gf_local"],  stats_local["n_local"],  avg_l)
-    against_local  = _encoger(stats_local["gc_local"],  stats_local["n_local"],  avg_v)
-    for_visita     = _encoger(stats_visita["gf_visita"], stats_visita["n_visita"], avg_v)
-    against_visita = _encoger(stats_visita["gc_visita"], stats_visita["n_visita"], avg_l)
 
-    # Fuerzas relativas. Cada término se divide entre la media de SU MISMO tipo de gol.
-    # (El bug anterior dividía la defensa del visitante entre avg_visita, cuando los
-    #  goles que encaja fuera son goles de local: eso inflaba al local ~29% siempre.)
-    ataque_local   = for_local / avg_l
-    defensa_visita = against_visita / avg_l
-    ataque_visita  = for_visita / avg_v
-    defensa_local  = against_local / avg_v
-
-    xg_local  = ataque_local  * defensa_visita * avg_l
-    xg_visita = ataque_visita * defensa_local  * avg_v
+def calcular_xg_partido(local, visita, promedio_liga):
+    """Goles esperados: media de la liga x ataque propio x defensa del rival
+    (local y visita son lo que da fuerza_equipo)."""
+    xg_local = promedio_liga["avg_local"] * local["ataque"] * visita["defensa"]
+    xg_visita = promedio_liga["avg_visita"] * visita["ataque"] * local["defensa"]
     return round(xg_local, 2), round(xg_visita, 2)
+
+
+def _tau(gl, gv, la, lv):
+    """Corrección de Dixon-Coles (RHO_EMPATES) para un marcador: solo toca 0-0,
+    1-0, 0-1 y 1-1."""
+    if gl == 0 and gv == 0:
+        return 1 - la * lv * RHO_EMPATES
+    if gl == 0 and gv == 1:
+        return 1 + la * RHO_EMPATES
+    if gl == 1 and gv == 0:
+        return 1 + lv * RHO_EMPATES
+    if gl == 1 and gv == 1:
+        return 1 - RHO_EMPATES
+    return 1.0
 
 
 def calcular_poisson(gla, gvi, limite=LIMITE_GOLES):
@@ -507,6 +700,8 @@ def calcular_poisson(gla, gvi, limite=LIMITE_GOLES):
         p_gl = poisson.pmf(gl, gla)
         for gv in range(limite + 1):
             prob = p_gl * poisson.pmf(gv, gvi)
+            if gl <= 1 and gv <= 1:
+                prob = prob * _tau(gl, gv, gla, gvi)
             if gl > gv: pl += prob
             elif gl == gv: pe += prob
             else: pv += prob
@@ -536,8 +731,10 @@ def mercados_de_goles(xg_local, xg_visita, promedio_liga, limite=LIMITE_GOLES):
     Salen todos de una misma rejilla de marcadores, así que no se contradicen
     entre sí. Esa rejilla usa los goles esperados acercados a la media de la
     liga (ENCOGER_GOLES), en escala logarítmica porque el modelo es
-    multiplicativo (ataque x defensa x media). Con dos equipos medios no cambia
-    nada, así que la base "equipo medio" de la validación es la misma de siempre.
+    multiplicativo (ataque x defensa x media), con la misma corrección de los
+    marcadores bajos que el 1X2 (RHO_EMPATES). Con dos equipos medios el
+    acercamiento no cambia nada, así que la base "equipo medio" de la
+    validación es la misma rejilla.
     """
     avg_l, avg_v = promedio_liga["avg_local"], promedio_liga["avg_visita"]
     gla = avg_l * (xg_local / avg_l) ** ENCOGER_GOLES
@@ -545,6 +742,9 @@ def mercados_de_goles(xg_local, xg_visita, promedio_liga, limite=LIMITE_GOLES):
 
     goles = np.arange(limite + 1)
     rejilla = np.outer(poisson.pmf(goles, gla), poisson.pmf(goles, gvi))
+    for i in (0, 1):
+        for j in (0, 1):
+            rejilla[i, j] = rejilla[i, j] * _tau(i, j, gla, gvi)
     rejilla /= rejilla.sum()    # misma normalización que calcular_poisson
     total = np.add.outer(goles, goles)
     reparto = [rejilla[total == k].sum() for k in range(5)] + [rejilla[total >= 5].sum()]
@@ -640,9 +840,9 @@ def multiplicadores_historial(h, k=K_HISTORIAL_CHAMPIONS):
     return (h["gf"] + k) / (h["esperado_f"] + k), (h["gc"] + k) / (h["esperado_c"] + k)
 
 
-def fuerzas_champions(team_id, en_casa, cache):
+def fuerzas_champions(team_id, cache):
     """Ataque y defensa de un equipo para un partido de Champions: su fuerza en
-    su liga nacional, relativa a la media de esa liga (como en calcular_xg_partido),
+    su liga nacional (la misma de sus partidos de liga, obtener_fuerzas_liga),
     atenuada con EXPONENTE_FUERZA_CHAMPIONS, el nivel de su liga y su historial
     en la Champions (historial_champions). Un equipo de otra liga cuenta como un
     equipo medio de FACTOR_OTRA_LIGA, corregido por su historial."""
@@ -654,21 +854,11 @@ def fuerzas_champions(team_id, en_casa, cache):
     if liga is None:
         return {"liga": None, "nombre_liga": None, "factor": FACTOR_OTRA_LIGA,
                 "ataque": 1.0, "defensa": 1.0, "muestra": 0, **historial}
-    s = obtener_stats_equipo(team_id, liga, cache)
-    prom = obtener_promedio_liga(liga, cache)
-    avg_l, avg_v = prom["avg_local"], prom["avg_visita"]
-    if en_casa:
-        ataque = _encoger(s["gf_local"], s["n_local"], avg_l) / avg_l
-        defensa = _encoger(s["gc_local"], s["n_local"], avg_v) / avg_v
-        n = s["n_local"]
-    else:
-        ataque = _encoger(s["gf_visita"], s["n_visita"], avg_v) / avg_v
-        defensa = _encoger(s["gc_visita"], s["n_visita"], avg_l) / avg_l
-        n = s["n_visita"]
+    f = fuerza_equipo(obtener_fuerzas_liga(liga, cache), team_id)
     b = EXPONENTE_FUERZA_CHAMPIONS
     nombre = next((k for k, v in LIGAS.items() if v == liga), liga)
     return {"liga": liga, "nombre_liga": nombre, "factor": factor,
-            "ataque": ataque ** b, "defensa": defensa ** b, "muestra": n, **historial}
+            "ataque": f["ataque"] ** b, "defensa": f["defensa"] ** b, "muestra": f["partidos"], **historial}
 
 
 def calcular_xg_champions(local, visita, promedio_cl):
@@ -915,9 +1105,9 @@ def correr_actualizacion(forzar=False):
 
         agotado = False
         for match in cola:
-            # Un partido cuyos dos equipos ya están en caché no gasta peticiones,
-            # así que se calcula igual aunque quede poco presupuesto. Solo paramos
-            # cuando de verdad se agotó.
+            # Un partido de una liga ya bajada no gasta peticiones, así que se
+            # calcula igual aunque quede poco presupuesto. Solo paramos cuando de
+            # verdad se agotó.
             if presupuesto_agotado():
                 agotado = True
                 break
@@ -929,8 +1119,8 @@ def correr_actualizacion(forzar=False):
             promedio_liga = obtener_promedio_liga(codigo_liga, cache)
             extra = {}
             if codigo_liga in TORNEOS.values():
-                f_local = fuerzas_champions(local_id, True, cache)
-                f_visita = fuerzas_champions(visita_id, False, cache)
+                f_local = fuerzas_champions(local_id, cache)
+                f_visita = fuerzas_champions(visita_id, cache)
                 xg_local, xg_visita = calcular_xg_champions(f_local, f_visita, promedio_liga)
                 muestra_local, muestra_visita = f_local["muestra"], f_visita["muestra"]
                 # de qué liga sale cada equipo, con qué nivel y qué dice su historial
@@ -941,18 +1131,25 @@ def correr_actualizacion(forzar=False):
                                              "defensa_cl": round(f["defensa_cl"], 2)}
                                       for lado, f in (("local", f_local), ("visita", f_visita))}
             else:
-                stats_local = obtener_stats_equipo(local_id, codigo_liga, cache)
-                stats_visita = obtener_stats_equipo(visita_id, codigo_liga, cache)
-                xg_local, xg_visita = calcular_xg_partido(stats_local, stats_visita, promedio_liga)
-                muestra_local, muestra_visita = stats_local["n_local"], stats_visita["n_visita"]
+                fuerzas = obtener_fuerzas_liga(codigo_liga, cache)
+                f_local = fuerza_equipo(fuerzas, local_id)
+                f_visita = fuerza_equipo(fuerzas, visita_id)
+                xg_local, xg_visita = calcular_xg_partido(f_local, f_visita, promedio_liga)
+                muestra_local, muestra_visita = f_local["partidos"], f_visita["partidos"]
             probs = calcular_poisson(xg_local, xg_visita)
             goles = mercados_de_goles(xg_local, xg_visita, promedio_liga)
 
             calculadas[match["id"]] = dict(
                 _ficha_base(match),
                 xg_local=xg_local, xg_visita=xg_visita,
-                # cuántos partidos reales hay detrás de cada lado: si son pocos,
-                # la predicción está dominada por la media de liga y conviene saberlo
+                # la media de goles de la liga con la que se calculó: la base "equipo
+                # medio" del registro en vivo del Worker
+                media_local=round(promedio_liga["avg_local"], 3),
+                media_visita=round(promedio_liga["avg_visita"], 3),
+                version_modelo=VERSION_MODELO,
+                # cuántos partidos de liga (esta temporada y la anterior) hay detrás
+                # de cada equipo: si son pocos, la predicción está dominada por el
+                # prior y conviene saberlo
                 muestra_local=muestra_local,
                 muestra_visita=muestra_visita,
                 calculado=ahora().isoformat(),
@@ -1100,6 +1297,16 @@ def api_validacion():
     return jsonify(validacion.leer_resultado())
 
 
+@app.route("/api/registro")
+def api_registro():
+    """El registro en vivo (lo publicado contra lo que pasó) solo existe en
+    Cloudflare: necesita guardar las predicciones durante meses, y el disco de
+    Render se borra en cada deploy."""
+    return jsonify({"estado": "no_disponible", "partidos": 0,
+                    "nota": "El registro en vivo funciona en la versión de Cloudflare: aquí el disco "
+                            "se borra en cada despliegue."})
+
+
 @app.route("/validar")
 def validar():
     """Lanza el backtest. Mismo token que /actualizar.
@@ -1232,6 +1439,10 @@ def _toca_validar():
     estado = r.get("estado")
     if estado == "sin_ejecutar":
         return True, "nunca se ha ejecutado"
+    # una validación de otro modelo no mide el que se publica (en Render el disco
+    # se borra en cada deploy y casi nunca pasa; en Cloudflare, D1 la guarda)
+    if estado in ("listo", "error") and r.get("version_modelo", 1) != VERSION_MODELO:
+        return True, "modelo nuevo"
     intentos = r.get("intentos", 0)
     if estado == "error" and intentos < MAX_INTENTOS_VALIDACION:
         return True, f"reintento {intentos + 1} de {MAX_INTENTOS_VALIDACION} tras un error"

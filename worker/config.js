@@ -22,24 +22,33 @@ export const TORNEOS = {
 export const COMPETICIONES = { ...LIGAS, ...TORNEOS };
 export const CODIGOS_TORNEO = new Set(Object.values(TORNEOS));
 
-export const FACTOR_LIGA = { PL: 1.28, PD: 1.09, FL1: 1.12, SA: 1.03, BL1: 1.06, PPL: 1.00, DED: 0.83 };
-export const FACTOR_OTRA_LIGA = 0.76;
-export const EXPONENTE_FUERZA_CHAMPIONS = 0.39;
-export const ESCALA_CHAMPIONS = [0.96, 0.97];
-export const K_HISTORIAL_CHAMPIONS = 31;
+export const FACTOR_LIGA = { PL: 1.25, PD: 1.06, FL1: 1.08, SA: 1.01, BL1: 1.06, PPL: 0.86, DED: 0.73 };
+export const FACTOR_OTRA_LIGA = 0.87;
+export const EXPONENTE_FUERZA_CHAMPIONS = 0.82;
+export const ESCALA_CHAMPIONS = [0.90, 0.89];
+export const K_HISTORIAL_CHAMPIONS = 54;
 export const DIAS_VALIDEZ_LIGA_EQUIPO = 30;
 
-export const DIAS_VALIDEZ_LIGA = 7;
+export const HORAS_VALIDEZ_LIGA = 12;
 export const HORAS_VALIDEZ_PREDICCION = 24;
-export const VENTANA_DIAS = 400;
-export const MAX_PARTIDOS_EQUIPO = 20;
-export const PSEUDO_PARTIDOS = 6;
+export const FACTOR_DIARIO = 0.998;
+export const PSEUDO_GOLES_ATAQUE = 6;
+export const PSEUDO_GOLES_DEFENSA = 8;
+export const ATAQUE_RECIEN_LLEGADO = 0.8;
+export const DEFENSA_RECIEN_LLEGADO = { PL: 1.3 };
+export const LIGA_DE_ARRIBA = { ELC: "PL" };
+export const ATAQUE_DESCENDIDO = 1.2;
+export const DEFENSA_DESCENDIDO = 0.85;
+export const VERSION_MODELO = 2;
+export const TOLERANCIA_FUERZAS = 1e-4;
+export const MAX_ITER_FUERZAS = 300;
 export const K_LIGA = 50;
 export const PRIOR_AVG_LOCAL = 1.50;
 export const PRIOR_AVG_VISITA = 1.15;
 export const DIAS_VALIDEZ_PRIOR = 30;
 export const LIMITE_GOLES = 10;
-export const ENCOGER_GOLES = 0.3;
+export const RHO_EMPATES = -0.05;
+export const ENCOGER_GOLES = 0.5;
 export const LIGAS_ANO_NATURAL = new Set(["BSA"]);
 export const DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"];
 export const MAX_INTENTOS_VALIDACION = 3;
@@ -68,7 +77,6 @@ export function ajustes(env = {}) {
   return {
     tz: env.TZ_LOCAL || "America/Lima",
     apiBase: String(env.API_BASE || "https://api.football-data.org/v4").replace(/\/+$/, ""),
-    diasValidezEquipo: num("DIAS_VALIDEZ_EQUIPO", 3),
     maxDiasBusqueda: num("DIAS_ADELANTE", 7),
     horasValidezFixtures: num("HORAS_VALIDEZ_FIXTURES", 2),
     minMinutosActualizacion: num("MIN_MINUTOS_ACTUALIZACION", 25),

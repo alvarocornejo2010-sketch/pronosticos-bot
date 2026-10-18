@@ -18,9 +18,9 @@ export class SinPresupuesto {
 const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Una respuesta "grande" (una temporada entera, ~400 KB, la Championship ~600)
-// cuesta 3-4 ms de CPU solo en leerla: va como mucho una por pasada, al
-// principio, y con ella la pasada ya no lee mucho más.
-const UMBRAL_GRANDE = 64 * 1024;
+// cuesta 3-4 ms de CPU solo en leerla: va como mucho una por pasada, y nunca
+// en la misma que un ajuste de fuerzas (pesada: lo marca obtenerFuerzasLiga).
+export const UMBRAL_GRANDE = 64 * 1024;
 
 export class ClienteAPI {
   constructor({ token, base, presupuesto, pausaMs, maxBytes, ultimaPeticion = 0, fetchFn = null }) {
@@ -34,6 +34,7 @@ export class ClienteAPI {
     this.gastadas = 0;
     this.bytes = 0;
     this.limitada = false;   // la API respondió 429
+    this.pesada = false;     // ya se hizo un ajuste de fuerzas en esta pasada
   }
 
   agotado() {
@@ -46,7 +47,7 @@ export class ClienteAPI {
   async get(ruta, params = {}, { calendario = false, grande = false } = {}) {
     if (this.limitada) throw new SinPresupuesto("la API pidió esperar (429)");
     if (!calendario && this.agotado()) throw new SinPresupuesto("presupuesto de la pasada agotado");
-    if (grande && this.bytes > UMBRAL_GRANDE) throw new SinPresupuesto("una respuesta grande por pasada");
+    if (grande && (this.bytes > UMBRAL_GRANDE || this.pesada)) throw new SinPresupuesto("una tarea pesada por pasada");
 
     const espera = this.ultima + this.pausaMs - Date.now();
     if (espera > 0) await dormir(espera);

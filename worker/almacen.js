@@ -4,18 +4,16 @@
 // El esquema se crea solo la primera vez que una consulta no encuentra su tabla,
 // así una base nueva (o la local de `wrangler dev`) no necesita ningún paso a mano.
 export const ESQUEMA = [
-  // Lo que se baja de football-data.org, por secciones: equipos (sumas de goles
-  // por lado), ligas (media de la temporada en curso), priors (ancla de la
-  // temporada anterior), calendario (cuándo se bajó el de cada competición) y
-  // liga_equipo (de qué liga es cada equipo de la Champions).
+  // Lo que se baja de football-data.org, por secciones: ligas (media de la
+  // temporada en curso), priors (ancla de la temporada anterior), partidos_liga
+  // (los partidos de cada liga de las dos temporadas, compactos), fuerzas (las
+  // de cada equipo, ajustadas con esos partidos), calendario (cuándo se bajó el
+  // de cada competición) y liga_equipo (de qué liga es cada equipo de la Champions).
   `CREATE TABLE IF NOT EXISTS cache (
      seccion TEXT NOT NULL,
      clave   TEXT NOT NULL,
      valor   TEXT NOT NULL,
      PRIMARY KEY (seccion, clave))`,
-  // La última predicción publicada de cada partido. No se borra cuando el
-  // partido empieza: es el registro de lo que dijo la web, para medirlo algún
-  // día contra el resultado real.
   // El calendario de la ventana, un partido por fila, con su ficha (nombres,
   // hora, escudos) ya en JSON. orden desempata los que empiezan a la vez.
   `CREATE TABLE IF NOT EXISTS partidos (
@@ -28,6 +26,9 @@ export const ESQUEMA = [
      visita_id INTEGER NOT NULL,
      base      TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS partidos_por_fecha ON partidos (utc)`,
+  // La última predicción publicada de cada partido. No se borra cuando el
+  // partido empieza: es lo que dijo la web, y el registro en vivo (registro.js)
+  // la mide contra el resultado real.
   // base: los datos del partido (hora, nombres, escudos) con los que se calculó;
   // si el calendario los cambia, la ficha se rehace sin recalcular los números.
   `CREATE TABLE IF NOT EXISTS predicciones (
@@ -38,8 +39,19 @@ export const ESQUEMA = [
      base      TEXT NOT NULL,
      ficha     TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS predicciones_por_fecha ON predicciones (utc)`,
+  // El marcador a los 90 minutos de cada partido con predicción, ya sumado al
+  // registro en vivo (contado = 0 si la predicción no era de antes de empezar).
+  `CREATE TABLE IF NOT EXISTS resultados (
+     id        INTEGER PRIMARY KEY,
+     liga      TEXT NOT NULL,
+     utc       TEXT NOT NULL,
+     gl        INTEGER NOT NULL,
+     gv        INTEGER NOT NULL,
+     contado   INTEGER NOT NULL,
+     liquidado INTEGER NOT NULL)`,
   // Documentos enteros: lo que lee la web (estado), su resumen, la validación,
-  // los pedidos de /actualizar y /validar y las temporadas terminadas.
+  // el registro en vivo, los pedidos de /actualizar y /validar y las temporadas
+  // terminadas.
   `CREATE TABLE IF NOT EXISTS documentos (
      clave       TEXT PRIMARY KEY,
      valor       TEXT NOT NULL,
@@ -171,6 +183,35 @@ export class Almacen {
     return this.db.prepare(
       "INSERT OR REPLACE INTO predicciones (id, utc, liga, calculado, base, ficha) VALUES (?1, ?2, ?3, ?4, ?5, ?6)")
       .bind(ficha.id, ficha.utcDate, ficha.liga_codigo, ficha.calculado, base, json);
+  }
+
+  // ---------- registro en vivo ----------
+  // Las predicciones de esas competiciones entre dos fechas que aún no tienen resultado.
+  async pendientesDeResultado(ligas, desdeUtc, hastaUtc) {
+    const marcas = ligas.map((_, i) => "?" + (i + 3)).join(",");
+    const r = await this.consultar(() => this.db.prepare(
+      `SELECT p.id, p.liga, p.utc, p.ficha
+       FROM predicciones p LEFT JOIN resultados r ON r.id = p.id
+       WHERE p.utc > ?1 AND p.utc < ?2 AND r.id IS NULL AND p.liga IN (${marcas})`)
+      .bind(desdeUtc, hastaUtc, ...ligas).all());
+    return r.results;
+  }
+
+  // Las competiciones con predicciones entre dos fechas sin resultado, con la hora
+  // del primero de esos partidos, de más antigua a más nueva.
+  async ligasConPendientes(desdeUtc, hastaUtc) {
+    const r = await this.consultar(() => this.db.prepare(
+      `SELECT p.liga AS liga, min(p.utc) AS primera
+       FROM predicciones p LEFT JOIN resultados r ON r.id = p.id
+       WHERE p.utc > ?1 AND p.utc < ?2 AND r.id IS NULL
+       GROUP BY p.liga ORDER BY primera`).bind(desdeUtc, hastaUtc).all());
+    return r.results;
+  }
+
+  sentenciaResultado(id, liga, utc, gl, gv, contado, ahora = Date.now()) {
+    return this.db.prepare(
+      `INSERT OR IGNORE INTO resultados (id, liga, utc, gl, gv, contado, liquidado)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`).bind(id, liga, utc, gl, gv, contado ? 1 : 0, ahora);
   }
 
   // ---------- candado ----------
