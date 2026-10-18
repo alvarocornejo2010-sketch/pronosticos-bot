@@ -11,13 +11,14 @@
 import {
   CODIGOS_TORNEO, COMPETICIONES, DIAS_SEMANA, DIAS_VALIDEZ_LIGA_EQUIPO, DIAS_VALIDEZ_PRIOR, FACTOR_LIGA,
   FACTOR_OTRA_LIGA, HORAS_VALIDEZ_LIGA, HORAS_VALIDEZ_PREDICCION, K_LIGA, LIGAS, LIGAS_ANO_NATURAL,
-  PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA,
+  LIGA_DE_ARRIBA, PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA, VERSION_FUERZAS,
 } from "./config.js";
 import {
-  ajustarFuerzas, calcularPoisson, calcularXgChampions, calcularXgPartido, fuerzaEquipo, fuerzasDesdeLiga,
-  mercadosDeGoles, multiplicadoresHistorial, redondear, sumarHistorial,
+  ajustarFuerzas, calcularPoisson, calcularXgChampions, calcularXgPartido, equiposDePartidos, fuerzaEquipo,
+  fuerzasDesdeLiga, mercadosDeGoles, multiplicadoresHistorial, redondear, sumarHistorial,
 } from "./modelo.js";
 import { SinPresupuesto, UMBRAL_GRANDE } from "./api.js";
+import { DIAS_LIQUIDAR, MARGEN_TERMINADO_MS, isoSinMs, liquidar } from "./registro.js";
 import { diaSemana, diasEntre, sumarDias } from "./tiempo.js";
 
 const MS_DIA = 86400000;
@@ -35,6 +36,9 @@ export class Contexto {
     // fallos ya vistos en esta pasada: no se repite la misma petición fallida
     // partido tras partido (app.py la repetía, gastando cuota en lo mismo)
     this.fallos = new Map();
+    // los marcadores de lo ya jugado que se bajaron en esta pasada, por
+    // competición: el registro en vivo los cruza con lo publicado (registro.js)
+    this.resultados = new Map();
   }
 
   ahoraIso() {
@@ -159,9 +163,10 @@ const ligaVigente = (ctx, codigo, e) => Boolean(e && ctx.vigente(e.actualizado, 
   && (CODIGOS_TORNEO.has(codigo) ? "historial" in e
     : listaVigente(ctx, codigo + ":actual", temporadaActual(ctx.reloj, codigo))));
 
-export async function obtenerPromedioLiga(ctx, codigo) {
+// forzar: aunque la de la caché siga valiendo (lo usa el registro en vivo).
+export async function obtenerPromedioLiga(ctx, codigo, forzar = false) {
   const entry = ctx.cache.get("ligas", codigo);
-  if (ligaVigente(ctx, codigo, entry)) return entry;
+  if (!forzar && ligaVigente(ctx, codigo, entry)) return entry;
   const fallo = ctx.fallos.get("liga:" + codigo);
   if (fallo) return fallo;
 
@@ -191,6 +196,12 @@ export async function obtenerPromedioLiga(ctx, codigo) {
       partidos: partidosCompactos(r.cuerpo.matches), actualizado: promedio.actualizado });
   }
   ctx.cache.poner("ligas", codigo, promedio);
+  const goles = new Map();
+  for (const m of r.cuerpo.matches || []) {
+    const [a, b] = goles90(m);
+    if (m.id != null && a != null && b != null) goles.set(m.id, [a, b]);
+  }
+  ctx.resultados.set(codigo, { goles, media: promedio });
   return promedio;
 }
 
@@ -203,8 +214,9 @@ const porFecha = (a, b) => {
 };
 
 // Las de todos los equipos de una liga, con las listas que ya bajaron
-// obtenerPriorLiga y obtenerPromedioLiga: no piden nada, y se recalculan (y
-// guardan en D1) solo cuando cambia alguna de las dos. Como mucho un ajuste por
+// obtenerPriorLiga y obtenerPromedioLiga (y, en una liga con LIGA_DE_ARRIBA, la
+// temporada anterior de la de arriba): no piden nada más, y se recalculan (y
+// guardan en D1) solo cuando cambia alguna lista. Como mucho un ajuste por
 // pasada y nunca en la misma que una respuesta grande (leerla ya gasta casi la
 // mitad de la CPU): lo que no cabe espera al minuto siguiente. En frío, recién
 // creado el isolate, un ajuste de la Championship cuesta unos 4 ms; ya
@@ -214,14 +226,23 @@ async function obtenerFuerzasLiga(ctx, codigo) {
   const season = temporadaActual(ctx.reloj, codigo);
   const previa = listaVigente(ctx, codigo + ":previa", season - 1) || {};
   const actual = listaVigente(ctx, codigo + ":actual", season) || {};
-  const version = `${previa.actualizado ?? null}|${actual.actualizado ?? null}|${promedio.actualizado ?? null}`;
+  let version = `${VERSION_FUERZAS}|${previa.actualizado ?? null}|${actual.actualizado ?? null}`
+    + `|${promedio.actualizado ?? null}`;
+  let arriba = {};
+  if (codigo in LIGA_DE_ARRIBA) {
+    const sup = LIGA_DE_ARRIBA[codigo];
+    await obtenerPriorLiga(ctx, sup);
+    arriba = listaVigente(ctx, sup + ":previa", temporadaActual(ctx.reloj, sup) - 1) || {};
+    version += `|${arriba.actualizado ?? null}`;
+  }
   const guardadas = ctx.cache.get("fuerzas", codigo);
   if (guardadas && guardadas.version === version) return guardadas;
   if (ctx.api.bytes > UMBRAL_GRANDE || ctx.api.pesada) {
     throw new SinPresupuesto("el ajuste de fuerzas va en la pasada siguiente");
   }
   ctx.api.pesada = true;
-  const fuerzas = ajustarFuerzas(previa.partidos || [], actual.partidos || [], promedio);
+  const fuerzas = ajustarFuerzas(previa.partidos || [], actual.partidos || [], promedio, null, codigo,
+    equiposDePartidos(arriba.partidos || []));
   fuerzas.version = version;
   ctx.cache.poner("fuerzas", codigo, fuerzas);
   return fuerzas;
@@ -531,6 +552,9 @@ async function calcularPartido(ctx, f) {
   return {
     ...JSON.parse(f.base),
     xg_local: xgLocal, xg_visita: xgVisita,
+    // la media de goles de la liga con la que se calculó: la base "equipo medio"
+    // del registro en vivo
+    media_local: redondear(promedioLiga.avg_local, 3), media_visita: redondear(promedioLiga.avg_visita, 3),
     // cuántos partidos de liga (esta temporada y la anterior) hay detrás de cada equipo
     muestra_local: muestraLocal,
     muestra_visita: muestraVisita,
@@ -540,6 +564,33 @@ async function calcularPartido(ctx, f) {
     ...mercadosDeGoles(xgLocal, xgVisita, promedioLiga),
     ...extra,
   };
+}
+
+// ==========================================
+// REGISTRO EN VIVO
+// ==========================================
+// Lo jugado de cada competición se baja cada HORAS_VALIDEZ_LIGA, pero solo
+// cuando lo pide el cálculo de uno de sus partidos. Para la última jornada de
+// una temporada, o la de antes de un parón, ya no lo pide nadie, y sus
+// predicciones no se medirían nunca. Así que, con la ventana al día, se mira qué
+// competiciones tienen partidos ya terminados sin resultado y una lista de lo
+// jugado de antes de que acabaran, y se vuelve a bajar la de una (es una
+// respuesta grande). Unas pocas peticiones a la semana.
+async function refrescarParaRegistro(ctx, almacen) {
+  const ahora = Date.now();
+  const ligas = await almacen.ligasConPendientes(isoSinMs(ahora - DIAS_LIQUIDAR * MS_DIA),
+    isoSinMs(ahora - MARGEN_TERMINADO_MS));
+  for (const { liga, primera } of ligas) {
+    if (ctx.resultados.has(liga) || !(liga in ORDEN_COMPETICION)) continue;
+    const e = ctx.cache.get("ligas", liga);
+    if (e && e.actualizado && Date.parse(e.actualizado) >= Date.parse(primera) + MARGEN_TERMINADO_MS) continue;
+    try {
+      await obtenerPromedioLiga(ctx, liga, true);
+    } catch (err) {
+      if (!(err instanceof SinPresupuesto)) throw err;
+    }
+    return;
+  }
 }
 
 // ==========================================
@@ -553,9 +604,13 @@ export async function pasada(ctx, almacen, forzar = false) {
   const debug = construirDebug(ctx, calendarios, filas);
 
   if (!filas.length) {
+    // sin partidos por jugar (un parón, el final de la temporada) aún puede
+    // haber partidos jugados por medir
+    await refrescarParaRegistro(ctx, almacen);
+    const registro = await liquidar(ctx, almacen);
     const resumen = { estado: "sin_partidos", total: 0, pendientes: 0, requests_gastadas: ctx.api.gastadas,
       ultima_actualizacion: ctx.ahoraIso(), plataforma: "cloudflare" };
-    await almacen.escribir([
+    await almacen.escribir([...almacen.sentenciasCache(ctx.cache), ...registro,
       almacen.sentenciaDoc("estado", { ...resumen, dias: [], debug_busqueda: debug }),
       almacen.sentenciaDoc("resumen", resumen),
     ]);
@@ -594,7 +649,7 @@ export async function pasada(ctx, almacen, forzar = false) {
     // rellenando los partidos al ritmo de la API, no todos de golpe al final
     if (ctx.api.gastadas > gastadasAntes && Date.now() - ultimoProgreso >= MS_ENTRE_PROGRESOS) {
       e = construirEstado(ctx, filas, "actualizando", debug);
-      await almacen.escribir([...porGuardar, ...almacen.sentenciasCache(ctx.cache),
+      await almacen.escribir([...porGuardar, ...almacen.sentenciasCache(ctx.cache), ...await liquidar(ctx, almacen),
         almacen.sentenciaDoc("estado", e.texto), almacen.sentenciaDoc("resumen", e.resumen)]);
       porGuardar = [];
       ultimoProgreso = Date.now();
@@ -602,8 +657,9 @@ export async function pasada(ctx, almacen, forzar = false) {
   }
 
   const final = agotado ? "actualizando" : "listo";
+  if (!agotado) await refrescarParaRegistro(ctx, almacen);
   e = construirEstado(ctx, filas, final, debug);
-  await almacen.escribir([...porGuardar, ...almacen.sentenciasCache(ctx.cache),
+  await almacen.escribir([...porGuardar, ...almacen.sentenciasCache(ctx.cache), ...await liquidar(ctx, almacen),
     almacen.sentenciaDoc("estado", e.texto), almacen.sentenciaDoc("resumen", e.resumen)]);
   return final;
 }

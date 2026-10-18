@@ -60,7 +60,9 @@ const out = {
     DIAS_VALIDEZ_LIGA_EQUIPO: c.DIAS_VALIDEZ_LIGA_EQUIPO, HORAS_VALIDEZ_LIGA: c.HORAS_VALIDEZ_LIGA,
     HORAS_VALIDEZ_PREDICCION: c.HORAS_VALIDEZ_PREDICCION, FACTOR_DIARIO: c.FACTOR_DIARIO,
     PSEUDO_GOLES_ATAQUE: c.PSEUDO_GOLES_ATAQUE, PSEUDO_GOLES_DEFENSA: c.PSEUDO_GOLES_DEFENSA,
-    ATAQUE_RECIEN_LLEGADO: c.ATAQUE_RECIEN_LLEGADO, TOLERANCIA_FUERZAS: c.TOLERANCIA_FUERZAS,
+    ATAQUE_RECIEN_LLEGADO: c.ATAQUE_RECIEN_LLEGADO, DEFENSA_RECIEN_LLEGADO: c.DEFENSA_RECIEN_LLEGADO,
+    LIGA_DE_ARRIBA: c.LIGA_DE_ARRIBA, ATAQUE_DESCENDIDO: c.ATAQUE_DESCENDIDO,
+    DEFENSA_DESCENDIDO: c.DEFENSA_DESCENDIDO, VERSION_FUERZAS: c.VERSION_FUERZAS, TOLERANCIA_FUERZAS: c.TOLERANCIA_FUERZAS,
     MAX_ITER_FUERZAS: c.MAX_ITER_FUERZAS, K_LIGA: c.K_LIGA,
     PRIOR_AVG_LOCAL: c.PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA: c.PRIOR_AVG_VISITA,
     DIAS_VALIDEZ_PRIOR: c.DIAS_VALIDEZ_PRIOR, LIMITE_GOLES: c.LIMITE_GOLES, RHO_EMPATES: c.RHO_EMPATES,
@@ -69,9 +71,9 @@ const out = {
     HORAS_VALIDEZ_FIXTURES: aj.horasValidezFixtures, MIN_MINUTOS_ACTUALIZACION: aj.minMinutosActualizacion,
     TZ: aj.tz,
   },
-  fuerzas: casos.fuerzas.map(({ previa, actual, media, inicio, fuera }) => {
-    const fz = m.ajustarFuerzas(previa, actual, media, inicio);
-    return { ...fz, fuera: m.fuerzaEquipo(fz, fuera) };
+  fuerzas: casos.fuerzas.map(({ previa, actual, media, inicio, codigo, de_arriba, fuera }) => {
+    const fz = m.ajustarFuerzas(previa, actual, media, inicio, codigo, de_arriba);
+    return { ...fz, fuera: fuera.map((t) => m.fuerzaEquipo(fz, t)), equipos_arriba: m.equiposDePartidos(previa) };
   }),
   compactos: casos.compactos.map((matches) => a.partidosCompactos(matches)),
   partidos: casos.partidos.map(({ local, visita, prom }) => {
@@ -92,14 +94,15 @@ const out = {
       return x.liga === null
         ? { liga: null, nombre_liga: null, factor: c.FACTOR_OTRA_LIGA, ataque: 1.0, defensa: 1.0, muestra: 0, ...historial }
         : { liga: x.liga, nombre_liga: Object.keys(c.LIGAS).find((k) => c.LIGAS[k] === x.liga),
-            factor, ...m.fuerzasDesdeLiga(m.fuerzaEquipo(m.ajustarFuerzas(x.previa, x.actual, x.prom), x.id)),
+            factor, ...m.fuerzasDesdeLiga(m.fuerzaEquipo(m.ajustarFuerzas(x.previa, x.actual, x.prom, null, x.liga, []),
+              x.id)),
             ...historial };
     };
     const fl = f(local), fv = f(visita);
     return { local: fl, visita: fv, xg: m.calcularXgChampions(fl, fv, cl) };
   }),
-  validacion: casos.validacion.map(({ codigo, nombre, season, previa, ultima }) =>
-    v.validarLiga(codigo, nombre, season, previa, ultima)),
+  validacion: casos.validacion.map(({ codigo, nombre, season, previa, ultima, arriba }) =>
+    v.validarLiga(codigo, nombre, season, previa, ultima, arriba ? arriba.flatMap((x) => [x.local, x.visita]) : [])),
   redondeo: casos.redondeo.map(([x, n]) => m.redondear(x, n)),
 };
 process.stdout.write(JSON.stringify(out));
@@ -161,8 +164,12 @@ def _casos(rnd):
         inicio = None
         if rnd.random() < 0.3:   # arranque con unas fuerzas anteriores, como en la validación
             inicio = {str(t): [rnd.uniform(0.5, 1.5), rnd.uniform(0.5, 1.5), 3] for t in equipos[:5]}
+        # la liga (la Premier tiene su propio ascendido) y los de la liga de arriba:
+        # un recién llegado, uno de la previa (no cuenta) y uno sin partidos
+        codigo = rnd.choice((None, "PL", "ELC", "PD"))
+        de_arriba = rnd.sample([equipos[-1], equipos[0], 888888, 888888], rnd.choice((0, 2, 4)))
         fuerzas.append({"previa": previa, "actual": actual, "media": _prom(rnd), "inicio": inicio,
-                        "fuera": 999999})
+                        "codigo": codigo, "de_arriba": de_arriba, "fuera": [999999, 888888]})
     # respuestas de la API: desordenadas, sin resultado, con prórroga y penaltis, sin equipo
     compactos = []
     for k in range(40):
@@ -211,6 +218,17 @@ def _casos(rnd):
         validaciones.append({"codigo": f"T{i}", "nombre": f"Prueba {i}", "season": 2024,
                              "previa": _temporada(rnd, equipos, fuerza, jornadas_previa),
                              "ultima": _temporada(rnd, equipos, fuerza, jornadas_ultima)})
+    # una Championship: tres equipos cambian, dos bajan de la Premier (que juegan
+    # su temporada anterior) y uno sube; y una Premier, con su propio ascendido
+    for codigo, i in (("ELC", 5), ("PL", 6)):
+        viejos = list(range(100 * i, 100 * i + 24))
+        nuevos = viejos[3:] + [100 * i + 50, 100 * i + 51, 100 * i + 52]
+        arriba = list(range(100 * i + 50, 100 * i + 52)) + list(range(100 * i + 60, 100 * i + 78))
+        fuerza = {e: rnd.uniform(0.6, 1.6) for e in viejos + nuevos + arriba}
+        validaciones.append({"codigo": codigo, "nombre": f"Prueba {codigo}", "season": 2024,
+                             "previa": _temporada(rnd, viejos, fuerza, 46),
+                             "ultima": _temporada(rnd, nuevos, fuerza, 46),
+                             "arriba": _temporada(rnd, arriba, fuerza, 38) if codigo == "ELC" else None})
     # redondeo: empates exactos (0.125, 2.675...), negativos y valores corrientes
     redondeo = [[x, n] for x in (0.125, 0.375, 2.675, 1.005, 12.345, 45.675, -0.125, 0.5, 1.5, 2.5)
                 for n in (0, 1, 2)] + [[rnd.uniform(0, 100), rnd.choice((1, 2, 3, 4))] for _ in range(3000)]
@@ -221,8 +239,10 @@ def _casos(rnd):
 def _python(casos):
     fuerzas = []
     for c in casos["fuerzas"]:
-        fz = app.ajustar_fuerzas(c["previa"], c["actual"], c["media"], c["inicio"])
-        fuerzas.append(dict(fz, fuera=app.fuerza_equipo(fz, c["fuera"])))
+        fz = app.ajustar_fuerzas(c["previa"], c["actual"], c["media"], c["inicio"],
+                                 codigo_liga=c["codigo"], de_arriba=c["de_arriba"])
+        fuerzas.append(dict(fz, fuera=[app.fuerza_equipo(fz, t) for t in c["fuera"]],
+                            equipos_arriba=app.equipos_de_partidos(c["previa"])))
     compactos = [app.partidos_compactos(ms) for ms in casos["compactos"]]
     partidos = []
     for c in casos["partidos"]:
@@ -252,6 +272,13 @@ def _python(casos):
                 if x["previa"]:
                     cache["partidos_liga"][x["liga"] + ":previa"] = {"temporada": season - 1, "partidos": x["previa"],
                                                                     "actualizado": hoy}
+                if x["liga"] in app.LIGA_DE_ARRIBA:
+                    # la temporada anterior de la liga de arriba, ya bajada (y vacía:
+                    # ninguno de sus equipos juega aquí)
+                    sup = app.LIGA_DE_ARRIBA[x["liga"]]
+                    s_sup = app.temporada_actual(sup) - 1
+                    cache["priors"][sup] = {"avg_local": 1.5, "avg_visita": 1.2, "temporada": s_sup, "actualizado": hoy}
+                    cache["partidos_liga"][sup + ":previa"] = {"temporada": s_sup, "partidos": [], "actualizado": hoy}
             cache["ligas"]["CL"] = dict(c["cl"], historial={str(tid): x["hist_actual"]}, actualizado=hoy)
             if c["previa"]:
                 cache["priors"]["CL"] = dict(c["previa"], historial={str(tid): x["hist_previa"]}, actualizado=hoy)
@@ -264,8 +291,10 @@ def _python(casos):
     original = validacion._cargar_temporada
     try:
         for c in casos["validacion"]:
-            temporadas = {c["season"] - 1: c["previa"], c["season"]: c["ultima"]}
-            validacion._cargar_temporada = lambda codigo, season: temporadas[season]
+            temporadas = {(c["codigo"], c["season"] - 1): c["previa"], (c["codigo"], c["season"]): c["ultima"]}
+            if c.get("arriba"):
+                temporadas[(app.LIGA_DE_ARRIBA[c["codigo"]], c["season"] - 1)] = c["arriba"]
+            validacion._cargar_temporada = lambda codigo, season: temporadas.get((codigo, season), [])
             vals.append(validacion.validar_liga(c["codigo"], c["nombre"], c["season"]))
     finally:
         validacion._cargar_temporada = original
@@ -273,7 +302,8 @@ def _python(casos):
     constantes = {k: getattr(app, k) for k in (
         "LIGAS", "TORNEOS", "FACTOR_LIGA", "FACTOR_OTRA_LIGA", "EXPONENTE_FUERZA_CHAMPIONS", "K_HISTORIAL_CHAMPIONS",
         "DIAS_VALIDEZ_LIGA_EQUIPO", "HORAS_VALIDEZ_LIGA", "HORAS_VALIDEZ_PREDICCION", "FACTOR_DIARIO",
-        "PSEUDO_GOLES_ATAQUE", "PSEUDO_GOLES_DEFENSA", "ATAQUE_RECIEN_LLEGADO", "TOLERANCIA_FUERZAS",
+        "PSEUDO_GOLES_ATAQUE", "PSEUDO_GOLES_DEFENSA", "ATAQUE_RECIEN_LLEGADO", "DEFENSA_RECIEN_LLEGADO",
+        "LIGA_DE_ARRIBA", "ATAQUE_DESCENDIDO", "DEFENSA_DESCENDIDO", "VERSION_FUERZAS", "TOLERANCIA_FUERZAS",
         "MAX_ITER_FUERZAS", "K_LIGA", "PRIOR_AVG_LOCAL", "PRIOR_AVG_VISITA", "DIAS_VALIDEZ_PRIOR",
         "LIMITE_GOLES", "RHO_EMPATES", "ENCOGER_GOLES", "DIAS_SEMANA", "MAX_DIAS_BUSQUEDA",
         "HORAS_VALIDEZ_FIXTURES")}

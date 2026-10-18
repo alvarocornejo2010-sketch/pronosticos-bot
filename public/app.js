@@ -25,10 +25,12 @@ const tip = $("tip");
 
 let datos = null;        // último /api/estado
 let validacion = null;   // /api/validacion: puede no haberse ejecutado nunca
+let registro = null;     // /api/registro: lo publicado contra lo que pasó (solo en Cloudflare)
 let infoLigas = null;    // /api/ligas: medias de goles que usa el modelo
 let rutaPintada = null;
 let orden = "hora";
 let mercadoFiab = "1x2";   // qué mercado enseña el panel de fiabilidad
+let fuenteFiab = "validacion";   // y de dónde: la temporada pasada o el registro en vivo
 let busqueda = "";
 const abiertos = new Set();
 const escudosRotos = new Set();
@@ -600,11 +602,15 @@ const MERCADOS_FIAB = {
   ambos:  { etiqueta: "Ambos", nombre: "ambos marcan" },
 };
 
-/** Skill y acierto de una liga en el mercado elegido, o null si no se midió. */
-function medidaFiab(c, mercado) {
-  const det = (validacion.ligas || {})[c] || {};
+const validacionLista = () => !!(validacion && validacion.estado === "listo");
+const registroListo = () => !!(registro && registro.estado === "listo" && registro.partidos > 0);
+
+/** Skill y acierto de una liga en el mercado elegido, o null si no se midió.
+ *  fuente es la validación o el registro en vivo: los dos tienen la misma forma. */
+function medidaFiab(fuente, c, mercado) {
+  const det = (fuente.ligas || {})[c] || {};
   if (mercado === "1x2") {
-    const r = (validacion.resumen || {})[c];
+    const r = (fuente.resumen || {})[c];
     if (!r) return null;
     return { skill: r.skill_score, acierto: det.modelo ? det.modelo.acierto : undefined,
              tip: (det.liga || c) + ", 1X2" + (det.partidos ? "\n" + det.partidos + " partidos" : "") };
@@ -617,18 +623,28 @@ function medidaFiab(c, mercado) {
 }
 
 function htmlFiabilidad() {
-  if (!validacion || validacion.estado !== "listo") {
+  const hayVal = validacionLista(), hayReg = registroListo();
+  if (!hayVal && !hayReg) {
     return '<section class="modulo m-fiab"><h2>Fiabilidad medida</h2><p class="placeholder">'
       + 'Aún no se ha ejecutado la validación del modelo. Se lanza sola cuando el calendario está completo.</p></section>';
   }
-  const res = validacion.resumen || {};
+  const enVivo = hayReg && (fuenteFiab === "registro" || !hayVal);
+  const fuente = enVivo ? registro : validacion;
+  const res = fuente.resumen || {};
   const codigos = ORDEN_LIGAS.filter(c => res[c]).concat(Object.keys(res).filter(c => ORDEN_LIGAS.indexOf(c) < 0));
   if (!codigos.length) return "";
-  const selector = '<div class="segmentos" role="group" aria-label="Mercado medido">'
-    + Object.keys(MERCADOS_FIAB).map(k => '<button data-mercado="' + k + '" aria-pressed="' + (mercadoFiab === k) + '">'
-      + esc(MERCADOS_FIAB[k].etiqueta) + '</button>').join("") + '</div>';
-  const medidas = codigos.map(c => ({ c: c, m: medidaFiab(c, mercadoFiab) })).filter(x => x.m);
-  const cab = '<section class="modulo m-fiab"><h2>Fiabilidad medida <span class="meta">temporada ' + esc(validacion.temporada || "") + '</span></h2>' + selector;
+  const segmentos = (aria, opciones) => '<div class="segmentos" role="group" aria-label="' + aria + '">'
+    + opciones.map(o => '<button ' + o.attr + ' aria-pressed="' + o.activo + '">' + esc(o.texto) + '</button>').join("") + '</div>';
+  const selFuente = hayVal && hayReg ? segmentos("Qué se mide", [
+      { attr: 'data-fuente="validacion"', activo: !enVivo, texto: "Temporada " + (validacion.temporada || "") },
+      { attr: 'data-fuente="registro"', activo: enVivo, texto: "En vivo" }]) : "";
+  const selector = segmentos("Mercado medido", Object.keys(MERCADOS_FIAB).map(k =>
+    ({ attr: 'data-mercado="' + k + '"', activo: mercadoFiab === k, texto: MERCADOS_FIAB[k].etiqueta })));
+  const medidas = codigos.map(c => ({ c: c, m: medidaFiab(fuente, c, mercadoFiab) })).filter(x => x.m);
+  const meta = enVivo ? registro.partidos + (registro.partidos === 1 ? " partido" : " partidos")
+    : "temporada " + (validacion.temporada || "");
+  const cab = '<section class="modulo m-fiab"><h2>Fiabilidad medida <span class="meta">' + esc(meta) + '</span></h2>'
+    + selFuente + selector;
   if (!medidas.length) {
     return cab + '<p class="placeholder">Esta validación no midió ' + esc(MERCADOS_FIAB[mercadoFiab].nombre)
       + '. Se mide en la próxima validación.</p></section>';
@@ -648,10 +664,45 @@ function htmlFiabilidad() {
           + '<span class="val">' + (m.skill > 0 ? "+" : "") + m.skill + '</span>'
           + '<span class="acierto">' + acierto + '</span></div>';
       }).join("")
-    + '<p class="nota">' + (mercadoFiab === "1x2"
+    + '<p class="nota">' + (enVivo
+        ? 'Lo que publicó esta web antes de cada partido, contra el resultado real'
+          + (registro.desde_fecha ? ', desde el ' + esc(fechaLarga(registro.desde_fecha)) : "")
+          + '. Skill frente a la base "equipo medio". Con pocos partidos por liga es sobre todo ruido: la temporada pasada mide cientos.'
+        : mercadoFiab === "1x2"
         ? 'Skill score: cuánto Brier le quita el modelo a la base "equipo medio". 0 es no aportar nada.'
         : 'Skill score frente a la base "equipo medio" en este mercado. Con solo resultados, los mercados de goles'
           + ' apenas se separan de la media de la liga: un skill cercano a 0 es lo esperable.') + '</p></section>';
+}
+
+/** Los últimos partidos terminados del registro en vivo: qué le dio la web,
+ *  antes de empezar, a lo que pasó, y si acertó el favorito. */
+function htmlResultados() {
+  if (!registroListo() || !(registro.ultimos || []).length) return "";
+  const lista = registro.ultimos.slice(0, 8);
+  let aciertos = 0;
+  const filas = lista.map(p => {
+    const r = reparto(p);
+    const paso = p.gl > p.gv ? "1" : p.gl === p.gv ? "X" : "2";
+    const n = paso === "1" ? r.l : paso === "2" ? r.v : r.x;
+    const fav = veredictoDe(p).signo;
+    const acerto = fav === paso;
+    if (acerto) aciertos++;
+    const quien = fav === "1" ? cortoDe(p, "local") : fav === "2" ? cortoDe(p, "visita") : "el empate";
+    const marcador = cortoDe(p, "local") + " " + p.gl + "–" + p.gv + " " + cortoDe(p, "visita");
+    // el veredicto delante: si algo se corta, que sea el nombre
+    const detalle = (acerto ? "Acertó" : "Falló") + " el favorito: " + quien;
+    const etiqueta = marcador + ". Le dio un " + n + " % a lo que pasó. " + detalle + ". " + p.liga + ", " + fechaCorta(p.fecha);
+    // el marcador no se corta nunca: cada nombre se encoge por su cuenta
+    return '<div class="res" role="listitem" aria-label="' + esc(etiqueta) + '">'
+      + '<span class="casilla" style="' + estiloTramo(n) + '" aria-hidden="true">' + n + '</span>'
+      + '<span class="txt" aria-hidden="true"><span class="quien marcador"><span class="eq">' + esc(cortoDe(p, "local")) + '</span>'
+      + '<b>' + p.gl + '–' + p.gv + '</b><span class="eq">' + esc(cortoDe(p, "visita")) + '</span></span>'
+      + '<span class="contra">' + esc(detalle) + '</span></span>'
+      + '<span class="cuando" aria-hidden="true">' + htmlInsignia(p.liga_codigo) + '<span>' + esc(fechaCorta(p.fecha)) + '</span></span></div>';
+  }).join("");
+  return '<section class="modulo m-resultados"><h2>Resultados <span class="meta">acertó el favorito en ' + aciertos + ' de ' + lista.length + '</span></h2>'
+    + '<div class="claros" role="list">' + filas + '</div>'
+    + '<p class="nota">La casilla es lo que la web le dio, antes del partido, a lo que pasó. Liga a liga, en Fiabilidad medida, En vivo.</p></section>';
 }
 
 const ICONO_TODAS = '<svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true">'
@@ -738,7 +789,7 @@ function htmlHistograma(todos) {
 }
 
 function pintarPanorama(todos, ruta) {
-  const html = htmlClaros(todos) + htmlHistograma(todos);
+  const html = htmlClaros(todos) + htmlHistograma(todos) + htmlResultados();
   if (panePan.dataset.huella === html) return;
   panePan.dataset.huella = html;
   panePan.innerHTML = html;
@@ -944,6 +995,8 @@ document.addEventListener("click", (e) => {
 
   const merc = t.closest("[data-mercado]");
   if (merc) { mercadoFiab = merc.dataset.mercado; render(); return; }
+  const fuente = t.closest("[data-fuente]");
+  if (fuente) { fuenteFiab = fuente.dataset.fuente; render(); return; }
 
   if (t.closest("#limpiar")) { limpiarBusqueda(); rutaPintada = null; render(); inputBuscar.focus(); return; }
 
@@ -1014,8 +1067,8 @@ async function refrescar() {
   try {
     datos = await (await fetch("/api/estado")).json();
     periodo = (datos.estado === "actualizando") ? 4000 : 30000;
-    // las medias de liga solo cambian cuando termina una pasada
-    if (estadoPrevio === "actualizando" && datos.estado !== "actualizando") cargarLigas();
+    // las medias de liga y el registro en vivo solo cambian cuando termina una pasada
+    if (estadoPrevio === "actualizando" && datos.estado !== "actualizando") { cargarLigas(); cargarRegistro(); }
     estadoPrevio = datos.estado;
     render();
   } catch (e) {
@@ -1044,7 +1097,22 @@ async function cargarValidacion() {
   } catch (e) { /* sin fiabilidad medida: el panel lo dice */ }
 }
 
+// El registro en vivo cambia cuando una pasada baja resultados: unas pocas veces al
+// día. En Render no existe (responde no_disponible) y los paneles no lo enseñan.
+async function cargarRegistro() {
+  try {
+    const r = await fetch("/api/registro");
+    if (!r.ok) return;
+    registro = await r.json();
+    paneLigas.dataset.huella = "";
+    panePan.dataset.huella = "";
+    if (datos) render();
+  } catch (e) { /* sin registro: los paneles no lo enseñan */ }
+}
+
 async function bucle() { await refrescar(); setTimeout(bucle, periodo); }
 bucle();
 cargarLigas();
 cargarValidacion();
+cargarRegistro();
+setInterval(cargarRegistro, 15 * 60000);

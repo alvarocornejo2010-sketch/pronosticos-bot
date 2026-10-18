@@ -8,9 +8,9 @@
 // miles de casos: si cambias algo aquí, cámbialo también en app.py.
 
 import {
-  ATAQUE_RECIEN_LLEGADO, ENCOGER_GOLES, ESCALA_CHAMPIONS, EXPONENTE_FUERZA_CHAMPIONS, FACTOR_DIARIO,
-  K_HISTORIAL_CHAMPIONS, LIMITE_GOLES, MAX_ITER_FUERZAS, PSEUDO_GOLES_ATAQUE, PSEUDO_GOLES_DEFENSA,
-  RHO_EMPATES, TOLERANCIA_FUERZAS,
+  ATAQUE_DESCENDIDO, ATAQUE_RECIEN_LLEGADO, DEFENSA_DESCENDIDO, DEFENSA_RECIEN_LLEGADO, ENCOGER_GOLES,
+  ESCALA_CHAMPIONS, EXPONENTE_FUERZA_CHAMPIONS, FACTOR_DIARIO, K_HISTORIAL_CHAMPIONS, LIMITE_GOLES,
+  MAX_ITER_FUERZAS, PSEUDO_GOLES_ATAQUE, PSEUDO_GOLES_DEFENSA, RHO_EMPATES, TOLERANCIA_FUERZAS,
 } from "./config.js";
 
 // ------------------------------------------
@@ -119,13 +119,17 @@ const pc = (v) => redondear(v * 100, 2);
 // ajustar_fuerzas de app.py: ataque y defensa de todos los equipos de una liga
 // con sus partidos de la temporada anterior y lo jugado de esta
 // ([[día, local, visita, gl, gv], ...]), cada uno medido frente al rival que
-// tuvo, pesado por su antigüedad y encogido hacia el equipo medio. Mismas
-// operaciones y en el mismo orden que en Python (el peso de cada día se
-// multiplica día a día, no con exp, para que salga el mismo double).
-export function ajustarFuerzas(previa, actual, media, inicio = null) {
+// tuvo, pesado por su antigüedad y encogido hacia el equipo medio (o, el que no
+// estaba la temporada anterior, hacia priorRecienLlegado). Mismas operaciones
+// y en el mismo orden que en Python (el peso de cada día se multiplica día a
+// día, no con exp, para que salga el mismo double).
+export function ajustarFuerzas(previa, actual, media, inicio = null, codigo = null, deArriba = []) {
   const todos = previa.concat(actual);
   const conPrevia = previa.length > 0;
-  if (!todos.length) return { equipos: {}, con_previa: conPrevia, dia: null, iteraciones: 0 };
+  const arribaLista = [...new Set(deArriba)];
+  if (!todos.length) {
+    return { equipos: {}, con_previa: conPrevia, codigo, de_arriba: arribaLista, dia: null, iteraciones: 0 };
+  }
   // bucles con índices y sin desestructurar: en un isolate recién creado el
   // código aún no está compilado, y así cuesta mucho menos
   const n = todos.length;
@@ -144,13 +148,18 @@ export function ajustarFuerzas(previa, actual, media, inicio = null) {
   const T = ids.length;
   const previos = new Set();
   for (let r = 0; r < previa.length; r++) { previos.add(previa[r][1]); previos.add(previa[r][2]); }
-  const a0 = ids.map((t) => (conPrevia && !previos.has(t) ? ATAQUE_RECIEN_LLEGADO : 1.0));
+  const arriba = new Set(arribaLista);
+  const a0 = new Array(T), d0 = new Array(T);
+  for (let x = 0; x < T; x++) {
+    const p = conPrevia && !previos.has(ids[x]) ? priorRecienLlegado(codigo, ids[x], arriba) : [1.0, 1.0];
+    a0[x] = p[0]; d0[x] = p[1];
+  }
   const pesos = [1.0];
   for (let k = 0; k < ref - primero; k++) pesos.push(pesos[k] * FACTOR_DIARIO);
   const ml = media.avg_local, mv = media.avg_visita;
   const kAt = PSEUDO_GOLES_ATAQUE, kDe = PSEUDO_GOLES_DEFENSA;
   const numAt = new Float64Array(T), numDe = new Float64Array(T), jugados = new Array(T).fill(0);
-  for (let x = 0; x < T; x++) { numAt[x] = kAt * a0[x]; numDe[x] = kDe * 1.0; }
+  for (let x = 0; x < T; x++) { numAt[x] = kAt * a0[x]; numDe[x] = kDe * d0[x]; }
   // peso total de cada cruce (i en casa contra j, en cruce[i*T + j]): las
   // vueltas del ajuste cuestan T² y no lo que tenga la lista
   const cruce = new Float64Array(T * T);
@@ -175,7 +184,7 @@ export function ajustarFuerzas(previa, actual, media, inicio = null) {
       pesaAt[i * T + j] = mv * cruce[i * T + j] + ml * cruce[j * T + i];
     }
   }
-  let ataque = Float64Array.from(a0), defensa = new Float64Array(T).fill(1.0);
+  let ataque = Float64Array.from(a0), defensa = Float64Array.from(d0);
   if (inicio) {
     ids.forEach((t, x) => {
       const e = inicio[String(t)];
@@ -206,15 +215,33 @@ export function ajustarFuerzas(previa, actual, media, inicio = null) {
   }
   const equipos = {};
   ids.forEach((t, x) => { equipos[String(t)] = [ataque[x], defensa[x], jugados[x]]; });
-  return { equipos, con_previa: conPrevia, dia: ref, iteraciones: it };
+  return { equipos, con_previa: conPrevia, codigo, de_arriba: arribaLista, dia: ref, iteraciones: it };
+}
+
+// [ataque, defensa] de los que parte un equipo que no estaba en la liga la
+// temporada anterior: el de un descendido si viene de la liga de arriba
+// (deArriba, ver LIGA_DE_ARRIBA) y si no, el de un ascendido de esa liga.
+export function priorRecienLlegado(codigo, teamId, deArriba) {
+  if (deArriba.has(teamId)) return [ATAQUE_DESCENDIDO, DEFENSA_DESCENDIDO];
+  return [ATAQUE_RECIEN_LLEGADO, DEFENSA_RECIEN_LLEGADO[codigo] ?? 1.0];
 }
 
 // Ataque, defensa y partidos de un equipo; uno sin partidos todavía (un
-// ascendido antes de debutar) parte de la fuerza de un recién llegado.
+// ascendido o un descendido antes de debutar) parte de la fuerza de un recién
+// llegado.
 export function fuerzaEquipo(fuerzas, teamId) {
   const e = fuerzas.equipos[String(teamId)];
   if (e) return { ataque: e[0], defensa: e[1], partidos: e[2] };
-  return { ataque: fuerzas.con_previa ? ATAQUE_RECIEN_LLEGADO : 1.0, defensa: 1.0, partidos: 0 };
+  if (!fuerzas.con_previa) return { ataque: 1.0, defensa: 1.0, partidos: 0 };
+  const [a, d] = priorRecienLlegado(fuerzas.codigo ?? null, teamId, new Set(fuerzas.de_arriba || []));
+  return { ataque: a, defensa: d, partidos: 0 };
+}
+
+// Los equipos de una lista de partidos compactos, en orden de aparición.
+export function equiposDePartidos(partidos) {
+  const vistos = new Set();
+  for (const p of partidos) { vistos.add(p[1]); vistos.add(p[2]); }
+  return [...vistos];
 }
 
 // ------------------------------------------

@@ -21,6 +21,9 @@ Uso:
                                       # por liga y por temporada (~3 min)
     python afinar_liga.py afinar      # busca los parámetros en el grupo de
                                       # ajuste y los juzga en el de prueba
+    python afinar_liga.py descensos   # de dónde parten los recién llegados: los
+                                      # que bajan de la Premier a la Championship
+                                      # y los que suben a cada liga
 
 La evaluación usa las funciones de app.py (ajustar_fuerzas, calcular_poisson,
 mercados_de_goles) y el recorrido de validacion.py, no una copia. La búsqueda
@@ -182,6 +185,23 @@ def casos():
     return out
 
 
+def de_arriba(codigo, season):
+    """Los que llegan a la liga desde la de arriba (app.LIGA_DE_ARRIBA: de la
+    Premier a la Championship), con el nombre que llevan en esta liga: los
+    recién llegados que casan con un equipo de la temporada anterior de la de
+    arriba (cada liga casa sus nombres por su cuenta, ver mapa_nombres). La app
+    pasa la lista entera de la de arriba; para el ajuste es lo mismo."""
+    sup = app.LIGA_DE_ARRIBA.get(codigo)
+    previa, ultima = cargar(codigo, season - 1), cargar(codigo, season)
+    arriba = cargar(sup, season - 1) if sup else None
+    if not arriba or not previa or not ultima:
+        return []
+    nombres = {m["local"] for m in arriba} | {m["visita"] for m in arriba}
+    antes = {m["local"] for m in previa} | {m["visita"] for m in previa}
+    nuevos = sorted(({m["local"] for m in ultima} | {m["visita"] for m in ultima}) - antes)
+    return [n for n in nuevos if max(_similitud(n, x) for x in nombres) >= 1.0]
+
+
 def _ancla(previa):
     n = len(previa)
     return {"avg_local": sum(m["gl"] for m in previa) / n, "avg_visita": sum(m["gv"] for m in previa) / n}
@@ -195,7 +215,7 @@ def recorrer_app(caso):
     goles local, goles visita] por partido, con el recorrido de validacion.py."""
     c, s = caso
     previa, ultima = cargar(c, s - 1), cargar(c, s)
-    hist = validacion._Historial(previa, _ancla(previa), app.K_LIGA)
+    hist = validacion._Historial(previa, _ancla(previa), app.K_LIGA, codigo_liga=c, de_arriba=de_arriba(c, s))
     filas = []
     for m in ultima:
         fz, media = hist.antes_de(m)
@@ -238,11 +258,15 @@ def recorrer_anterior(caso):
     return c, s, np.array(filas, dtype=float)
 
 
-def _fuerzas_np(caso, factor, k_at, k_de, a0):
+def _fuerzas_np(caso, factor, k_at, k_de, a0, d0=None, baja=None):
     """Gemela en numpy de ajustar_fuerzas + el recorrido de validacion.py, para
     buscar parámetros deprisa. Mismo algoritmo; no el mismo orden de sumas, así
-    que difiere en el último decimal (lo mide main al final)."""
+    que difiere en el último decimal (lo mide main al final). d0 (la defensa
+    de la que parte un ascendido) y baja (ataque y defensa de un descendido de
+    la liga de arriba) son, si no se dan, los de app.py para esa liga."""
     c, s = caso
+    d0 = app.DEFENSA_RECIEN_LLEGADO.get(c, 1.0) if d0 is None else d0
+    baja = (app.ATAQUE_DESCENDIDO, app.DEFENSA_DESCENDIDO) if baja is None else baja
     previa, ultima = cargar(c, s - 1), cargar(c, s)
     ancla = _ancla(previa)
     todos = previa + ultima
@@ -254,8 +278,10 @@ def _fuerzas_np(caso, factor, k_at, k_de, a0):
     D = np.array([app.dia_de(m["fecha"]) for m in todos])
     n0 = len(previa)
     previos = np.zeros(T, bool); previos[H[:n0]] = True; previos[A[:n0]] = True
-    p_at = np.where(previos, 1.0, a0)
-    at, de = p_at.copy(), np.ones(T)
+    p_at, p_de = np.where(previos, 1.0, a0), np.where(previos, 1.0, d0)
+    for n in de_arriba(c, s):
+        p_at[idx[n]], p_de[idx[n]] = baja
+    at, de = p_at.copy(), p_de.copy()
     filas, i = [], n0
     while i < len(todos):
         j = i
@@ -266,7 +292,7 @@ def _fuerzas_np(caso, factor, k_at, k_de, a0):
         ml = (GH[n0:i].sum() + app.K_LIGA * ancla["avg_local"]) / (i - n0 + app.K_LIGA)
         mv = (GA[n0:i].sum() + app.K_LIGA * ancla["avg_visita"]) / (i - n0 + app.K_LIGA)
         gf = np.bincount(h, w * gh, T) + np.bincount(a, w * ga, T) + k_at * p_at
-        gc = np.bincount(h, w * ga, T) + np.bincount(a, w * gh, T) + k_de
+        gc = np.bincount(h, w * ga, T) + np.bincount(a, w * gh, T) + k_de * p_de
         for _ in range(app.MAX_ITER_FUERZAS):
             at_n = gf / (np.bincount(h, w * ml * de[a], T) + np.bincount(a, w * mv * de[h], T) + k_at)
             de_n = gc / (np.bincount(h, w * mv * at_n[a], T) + np.bincount(a, w * ml * at_n[h], T) + k_de)
@@ -428,6 +454,81 @@ def afinar(pool, lista):
               f"{skill(p['ambos'][aj], p['ambos_base'][aj]):+.2f}% | {skill(p['ambos'][pr], p['ambos_base'][pr]):+.2f}%")
 
 
+def _np_prior(arg):
+    caso, d0, baja = arg
+    return _fuerzas_np(caso, app.FACTOR_DIARIO, app.PSEUDO_GOLES_ATAQUE, app.PSEUDO_GOLES_DEFENSA,
+                       app.ATAQUE_RECIEN_LLEGADO, d0, baja)
+
+
+def _fuerza_real(partidos):
+    """(ataque, defensa) de cada equipo con una temporada entera y sin prior:
+    lo que fue de verdad ese año."""
+    nombres = sorted({m["local"] for m in partidos} | {m["visita"] for m in partidos})
+    idx = {x: i for i, x in enumerate(nombres)}
+    T = len(nombres)
+    H = np.array([idx[m["local"]] for m in partidos]); A = np.array([idx[m["visita"]] for m in partidos])
+    GH = np.array([m["gl"] for m in partidos], float); GA = np.array([m["gv"] for m in partidos], float)
+    ml, mv = GH.mean(), GA.mean()
+    at, de = np.ones(T), np.ones(T)
+    for _ in range(5000):
+        at_n = (np.bincount(H, GH, T) + np.bincount(A, GA, T)) / (np.bincount(H, ml * de[A], T) + np.bincount(A, mv * de[H], T))
+        de_n = (np.bincount(H, GA, T) + np.bincount(A, GH, T)) / (np.bincount(H, mv * at_n[A], T) + np.bincount(A, ml * at_n[H], T))
+        listo = max(np.abs(at_n - at).max(), np.abs(de_n - de).max()) < 1e-10
+        at, de = at_n, de_n
+        if listo:
+            break
+    return {n: (at[idx[n]], de[idx[n]]) for n in nombres}
+
+
+def descensos(pool, lista):
+    """De dónde parten los recién llegados (prior_recien_llegado en app.py):
+    diferencia de Brier del 1X2 con cada prior frente a tratarlos como un
+    ascendido cualquiera (ataque ATAQUE_RECIEN_LLEGADO, defensa 1)."""
+    def brier(casos_liga, d0, baja):
+        res = pool.map(_np_prior, [(x, d0, baja) for x in casos_liga])
+        return {g: puntuar(np.concatenate([r[2] for r in res if filtro(r[1])]), app.RHO_EMPATES,
+                           app.ENCOGER_GOLES)["1x2"]
+                for g, filtro in (("ajuste", lambda s: s <= FIN_AJUSTE),
+                                  ("prueba", lambda s: FIN_AJUSTE < s <= 2025))}
+
+    def linea(texto, b, b0, marca=False):
+        partes = []
+        for g in ("ajuste", "prueba"):
+            d, se = pareado(b[g], b0[g])
+            partes.append(f"{g} {d:+.4f} ({d / se:+.1f} se)" if se else f"{g} igual")
+        print(f"  {texto:22s} " + "   ".join(partes) + ("   <- app.py" if marca else ""), flush=True)
+
+    asc = (app.ATAQUE_RECIEN_LLEGADO, 1.0)
+    elc = [x for x in lista if x[0] == "ELC"]
+    print("Los que bajan de la Premier a la Championship (ataque, defensa de partida):")
+    b0 = brier(elc, 1.0, asc)
+    for at_b in (1.0, 1.1, 1.2, 1.3, 1.4):
+        for de_b in (0.8, 0.85, 0.9, 1.0):
+            linea(f"{at_b:.2f}, {de_b:.2f}", brier(elc, 1.0, (at_b, de_b)), b0,
+                  (at_b, de_b) == (app.ATAQUE_DESCENDIDO, app.DEFENSA_DESCENDIDO))
+    print("Fuerza de verdad (temporada entera, media geométrica) de los recién llegados:")
+    for liga in ("ELC", "PL"):
+        for g, filtro in (("ajuste", lambda s: s <= FIN_AJUSTE), ("prueba", lambda s: FIN_AJUSTE < s <= 2025)):
+            bajan, suben = [], []
+            for c, s in lista:
+                if c == liga and filtro(s):
+                    real = _fuerza_real(cargar(c, s))
+                    antes = {m["local"] for m in cargar(c, s - 1)} | {m["visita"] for m in cargar(c, s - 1)}
+                    arriba = set(de_arriba(c, s))
+                    for n in set(real) - antes:
+                        (bajan if n in arriba else suben).append(real[n])
+            for txt, v in (("bajan", bajan), ("suben", suben)):
+                if v:
+                    g_at, g_de = np.exp(np.log(np.array(v)).mean(0))
+                    print(f"  {liga:4s} {g:6s} {txt}: {len(v):3d} equipos, ataque {g_at:.2f}, defensa {g_de:.2f}")
+    for liga, valores in (("PL", (1.1, 1.2, 1.3, 1.4)), (None, (1.1, 1.2))):
+        sel = [x for x in lista if (x[0] == liga if liga else x[0] not in ("PL", "ELC"))]
+        print(f"Defensa de partida de un ascendido, {'Premier' if liga else 'las demás ligas (sin Premier ni Championship)'}:")
+        b0 = brier(sel, 1.0, None)
+        for d0 in valores:
+            linea(f"{d0:.2f}", brier(sel, d0, None), b0, liga and d0 == app.DEFENSA_RECIEN_LLEGADO.get(liga))
+
+
 def main():
     lista = casos()
     print(f"{len(lista)} temporadas evaluables: "
@@ -435,6 +536,9 @@ def main():
     with Pool(min(4, os.cpu_count() or 1)) as pool:
         if sys.argv[1:] == ["afinar"]:
             afinar(pool, lista)
+            return
+        if sys.argv[1:] == ["descensos"]:
+            descensos(pool, lista)
             return
         nuevo, _, _ = evaluar(pool, lista)
         clave = (app.FACTOR_DIARIO, app.PSEUDO_GOLES_ATAQUE, app.PSEUDO_GOLES_DEFENSA, app.ATAQUE_RECIEN_LLEGADO)

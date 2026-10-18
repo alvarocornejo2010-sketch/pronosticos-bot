@@ -86,10 +86,11 @@ class _Historial:
     partidos de un mismo día no se ven entre sí; el ajuste de cada día arranca
     del anterior, que solo lo hace converger antes."""
 
-    def __init__(self, previa, ancla, k):
+    def __init__(self, previa, ancla, k, codigo_liga=None, de_arriba=()):
         self.previa = [_compacto(m) for m in previa]
         self.actual = []
         self.ancla, self.k = ancla, k
+        self.codigo_liga, self.de_arriba = codigo_liga, list(de_arriba)
         self.gl = self.gv = self.n = 0
         self.dia = None
         self.fuerzas = None
@@ -104,7 +105,8 @@ class _Historial:
             self.media = {"avg_local": (self.gl + k * self.ancla["avg_local"]) / (self.n + k),
                           "avg_visita": (self.gv + k * self.ancla["avg_visita"]) / (self.n + k)}
             self.fuerzas = app.ajustar_fuerzas(self.previa, self.actual, self.media,
-                                               inicio=self.fuerzas["equipos"] if self.fuerzas else None)
+                                               inicio=self.fuerzas["equipos"] if self.fuerzas else None,
+                                               codigo_liga=self.codigo_liga, de_arriba=self.de_arriba)
             self.dia = dia
         return self.fuerzas, self.media
 
@@ -240,8 +242,16 @@ def validar_liga(codigo_liga, nombre, season):
         ancla = {"avg_local": app.PRIOR_AVG_LOCAL, "avg_visita": app.PRIOR_AVG_VISITA,
                  "origen": "constante de respaldo"}
 
+    # los que bajan de la liga de arriba parten de su propia fuerza (LIGA_DE_ARRIBA):
+    # su temporada anterior ya la bajó la validación de esa liga, que va antes
+    de_arriba = []
+    if codigo_liga in app.LIGA_DE_ARRIBA:
+        sup = _cargar_temporada(app.LIGA_DE_ARRIBA[codigo_liga], season - 1)
+        de_arriba = [t for m in sup for t in (m["local"], m["visita"])]
+
     # la temporada anterior entra en las fuerzas, no se puntúa
-    hist = _Historial(previa if len(previa) >= 100 else [], ancla, app.K_LIGA)
+    hist = _Historial(previa if len(previa) >= 100 else [], ancla, app.K_LIGA,
+                      codigo_liga=codigo_liga, de_arriba=de_arriba)
 
     modelo = _Acumulador()
     base_liga = _Acumulador()
