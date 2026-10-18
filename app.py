@@ -189,8 +189,9 @@ DEFENSA_RECIEN_LLEGADO = {"PL": 1.3}   # ...salvo en la Premier, donde el que su
 LIGA_DE_ARRIBA = {"ELC": "PL"}
 ATAQUE_DESCENDIDO = 1.2
 DEFENSA_DESCENDIDO = 0.85
-VERSION_FUERZAS = 2             # va en la versión de las fuerzas guardadas: subirlo al
-                                # cambiar el modelo hace que todas se recalculen
+VERSION_MODELO = 2              # subirlo al cambiar el modelo: las fuerzas guardadas se
+                                # recalculan, cada ficha dice con cuál se calculó y en
+                                # Cloudflare (donde D1 guarda la validación) esta se repite
 TOLERANCIA_FUERZAS = 1e-4       # el ajuste se repite hasta que nada cambia más que esto:
                                 # con 1e-6 harían falta el doble de vueltas y los goles
                                 # esperados (con dos decimales) salen iguales salvo algún
@@ -652,7 +653,7 @@ def obtener_fuerzas_liga(codigo_liga, cache):
     season = temporada_actual(codigo_liga)
     previa = _lista_vigente(cache, codigo_liga + ":previa", season - 1) or {}
     actual = _lista_vigente(cache, codigo_liga + ":actual", season) or {}
-    version = (f"{VERSION_FUERZAS}|{previa.get('actualizado')}|{actual.get('actualizado')}"
+    version = (f"{VERSION_MODELO}|{previa.get('actualizado')}|{actual.get('actualizado')}"
                f"|{promedio.get('actualizado')}")
     arriba = {}
     if codigo_liga in LIGA_DE_ARRIBA:
@@ -1145,6 +1146,7 @@ def correr_actualizacion(forzar=False):
                 # medio" del registro en vivo del Worker
                 media_local=round(promedio_liga["avg_local"], 3),
                 media_visita=round(promedio_liga["avg_visita"], 3),
+                version_modelo=VERSION_MODELO,
                 # cuántos partidos de liga (esta temporada y la anterior) hay detrás
                 # de cada equipo: si son pocos, la predicción está dominada por el
                 # prior y conviene saberlo
@@ -1437,6 +1439,10 @@ def _toca_validar():
     estado = r.get("estado")
     if estado == "sin_ejecutar":
         return True, "nunca se ha ejecutado"
+    # una validación de otro modelo no mide el que se publica (en Render el disco
+    # se borra en cada deploy y casi nunca pasa; en Cloudflare, D1 la guarda)
+    if estado in ("listo", "error") and r.get("version_modelo", 1) != VERSION_MODELO:
+        return True, "modelo nuevo"
     intentos = r.get("intentos", 0)
     if estado == "error" and intentos < MAX_INTENTOS_VALIDACION:
         return True, f"reintento {intentos + 1} de {MAX_INTENTOS_VALIDACION} tras un error"

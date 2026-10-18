@@ -11,7 +11,7 @@
 import {
   CODIGOS_TORNEO, COMPETICIONES, DIAS_SEMANA, DIAS_VALIDEZ_LIGA_EQUIPO, DIAS_VALIDEZ_PRIOR, FACTOR_LIGA,
   FACTOR_OTRA_LIGA, HORAS_VALIDEZ_LIGA, HORAS_VALIDEZ_PREDICCION, K_LIGA, LIGAS, LIGAS_ANO_NATURAL,
-  LIGA_DE_ARRIBA, PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA, VERSION_FUERZAS,
+  LIGA_DE_ARRIBA, PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA, VERSION_MODELO,
 } from "./config.js";
 import {
   ajustarFuerzas, calcularPoisson, calcularXgChampions, calcularXgPartido, equiposDePartidos, fuerzaEquipo,
@@ -226,7 +226,7 @@ async function obtenerFuerzasLiga(ctx, codigo) {
   const season = temporadaActual(ctx.reloj, codigo);
   const previa = listaVigente(ctx, codigo + ":previa", season - 1) || {};
   const actual = listaVigente(ctx, codigo + ":actual", season) || {};
-  let version = `${VERSION_FUERZAS}|${previa.actualizado ?? null}|${actual.actualizado ?? null}`
+  let version = `${VERSION_MODELO}|${previa.actualizado ?? null}|${actual.actualizado ?? null}`
     + `|${promedio.actualizado ?? null}`;
   let arriba = {};
   if (codigo in LIGA_DE_ARRIBA) {
@@ -555,6 +555,7 @@ async function calcularPartido(ctx, f) {
     // la media de goles de la liga con la que se calculó: la base "equipo medio"
     // del registro en vivo
     media_local: redondear(promedioLiga.avg_local, 3), media_visita: redondear(promedioLiga.avg_visita, 3),
+    version_modelo: VERSION_MODELO,
     // cuántos partidos de liga (esta temporada y la anterior) hay detrás de cada equipo
     muestra_local: muestraLocal,
     muestra_visita: muestraVisita,

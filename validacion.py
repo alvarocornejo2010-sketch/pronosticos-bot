@@ -366,6 +366,7 @@ def correr_validacion(season=None):
         _escribir({
             "estado": "listo",
             "temporada": season,
+            "version_modelo": app.VERSION_MODELO,
             "hora": app.ahora().isoformat(),
             "resumen": {r["codigo"]: {
                 "skill_score": r["skill_score"],
@@ -383,6 +384,7 @@ def correr_validacion(season=None):
         # se cuentan los intentos: si algo falla siempre, no queremos que el
         # planificador lo reintente indefinidamente gastando cuota
         previos = leer_resultado().get("intentos", 0)
-        _escribir({"estado": "error", "error": str(e), "intentos": previos + 1})
+        _escribir({"estado": "error", "error": str(e), "intentos": previos + 1,
+                   "version_modelo": app.VERSION_MODELO})
     finally:
         validando_ahora = False

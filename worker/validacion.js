@@ -10,7 +10,7 @@
 // en D1 por dónde iba. Las temporadas terminadas no cambian: se guardan y la
 // próxima validación no las vuelve a pedir.
 
-import { K_LIGA, LIGAS, LIGA_DE_ARRIBA, PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA } from "./config.js";
+import { K_LIGA, LIGAS, LIGA_DE_ARRIBA, PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA, VERSION_MODELO } from "./config.js";
 import { ajustarFuerzas, calcularPoisson, calcularXgPartido, fuerzaEquipo, mercadosDeGoles, redondear } from "./modelo.js";
 import { Acumulador, Binario, MERCADOS, resultado, resumenMercado } from "./metricas.js";
 import { diaDe } from "./actualizacion.js";
@@ -221,12 +221,13 @@ const PROGRESO = "validacion_progreso:";
 
 // El documento que sirve /api/validacion y, aparte, lo poco que necesita el
 // cron para decidir: en qué estado está, qué temporadas fallaron en esta
-// ejecución (para no pedirlas en cada paso) y cuántas veces seguidas falló.
+// ejecución (para no pedirlas en cada paso), cuántas veces seguidas falló y con
+// qué versión del modelo (una de otra versión no mide lo que se publica: se repite).
 function escribirValidacion(almacen, doc, { fallidas = {}, intentos = 0 } = {}) {
   return [
     almacen.sentenciaDoc("validacion", doc),
     almacen.sentenciaDoc("validacion_resumen", { estado: doc.estado, temporada: doc.temporada ?? null,
-      fallidas, intentos }),
+      fallidas, intentos, version_modelo: VERSION_MODELO }),
   ];
 }
 
@@ -306,6 +307,7 @@ export async function pasoValidacion(ctx, almacen, resumen, escala = 1) {
   const final = {
     estado: "listo",
     temporada: season,
+    version_modelo: VERSION_MODELO,
     hora: ahoraIso,
     resumen: Object.fromEntries(ok.map((r) => [r.codigo, {
       skill_score: r.skill_score,
@@ -323,5 +325,6 @@ export async function pasoValidacion(ctx, almacen, resumen, escala = 1) {
 
 export function sentenciasError(almacen, mensaje, intentosPrevios) {
   const intentos = intentosPrevios + 1;
-  return escribirValidacion(almacen, { estado: "error", error: mensaje, intentos }, { intentos });
+  return escribirValidacion(almacen, { estado: "error", error: mensaje, intentos, version_modelo: VERSION_MODELO },
+    { intentos });
 }

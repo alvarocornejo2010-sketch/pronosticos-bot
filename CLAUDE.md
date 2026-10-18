@@ -267,7 +267,9 @@ de las que arranca el ajuste siguiente). Cada día con partidos es un ajuste de
 fuerzas, así que un paso cuesta más que con el modelo de antes (que iba de 25
 en 25): 1 a 4 ms en caliente. Unas 4 horas la primera vez; las temporadas
 quedan en D1. Como D1 no se borra, se repite sola cuando termina una temporada
-nueva.
+nueva y cuando cambia el modelo: cada validación guarda su `version_modelo`, y
+una de otra versión (o de antes de que existiera, que cuenta como la 1) se
+repite con la web al día; una a medias de otra versión se empieza de cero.
 
 **El registro en vivo** (`registro.js`, oct 2026): lo que publicó la web contra
 lo que pasó, liga a liga, con las mismas métricas que la validación (Brier,
@@ -796,8 +798,9 @@ Environment).
   "El registro en vivo"). Con unos pocos partidos por liga es ruido; con una
   temporada (unos 300 por liga) ya se puede comparar con el backtest de
   `/api/validacion`, y es lo único que puede afinar `RHO_EMPATES` con datos
-  propios. Idea: guardar en cada ficha la versión del modelo (`VERSION_FUERZAS`
-  u otra), para separar lo publicado con cada versión cuando cambie.
+  propios. Cada ficha guarda con qué versión del modelo se calculó
+  (`version_modelo`), pero el registro las suma todas juntas: cuando cambie el
+  modelo, separarlas.
 - **Champions:** ya junta liga nacional, nivel de liga e historial en la
   Champions, medido con cuatro temporadas (ver "Champions: cómo se predice").
   Cada verano, añadir la temporada que termina a `TEMPORADAS_CL` en
@@ -825,6 +828,9 @@ Environment).
 - El modelo vive dos veces: `app.py`/`validacion.py` (Python, lo que miden las
   herramientas de afinado) y `worker/` (lo que publica Cloudflare). Un cambio
   va en los dos y `python test_paridad.py` tiene que dar "todo igual".
+- Al cambiar el modelo, subir `VERSION_MODELO` (en `app.py` y en
+  `worker/config.js`): las fuerzas guardadas se recalculan y la validación de
+  Cloudflare, que D1 conserva, se repite sola.
 - En el Worker, cada ejecución tiene 10 ms de CPU: nada de recorrer o parsear
   la semana entera en cada pasada sin medirlo antes (ver "Cloudflare: cómo
   funciona").
