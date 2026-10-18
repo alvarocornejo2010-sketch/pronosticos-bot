@@ -20,8 +20,10 @@ Corre en dos sitios con la misma lógica:
 - Repo: `pronosticos-bot`
 - Carpeta local: `C:\Users\Alvaro\Desktop\webapp`
 - URL en Render: https://pronosticos-bot.onrender.com
-- URL en Cloudflare: `https://pronosticos-bot.<subdominio>.workers.dev` (el
-  subdominio es el de la cuenta: Workers & Pages → el Worker → Settings → Domains)
+- URL en Cloudflare: https://pronosticos-bot.alvarocornejo2010.workers.dev
+  (funcionando desde el 18 oct 2026). En Settings → Domains sale también
+  `*-pronosticos-bot.alvarocornejo2010.workers.dev`: es el patrón de las URLs de
+  Preview, no la web (ver "Cloudflare: cómo se despliega").
 - Ficheros clave: `app.py`, `public/index.html`, `public/app.js`,
   `validacion.py`, `worker/`, `wrangler.jsonc`, `test_paridad.py`,
   `afinar_liga.py`, `afinar_champions.py`, `diagnostico.py`
@@ -751,6 +753,15 @@ Create → Import a repository): **un push a `main` despliega solo**, con
 `npx wrangler deploy` (sin comando de build). El Worker del panel tiene que
 llamarse `pronosticos-bot`, como `name` en `wrangler.jsonc`, o el build falla.
 La base D1 va enlazada por su id en `wrangler.jsonc`; el cron, también ahí.
+
+**Builds de las otras ramas: desactivados** (Settings → Build → Branch control
+→ "Enable Preview Builds" sin marcar). Un Worker creado desde el 22 sept 2026
+compila las ramas que no son `main` como Worker Previews (`npx wrangler
+preview`), que exige un bloque `previews` en `wrangler.jsonc`. Sin él, el check
+"Workers Builds" de cada PR sale en rojo (pasó en la PR #9), aunque producción
+despliegue bien. No se añade el bloque a propósito: cada rama tendría una URL
+pública propia, sin la base ni los secretos (la página saldría rota), y el
+proyecto evita URLs de más (`preview_urls: false`).
 
 Secretos, en el panel (Settings → Variables and Secrets, tipo Secret):
 `FOOTBALL_DATA_TOKEN` y `UPDATE_SECRET`, los mismos valores que en Render →
