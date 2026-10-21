@@ -301,6 +301,13 @@ En vivo, y el tablero Resultados. En Render no existe (disco efímero):
 - una petición que falla no se repite partido tras partido en la misma pasada;
 - si el calendario cambia la hora o el nombre de un partido ya calculado, la
   ficha se corrige sin recalcular (`app.py` enseñaba la hora vieja hasta 24 h);
+- una predicción caducada (24 h) se sigue enseñando hasta que la nueva está
+  calculada; solo sale sin números un partido que nunca tuvo predicción
+  (`app.py` la quitaba al caducar). Como las predicciones se calculan casi
+  todas a la vez, caducan casi a la vez: sin esto, cada noche media semana
+  salía "sin calcular" durante los ~20 minutos del recálculo (oct 2026). El
+  resumen lleva `recalculando` (las que se están rehaciendo), que
+  `/api/estado` no enseña;
 - los intentos de la validación se arrastran (en `validacion.py` se perdían y
   el tope de 3 no frenaba nada);
 - `/actualizar?forzar=1` y `/validar` dejan un pedido en D1 que el cron recoge

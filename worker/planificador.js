@@ -44,7 +44,9 @@ export function tocaActualizar(resumen, aj, ahora) {
     return desde >= MINUTOS_REINTENTO_ERROR ? "reintento tras un error" : null;
   }
   if (e == null || e === "sin_datos") return "no hay datos todavía";
-  if (e === "actualizando") return `quedan ${resumen.pendientes ?? "?"} partidos por calcular`;
+  if (e === "actualizando") {
+    return `quedan ${(resumen.pendientes ?? 0) + (resumen.recalculando ?? 0)} partidos por calcular`;
+  }
   if (e === "parcial" && resumen.pendientes > 0) return `quedan ${resumen.pendientes} partidos por calcular`;
   const ultima = resumen.ultima_actualizacion;
   if (!ultima) return "sin marca de tiempo";
