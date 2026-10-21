@@ -1,0 +1,57 @@
+# Mira cada 3 horas que la web de Cloudflare se sigue actualizando. Si no (el cron
+# parado, el token caducado, la API caída), la tarea falla y GitHub manda un email
+# a quien la creó o cambió por última vez el cron de este archivo.
+# Ojo: en un repo público, GitHub desactiva las tareas programadas tras 60 días sin
+# actividad en el repo (avisa antes por email; se reactivan en la pestaña Actions).
+# Para probar el aviso: Actions → vigilancia → Run workflow, con una URL que no exista.
+name: vigilancia
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Web que se mira (para probar el aviso, una que no exista)"
+        default: "https://pronosticos-bot.alvarocornejo2010.workers.dev"
+
+permissions: {}
+
+jobs:
+  salud:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Mirar /salud
+        env:
+          URL: ${{ inputs.url || 'https://pronosticos-bot.alvarocornejo2010.workers.dev' }}
+        run: |
+          python3 - <<'EOF'
+          import json, os, sys, time, urllib.request
+          from datetime import datetime, timezone
+
+          url = os.environ["URL"].rstrip("/") + "/salud"
+          ultimo = None
+          for intento in range(3):          # un fallo suelto de red no es un aviso
+              try:
+                  salud = json.load(urllib.request.urlopen(url, timeout=20))
+                  break
+              except Exception as e:
+                  ultimo = e
+                  time.sleep(20)
+          else:
+              sys.exit(f"{url} no responde: {ultimo}")
+
+          estado = salud.get("estado")
+          ultima = salud.get("ultima_actualizacion")
+          edad = None
+          if ultima:
+              edad = (datetime.now(timezone.utc) - datetime.fromisoformat(ultima)).total_seconds() / 60
+          linea = f"estado {estado}, {salud.get('total')} partidos, última actualización hace {edad and round(edad)} min"
+          print(linea)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(linea + "\n")
+          # el cron pasa cada 25 min con la web al día: 90 sin pasar es que algo va mal
+          if estado == "error" or edad is None or edad > 90:
+              sys.exit("la web no se está actualizando: " + linea)
+          EOF

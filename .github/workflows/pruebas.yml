@@ -1,0 +1,55 @@
+# Las pruebas de verdad de cada PR y de cada push a main (ver "Convenciones" en
+# CLAUDE.md). Sustituyen al check de las Preview Builds de Cloudflare, que van
+# desactivadas: el despliegue sigue siendo el push a main (Workers Builds).
+name: pruebas
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pruebas-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  paridad:
+    name: Paridad Python / Worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - run: pip install -r requirements.txt
+      - name: Sintaxis del Worker y de la web
+        run: for f in worker/*.js public/app.js; do node --check "$f"; done
+      - name: El modelo da lo mismo en los dos lenguajes
+        run: python test_paridad.py
+
+  punta-a-punta:
+    name: Flask contra el Worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+      - run: pip install -r requirements.txt
+      - run: npm ci
+      - name: API falsa, Flask, wrangler dev y caducidad
+        run: bash pruebas/e2e.sh
