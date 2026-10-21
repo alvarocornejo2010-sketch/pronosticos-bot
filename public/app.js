@@ -107,14 +107,31 @@ const MESES_LARGOS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "ju
                       "septiembre", "octubre", "noviembre", "diciembre"];
 function fechaCorta(iso) { const p = partes(iso); return p.d + " " + MESES[p.m - 1]; }
 function fechaLarga(iso) { const p = partes(iso); return p.d + " de " + MESES_LARGOS[p.m - 1]; }
-function diaCorto(d) { return d.length > 6 ? d.slice(0, 3) : d; }
+// Lun, Mar, Sáb...: con las tarjetas de día estrechas, "Sábado" no cabía y salía "Sába…".
+function diaCorto(d) { return d === "Hoy" || d === "Mañana" ? d : d.slice(0, 3); }
 function pct(v) { return Number(v).toFixed(1) + " %"; }
+
+// Hoy en Lima ("2026-10-21"): UTC-5 todo el año, sin horario de verano. Hoy, Mañana
+// y el día de la semana se ponen aquí y no se toman del servidor, que los pone en
+// cada pasada: tras la medianoche se quedaban viejos hasta la siguiente (~25 min).
+function hoyLima() { return new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 10); }
+const NOMBRES_DIA = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+function etiquetaDia(fecha, hoy) {
+  const p = partes(fecha), h = partes(hoy);
+  const dia = Date.UTC(p.a, p.m - 1, p.d);
+  const dif = Math.round((dia - Date.UTC(h.a, h.m - 1, h.d)) / 86400000);
+  return dif === 0 ? "Hoy" : dif === 1 ? "Mañana" : NOMBRES_DIA[new Date(dia).getUTCDay()];
+}
 function f2(v) { return Number(v).toFixed(2); }
 
+// Los que ya empezaron se quitan aquí: el servidor los quita en su pasada
+// siguiente, hasta 25 minutos después.
 function aplanar(dias) {
-  const out = [];
-  (dias || []).forEach(d => d.partidos.forEach(p =>
-    out.push(Object.assign({}, p, { fecha: d.fecha, dia: d.etiqueta }))));
+  const out = [], ahora = Date.now(), hoy = hoyLima();
+  (dias || []).forEach(d => d.partidos.forEach(p => {
+    if (Date.parse(p.utcDate) <= ahora) return;
+    out.push(Object.assign({}, p, { fecha: d.fecha, dia: etiquetaDia(d.fecha, hoy) }));
+  }));
   return out;
 }
 
@@ -281,11 +298,21 @@ function htmlDetalle(p) {
     + dato("Doble oportunidad", "1X " + pct(p.prob_1x) + ", X2 " + pct(p.prob_x2) + ", 12 " + pct(p.prob_12))
     + dato("Goles esperados", f2(p.xg_local) + " – " + f2(p.xg_visita))
     + dato("Muestra", muestraTxt)
+    + (p.calculado ? dato("Calculado", htmlCalculado(p.calculado)) : "")
     + (ch ? dato("Nivel de liga", htmlNivelChampions(p)) : "")
     + (ch && ch.local && ch.local.partidos_cl !== undefined ? dato("En la Champions, frente a lo esperado", htmlHistorialChampions(p)) : "")
     + (conGoles(p) ? htmlDetalleGoles(p, dato) : "")
     + '</dl>' + (ch ? htmlAvisoChampions(p, m) : aviso) + (ch ? htmlNotaChampions() : "")
     + (conGoles(p) ? htmlNotaGoles(p) : "") + '</div>';
+}
+
+// Una predicción se rehace cada 24 h; si es más vieja, la API lleva tiempo sin
+// responder y se ven los números de entonces (se siguen enseñando hasta tener los nuevos).
+function htmlCalculado(iso) {
+  const vieja = Date.now() - Date.parse(iso) > 26 * 3600000;
+  return vieja ? '<span class="viejo">' + ICONO_AVISO + esc(haceCuanto(iso))
+      + ': la API no responde y estos son los números de entonces</span>'
+    : esc(haceCuanto(iso));
 }
 
 /** De qué liga sale cada equipo de la Champions y con qué nivel. */
@@ -572,6 +599,11 @@ function pintarFechas(todos, ruta) {
   if (fechasEl.dataset.huella === html) return;
   fechasEl.dataset.huella = html;
   fechasEl.innerHTML = html;
+  const elegido = fechasEl.querySelector('[aria-current="true"]:not(.toda)');
+  if (elegido && elegido.dataset.hash !== fechasEl.dataset.elegido) {
+    fechasEl.dataset.elegido = elegido.dataset.hash;
+    elegido.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
 }
 
 function pintarTiraLigas(todos, ruta) {
@@ -848,12 +880,16 @@ function pintarEstado() {
   const total = datos.total || 0, pend = datos.pendientes || 0, hechos = total - pend;
   const modo = e === "actualizando" || e === "sin_datos" ? "trabajando"
     : e === "parcial" ? "pausa" : e === "error" ? "error" : "reposo";
-  const texto = { actualizando: "Calculando", parcial: "En pausa", listo: "Al día", error: "Error",
-                  sin_datos: "Esperando la primera actualización", sin_partidos: "Sin partidos en la ventana" }[e] || e;
+  // actualizando sin ninguno sin números: rehace predicciones caducadas, y mientras
+  // tanto se ven las de antes (no hay nada "por calcular")
+  const recalculo = e === "actualizando" && total > 0 && !pend;
+  const texto = recalculo ? "Actualizando números"
+    : { actualizando: "Calculando", parcial: "En pausa", listo: "Al día", error: "Error",
+        sin_datos: "Esperando la primera actualización", sin_partidos: "Sin partidos en la ventana" }[e] || e;
 
   // móvil: un punto y lo esencial
   estadoCorto.dataset.modo = modo;
-  estadoCorto.querySelector(".txt").textContent = total && pend ? hechos + "/" + total : texto;
+  estadoCorto.querySelector(".txt").textContent = total && pend ? hechos + "/" + total : recalculo ? "Actualizando" : texto;
 
   // escritorio: barra de estado a lo editor de código
   let seg = '<span title="' + esc(e === "parcial"
@@ -931,7 +967,13 @@ function render() {
   app.classList.remove("sin-datos");
 
   const todos = aplanar(datos.dias);
-  const ruta = leerRuta();
+  let ruta = leerRuta();
+  // un enlace guardado a un día que ya pasó lleva a la semana (o a la liga entera),
+  // no a "Nada ese día"
+  if (ruta.fecha && ruta.fecha < hoyLima()) {
+    history.replaceState(null, "", ruta.vista === "liga" ? "#/liga/" + encodeURIComponent(ruta.liga) : "#/");
+    ruta = leerRuta();
+  }
   const clave = JSON.stringify(ruta) + "|" + orden + "|" + (busqueda ? "b" : "") + "|" + mqEscritorio.matches;
   const reconstruir = clave !== rutaPintada;
   rutaPintada = clave;
@@ -1056,6 +1098,18 @@ document.addEventListener("focusin", (e) => { const el = e.target.closest("[data
 document.addEventListener("scroll", ocultarTip, true);
 
 window.addEventListener("hashchange", () => render());
+
+// La rueda del ratón mueve en horizontal la tira de días y la de próximos: en
+// escritorio no siempre caben todos y, sin barra, no había forma de llegar al último.
+function ruedaHorizontal(el) {
+  el.addEventListener("wheel", (e) => {
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || el.scrollWidth <= el.clientWidth) return;
+    const antes = el.scrollLeft;
+    el.scrollLeft += e.deltaY;
+    if (el.scrollLeft !== antes) e.preventDefault();   // en el borde, la página sigue con su scroll
+  }, { passive: false });
+}
+[fechasEl, proximosEl].forEach(ruedaHorizontal);
 mqEscritorio.addEventListener("change", () => { rutaPintada = null; render(); });
 
 // ==========================================

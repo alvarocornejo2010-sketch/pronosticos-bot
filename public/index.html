@@ -292,6 +292,12 @@
      una barrita por partido, cómo de claros son */
   .carril { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 14px 16px 6px; }
   .carril::-webkit-scrollbar { display: none; }
+  /* con ratón, una barra fina: si no caben todos los días (o los próximos), se ve que hay más */
+  @media (hover: hover) and (pointer: fine) {
+    .carril, .proximos { scrollbar-width: thin; scrollbar-color: var(--linea-viva) transparent; }
+    .carril::-webkit-scrollbar, .proximos::-webkit-scrollbar { display: block; height: 6px; }
+    .carril::-webkit-scrollbar-thumb, .proximos::-webkit-scrollbar-thumb { background: var(--linea-viva); border-radius: 3px; }
+  }
   .dia-celda {
     flex: 0 0 auto; width: 6.5rem;
     display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto auto;
@@ -314,8 +320,8 @@
   .dia-celda .forma i { display: block; flex: 0 0 3px; border-radius: 1.5px 1.5px 0 0; }
   .dia-celda.toda { width: 7.25rem; }
   @container centro (min-width: 720px) {
-    .dia-celda { flex: 1 1 0; width: auto; min-width: 6.25rem; max-width: 10rem; }
-    .dia-celda.toda { flex-grow: 1.1; min-width: 7.25rem; max-width: 11rem; }
+    .dia-celda { flex: 1 1 0; width: auto; min-width: 5.75rem; max-width: 10rem; }
+    .dia-celda.toda { flex-grow: 1.1; min-width: 6.75rem; max-width: 11rem; }
   }
 
   .herramientas {
@@ -542,6 +548,7 @@
   .goles-graf .k { width: 100%; padding-top: 3px; border-top: 1px solid var(--linea-viva);
                    text-align: center; font-size: var(--t-12); color: var(--tinta-3); }
   .detalle .nw { white-space: nowrap; }
+  .detalle .viejo svg { color: var(--critico); margin-right: 6px; vertical-align: -2px; }
   .detalle .nota-goles { margin: 14px 0 0; max-width: 72ch; font-size: var(--t-13); color: var(--tinta-3); }
 
   .vacio { padding: 40px 20px; max-width: 600px; }
