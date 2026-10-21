@@ -41,7 +41,8 @@ def _cargar_temporada(codigo_liga, season):
     import app
     _, cache_dir = _rutas()
     os.makedirs(cache_dir, exist_ok=True)
-    ruta = os.path.join(cache_dir, f"{codigo_liga}_{season}.json")
+    # _liga: desde oct 2026 sin playoffs (app.solo_liga); las de antes se bajan otra vez
+    ruta = os.path.join(cache_dir, f"{codigo_liga}_{season}_liga.json")
 
     if os.path.exists(ruta):
         try:
@@ -57,7 +58,7 @@ def _cargar_temporada(codigo_liga, season):
         return []
 
     limpios = []
-    for m in resp.json().get("matches", []):
+    for m in app.solo_liga(resp.json().get("matches", [])):
         ft = m.get("score", {}).get("fullTime", {})
         if ft.get("home") is None or ft.get("away") is None:
             continue

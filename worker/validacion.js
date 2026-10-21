@@ -13,7 +13,7 @@
 import { K_LIGA, LIGAS, LIGA_DE_ARRIBA, PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA, VERSION_MODELO } from "./config.js";
 import { ajustarFuerzas, calcularPoisson, calcularXgPartido, fuerzaEquipo, mercadosDeGoles, redondear } from "./modelo.js";
 import { Acumulador, Binario, MERCADOS, resultado, resumenMercado } from "./metricas.js";
-import { diaDe } from "./actualizacion.js";
+import { diaDe, soloLiga } from "./actualizacion.js";
 
 // Cada día con partidos es un ajuste de fuerzas (unos 0.2 ms ya compilado, más
 // en un isolate recién creado, que aún no ha compilado nada): con 15 partidos,
@@ -200,10 +200,11 @@ export function validarLiga(codigo, nombre, season, previa, ultima, deArriba = [
   return v.resultado();
 }
 
-// De la respuesta de la API a la lista compacta de resultados, ordenada por fecha.
+// De la respuesta de la API a la lista compacta de resultados de la fase de liga
+// (sin playoffs), ordenada por fecha.
 export function compactarTemporada(cuerpo) {
   const limpios = [];
-  for (const m of (cuerpo && cuerpo.matches) || []) {
+  for (const m of soloLiga((cuerpo && cuerpo.matches) || [])) {
     const ft = (m.score || {}).fullTime || {};
     if (ft.home == null || ft.away == null) continue;
     limpios.push([m.utcDate, m.homeTeam.id, m.awayTeam.id, ft.home, ft.away]);
@@ -212,6 +213,10 @@ export function compactarTemporada(cuerpo) {
 }
 
 const desplegar = (filas) => filas.map(([fecha, local, visita, gl, gv]) => ({ fecha, local, visita, gl, gv }));
+
+// Las temporadas terminadas, guardadas en D1. "liga:": desde oct 2026 sin playoffs;
+// las de antes ("temporada:PD:2025") ya no se leen y se vuelven a bajar.
+const claveTemporada = (codigo, s) => `temporada:liga:${codigo}:${s}`;
 
 // ==========================================
 // ORQUESTACIÓN (un paso por ejecución del cron)
@@ -260,7 +265,7 @@ export async function pasoValidacion(ctx, almacen, resumen, escala = 1) {
     // las dos temporadas: la anterior entra en las fuerzas de cada día
     const temporadas = {};
     for (const s of [season - 1, season]) {
-      const clave = `temporada:${codigo}:${s}`;
+      const clave = claveTemporada(codigo, s);
       if (fallidas[clave]) { temporadas[s] = []; continue; }
       const texto = await almacen.leerDocTexto(clave);
       if (texto !== null) { temporadas[s] = desplegar(JSON.parse(texto)); continue; }
@@ -280,7 +285,7 @@ export async function pasoValidacion(ctx, almacen, resumen, escala = 1) {
     // anterior ya la guardó la validación de esa liga, que va antes
     let deArriba = [];
     if (!guardado && codigo in LIGA_DE_ARRIBA) {
-      const texto = await almacen.leerDocTexto(`temporada:${LIGA_DE_ARRIBA[codigo]}:${season - 1}`);
+      const texto = await almacen.leerDocTexto(claveTemporada(LIGA_DE_ARRIBA[codigo], season - 1));
       if (texto !== null) deArriba = JSON.parse(texto).flatMap((f) => [f[1], f[2]]);
     }
 

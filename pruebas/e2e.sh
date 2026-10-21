@@ -62,6 +62,8 @@ muertas=$(grep -c '"muertes":[1-9]' "$TMP/wrangler.log" || true)
 echo "pasadas muertas: $muertas"
 [ "$muertas" = "0" ]
 curl -s "http://127.0.0.1:$P_API/__stats" | python3 -c "import json,sys; print('peticiones del Worker:', json.load(sys.stdin)['total'])"
+# la temporada anterior de la Championship trae 5 partidos de playoff: no cuentan
+curl -s "http://127.0.0.1:$P_W/api/ligas" | python3 -c "import json,sys; n = json.load(sys.stdin)['ELC']['ancla_partidos']; print('Championship, temporada anterior:', n, 'partidos de liga'); assert n == 552, n"
 
 echo "== Caducidad"
 python3 "$REPO/pruebas/caducidad.py" "$P_W" "$TMP/d1" | tail -3

@@ -97,6 +97,13 @@ def temporada(c, n_partidos, semilla, fin):
     for k in range(n_partidos):
         h, a = r.sample(eq, 2)
         out.append(partido(r, c, 10_000_000 + estable(c, semilla, k) % 1_000_000, h, a, fin - timedelta(days=n_partidos - k, hours=r.randint(0, 5)), True))
+    if c == "ELC" and semilla != "actual":
+        # los playoffs de ascenso, después de la liga: no son liga y no cuentan (solo_liga)
+        for k in range(5):
+            h, a = r.sample(eq[2:6], 2)
+            p = partido(r, c, 11_000_000 + estable(c, semilla, "playoff", k) % 1_000_000, h, a, fin + timedelta(days=3 + 4 * k), True)
+            p["stage"] = "PLAYOFFS"
+            out.append(p)
     return out
 
 def responder(ruta, q):
