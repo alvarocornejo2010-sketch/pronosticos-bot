@@ -439,34 +439,43 @@ const sigueFresca = (calculado) => Boolean(calculado)
 const MS_ENTRE_PROGRESOS = 15000;
 
 // Los partidos por jugar de la ventana, en el orden de la web, cada uno con su
-// JSON: el de su predicción si sigue fresca, o el de la ficha sin números.
+// JSON. pendiente: hay que calcularlo, porque no tiene predicción o porque la
+// suya ya pasó de HORAS_VALIDEZ_PREDICCION. Si la tenía, la web la sigue
+// enseñando mientras se recalcula (sinNumeros = false): como se calculan casi
+// todas a la vez, caducan casi a la vez, y si no media semana salía sin
+// números el rato que dura el recálculo (app.py las dejaba sin números).
 async function leerVentana(ctx, almacen) {
   const ahoraUtc = new Date().toISOString().slice(0, 19) + "Z";
   const filas = await almacen.ventana(ahoraUtc);
   const reguardar = [];
   for (const f of filas) {
-    if (f.ficha !== null && sigueFresca(f.calculado)) {
-      f.pendiente = false;
-      if (f.base_pred !== f.base) {
-        // el calendario cambió la hora, un nombre o un escudo: la ficha se
-        // rehace con lo nuevo sin recalcular los números (app.py seguía
-        // enseñando la hora vieja hasta recalcular)
-        const ficha = Object.assign(JSON.parse(f.ficha), JSON.parse(f.base));
-        f.ficha = JSON.stringify(ficha);
-        reguardar.push(almacen.sentenciaPrediccion(ficha, f.ficha, f.base));
-      }
-      f.json = f.ficha;
-    } else {
+    if (f.ficha === null) {
       f.pendiente = true;
+      f.sinNumeros = true;
       f.json = f.base.slice(0, -1) + ',"pendiente":true}';
+      continue;
     }
+    f.pendiente = !sigueFresca(f.calculado);
+    f.sinNumeros = false;
+    if (f.base_pred !== f.base) {
+      // el calendario cambió la hora, un nombre o un escudo: la ficha se
+      // rehace con lo nuevo sin recalcular los números (app.py seguía
+      // enseñando la hora vieja hasta recalcular). Si toca recalcularla, se
+      // guarda al recalcular.
+      const ficha = Object.assign(JSON.parse(f.ficha), JSON.parse(f.base));
+      f.ficha = JSON.stringify(ficha);
+      if (!f.pendiente) reguardar.push(almacen.sentenciaPrediccion(ficha, f.ficha, f.base));
+    }
+    f.json = f.ficha;
   }
   return { filas, reguardar };
 }
 
-// El JSON que lee la web, montado pegando el de cada partido.
+// El JSON que lee la web, montado pegando el de cada partido. pendientes son
+// los que la web enseña sin números; recalculando, los que aún enseñan los de
+// antes.
 function construirEstado(ctx, filas, estadoTexto, debug) {
-  let pendientes = 0;
+  let pendientes = 0, recalculando = 0;
   const trozos = [];
   let fecha = null, pj = null;
   for (const f of filas) {
@@ -475,7 +484,8 @@ function construirEstado(ctx, filas, estadoTexto, debug) {
       fecha = f.fecha;
       pj = [];
     }
-    if (f.pendiente) pendientes += 1;
+    if (f.sinNumeros) pendientes += 1;
+    else if (f.pendiente) recalculando += 1;
     pj.push(f.json);
   }
   if (pj) trozos.push(cerrarDia(ctx, fecha, pj));
@@ -485,7 +495,8 @@ function construirEstado(ctx, filas, estadoTexto, debug) {
   };
   const cabeza = JSON.stringify(resumen).slice(1, -1);
   const texto = `{${cabeza},"dias":[${trozos.join(",")}],"debug_busqueda":${JSON.stringify(debug)}}`;
-  return { texto, resumen };
+  // recalculando va solo en el resumen (lo lee el cron): /api/estado sigue igual que en app.py
+  return { texto, resumen: { ...resumen, recalculando } };
 }
 
 const cerrarDia = (ctx, fecha, pj) =>
@@ -645,6 +656,7 @@ export async function pasada(ctx, almacen, forzar = false) {
     calculados += 1;
     f.json = JSON.stringify(ficha);
     f.pendiente = false;
+    f.sinNumeros = false;
     porGuardar.push(almacen.sentenciaPrediccion(ficha, f.json, f.base));
     // a mitad de pasada se escribe el progreso cada pocos segundos: la web va
     // rellenando los partidos al ritmo de la API, no todos de golpe al final
