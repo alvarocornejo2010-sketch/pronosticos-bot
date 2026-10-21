@@ -27,15 +27,21 @@ jobs:
           URL: ${{ inputs.url || 'https://pronosticos-bot.alvarocornejo2010.workers.dev' }}
         run: |
           python3 - <<'EOF'
-          import json, os, sys, time, urllib.request
+          import json, os, sys, time, urllib.error, urllib.request
           from datetime import datetime, timezone
 
           url = os.environ["URL"].rstrip("/") + "/salud"
+          # con el User-Agent de urllib ("Python-urllib/3.x"), Cloudflare responde 403
+          pedido = urllib.request.Request(url, headers={
+              "User-Agent": "pronosticos-bot-vigilancia (GitHub Actions; +https://github.com/alvarocornejo2010-sketch/pronosticos-bot)"})
           ultimo = None
           for intento in range(3):          # un fallo suelto de red no es un aviso
               try:
-                  salud = json.load(urllib.request.urlopen(url, timeout=20))
+                  salud = json.load(urllib.request.urlopen(pedido, timeout=20))
                   break
+              except urllib.error.HTTPError as e:
+                  ultimo = f"HTTP {e.code}: {e.read()[:200]!r}"
+                  time.sleep(20)
               except Exception as e:
                   ultimo = e
                   time.sleep(20)
