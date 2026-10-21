@@ -302,6 +302,13 @@ En vivo, y el tablero Resultados. En Render no existe (disco efímero):
 - una petición que falla no se repite partido tras partido en la misma pasada;
 - si el calendario cambia la hora o el nombre de un partido ya calculado, la
   ficha se corrige sin recalcular (`app.py` enseñaba la hora vieja hasta 24 h);
+- un partido por jugar que deja de venir en el calendario se conserva hasta que
+  falta en dos descargas seguidas (`VECES_AUSENTE`; la cuenta va en `ausentes`
+  de la sección `calendario`). Y si una descarga falla, los partidos que ya había
+  se quedan (`app.py` borraba la liga entera y la rehacía con lo que llegara).
+  football-data responde a veces 200 con la lista incompleta: el 21 oct 2026, a
+  las 09:14 de Lima, dio 5 de los 11 partidos de LaLiga de la semana, y los otros
+  6 seguían programados. La web los perdió dos horas;
 - una predicción caducada (24 h) se sigue enseñando hasta que la nueva está
   calculada; solo sale sin números un partido que nunca tuvo predicción
   (`app.py` la quitaba al caducar). Como las predicciones se calculan casi
@@ -857,8 +864,10 @@ Environment).
     (`correr_cron.py`, que mide la CPU de workerd por pasada). Exige 0 diferencias
     en `/api/estado`, `/api/ligas` y `/api/validacion` (`comparar.py`) y ninguna
     pasada muerta. Después caduca todas las predicciones a la vez y comprueba que
-    la web sigue enseñando números mientras se recalculan (`caducidad.py`). Unos 10
-    minutos.
+    la web sigue enseñando números mientras se recalculan (`caducidad.py`), y que
+    un calendario que llega incompleto no quita partidos a la primera
+    (`calendario.py`, con `/__omitir` de la API falsa). En GitHub, 1-2 minutos; en
+    local, unos 10.
   - Las variables del Worker van con `--var`, que manda sobre `.dev.vars`: el token
     de verdad, si está ahí, no se usa ni sale a ningún sitio.
   - En local, lo mismo: `npm ci`, `pip install -r requirements.txt` y

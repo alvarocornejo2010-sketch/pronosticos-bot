@@ -4,7 +4,8 @@
 # Los dos tienen que servir exactamente lo mismo en /api/estado, /api/ligas y
 # /api/validacion; ninguna pasada puede morir; y, con la web llena, todas las
 # predicciones caducan a la vez y la web tiene que seguir enseñando números
-# (caducidad.py).
+# (caducidad.py), y un calendario que llega incompleto no le quita partidos a la
+# primera (calendario.py).
 #
 # Uso: bash pruebas/e2e.sh   (antes: npm ci y pip install -r requirements.txt)
 # Las variables del Worker van con --var, que manda sobre .dev.vars: tu token de
@@ -64,4 +65,7 @@ curl -s "http://127.0.0.1:$P_API/__stats" | python3 -c "import json,sys; print('
 
 echo "== Caducidad"
 python3 "$REPO/pruebas/caducidad.py" "$P_W" "$TMP/d1" | tail -3
+
+echo "== Calendario incompleto"
+python3 "$REPO/pruebas/calendario.py" "$P_W" "$P_API" secreto_de_prueba_123
 echo "e2e: OK"
