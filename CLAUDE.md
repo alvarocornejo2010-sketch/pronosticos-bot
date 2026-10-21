@@ -26,8 +26,8 @@ Corre en dos sitios con la misma lógica:
   `*-pronosticos-bot.alvarocornejo2010.workers.dev`: es el patrón de las URLs de
   Preview, no la web (ver "Cloudflare: cómo se despliega").
 - Ficheros clave: `app.py`, `public/index.html`, `public/app.js`,
-  `validacion.py`, `worker/`, `wrangler.jsonc`, `test_paridad.py`,
-  `afinar_liga.py`, `afinar_champions.py`, `diagnostico.py`
+  `validacion.py`, `worker/`, `wrangler.jsonc`, `test_paridad.py`, `pruebas/`,
+  `.github/workflows/`, `afinar_liga.py`, `afinar_champions.py`, `diagnostico.py`
 - **El repo es público**: todo lo que se sube (y su historial) lo ve cualquiera.
   Ver "Seguridad".
 
@@ -213,7 +213,8 @@ descendidos) y da 0 diferencias en unos 187.000 valores. Y de punta a punta,
 contra una API falsa determinista (`/api/estado` con 149 partidos y 16 de
 Champions, `/api/ligas`, `/api/validacion` de las 9 ligas, con equipos que
 suben a la Premier y bajan a la Championship): 0 diferencias entre Flask y el
-Worker, también con 1 de cada 5 peticiones respondida con 429.
+Worker, también con 1 de cada 5 peticiones respondida con 429. Esa prueba está en
+`pruebas/` (ver "Pruebas automáticas").
 
 Ficheros: `config.js` (constantes, las mismas de `app.py`), `modelo.js` (el
 modelo y un `redondear` que imita a `round()` de Python, empates al par
@@ -766,10 +767,11 @@ La base D1 va enlazada por su id en `wrangler.jsonc`; el cron, también ahí.
 → "Enable Preview Builds" sin marcar). Un Worker creado desde el 22 sept 2026
 compila las ramas que no son `main` como Worker Previews (`npx wrangler
 preview`), que exige un bloque `previews` en `wrangler.jsonc`. Sin él, el check
-"Workers Builds" de cada PR sale en rojo (pasó en la PR #9), aunque producción
-despliegue bien. No se añade el bloque a propósito: cada rama tendría una URL
-pública propia, sin la base ni los secretos (la página saldría rota), y el
-proyecto evita URLs de más (`preview_urls: false`).
+"Workers Builds" de cada PR sale en rojo (pasó en las PR #9 y #10), aunque
+producción despliegue bien. No se añade el bloque a propósito: cada rama tendría
+una URL pública propia, sin la base ni los secretos (la página saldría rota), y el
+proyecto evita URLs de más (`preview_urls: false`). Los checks de las PR salen de
+GitHub Actions (ver "Pruebas automáticas").
 
 Secretos, en el panel (Settings → Variables and Secrets, tipo Secret):
 `FOOTBALL_DATA_TOKEN` y `UPDATE_SECRET`, los mismos valores que en Render →
@@ -843,6 +845,31 @@ Environment).
   publicados no suelen pasar mucho de ahí. Para más hace falta otra información
   (tiros, xG, alineaciones), que el plan free no da.
 
+## Pruebas automáticas (GitHub Actions, oct 2026)
+
+- `.github/workflows/pruebas.yml`, en cada PR y cada push a `main`, dos checks:
+  - **Paridad Python / Worker**: `node --check` de `worker/*.js` y `public/app.js`, y
+    `python test_paridad.py` ("todo igual").
+  - **Flask contra el Worker**: `bash pruebas/e2e.sh`. Levanta la API falsa
+    (`pruebas/api_falsa.py`, determinista), corre `app.py` + `validacion.py` contra
+    ella (`correr_flask.py`), arranca `wrangler dev --test-scheduled` con una D1
+    local y lanza el cron hasta que la web y la validación están listas
+    (`correr_cron.py`, que mide la CPU de workerd por pasada). Exige 0 diferencias
+    en `/api/estado`, `/api/ligas` y `/api/validacion` (`comparar.py`) y ninguna
+    pasada muerta. Después caduca todas las predicciones a la vez y comprueba que
+    la web sigue enseñando números mientras se recalculan (`caducidad.py`). Unos 10
+    minutos.
+  - Las variables del Worker van con `--var`, que manda sobre `.dev.vars`: el token
+    de verdad, si está ahí, no se usa ni sale a ningún sitio.
+  - En local, lo mismo: `npm ci`, `pip install -r requirements.txt` y
+    `bash pruebas/e2e.sh`.
+- `.github/workflows/vigilancia.yml`: cada 3 horas pide `/salud` a la web de
+  Cloudflare. Falla si hay error, si no responde o si la última actualización tiene
+  más de 90 minutos, y GitHub manda un email. Se prueba a mano en Actions →
+  vigilancia → Run workflow, con una URL que no exista. En un repo público, GitHub
+  desactiva las tareas programadas tras 60 días sin actividad (avisa antes por
+  email; se reactivan en la pestaña Actions).
+
 ## Convenciones para seguir trabajando aquí
 
 - Cualquier cambio al modelo de liga pasa por `afinar_liga.py`: se elige mirando
@@ -852,7 +879,8 @@ Environment).
   `afinar_champions.py`.
 - El modelo vive dos veces: `app.py`/`validacion.py` (Python, lo que miden las
   herramientas de afinado) y `worker/` (lo que publica Cloudflare). Un cambio
-  va en los dos y `python test_paridad.py` tiene que dar "todo igual".
+  va en los dos y `python test_paridad.py` tiene que dar "todo igual", y
+  `bash pruebas/e2e.sh`, 0 diferencias (GitHub los corre en cada PR).
 - Al cambiar el modelo, subir `VERSION_MODELO` (en `app.py` y en
   `worker/config.js`): las fuerzas guardadas se recalculan y la validación de
   Cloudflare, que D1 conserva, se repite sola.
