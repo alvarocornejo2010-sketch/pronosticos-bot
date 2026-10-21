@@ -371,6 +371,13 @@ function filaPartido(ctx, m, codigo, nombreLiga, posicion) {
 // 5 minutos, como el tick de app.py, no a cada minuto.
 const MINUTOS_REINTENTO_CALENDARIO = 5;
 
+// Un partido por jugar que deja de venir en el calendario se quita cuando falta
+// en estas descargas seguidas. football-data a veces responde 200 con la lista
+// incompleta: el 21 oct 2026 dio 5 de los 11 partidos de LaLiga de la semana, y
+// los otros 6 seguían programados. Uno aplazado de verdad tarda así una descarga
+// más en irse (2 h).
+const VECES_AUSENTE = 2;
+
 // Baja el calendario de las competiciones que lo tengan caducado (cada
 // HORAS_VALIDEZ_FIXTURES, o al cambiar el día) y lo deja en la tabla partidos.
 // Usa /competitions/{codigo}/matches y NO /v4/matches: en el plan free el
@@ -409,19 +416,33 @@ async function refrescarCalendarios(ctx, almacen, forzar) {
       mensaje_api: (r.status === 200 ? r.cuerpo.message : null) ?? null };
     if (r.status === 200) {
       const matches = r.cuerpo.matches || [];
-      sentencias.push(almacen.sentenciaBorrarPartidos(codigo));
-      matches.forEach((m, i) => {
-        const fila = filaPartido(ctx, m, codigo, nombreLiga, i);
-        if (fila) sentencias.push(almacen.sentenciaPartido(fila));
-      });
-      ctx.cache.poner("calendario", codigo, { rango, actualizado: ctx.ahoraIso(), en_lista: matches.length });
+      const filas = matches.map((m, i) => filaPartido(ctx, m, codigo, nombreLiga, i)).filter(Boolean);
+      // los que estaban, aún no han empezado y no vienen: se quedan hasta faltar VECES_AUSENTE veces
+      const llegan = new Set(filas.map((f) => f.id));
+      const antes = (meta && meta.ausentes) || {};
+      const ausentes = {};
+      for (const p of await almacen.partidosPorJugar(codigo, isoSinMs(ahoraMs))) {
+        if (llegan.has(p.id)) continue;
+        const veces = (antes[p.id] || 0) + 1;
+        if (veces < VECES_AUSENTE) ausentes[p.id] = veces;
+      }
+      const conservados = Object.keys(ausentes).map(Number);
+      if (conservados.length) {
+        console.warn(`Calendario ${codigo}: faltan ${conservados.length} partidos que venían antes `
+          + `(${conservados.join(", ")}); se conservan hasta la próxima descarga.`);
+      }
+      sentencias.push(almacen.sentenciaBorrarPartidosSalvo(codigo, conservados));
+      for (const fila of filas) sentencias.push(almacen.sentenciaPartido(fila));
+      ctx.cache.poner("calendario", codigo, { rango, actualizado: ctx.ahoraIso(), en_lista: matches.length,
+        ...(conservados.length ? { ausentes } : {}) });
     } else if (meta && meta.rango === rango && !meta.fallo) {
       // la API falló pero había algo del mismo rango: mejor eso que nada
       origen[codigo].origen = "caché (la API falló)";
     } else if (r.status !== 429) {
-      sentencias.push(almacen.sentenciaBorrarPartidos(codigo));
-      ctx.cache.poner("calendario", codigo, { rango, actualizado: ctx.ahoraIso(), en_lista: 0, fallo: true,
-        http_status: r.status });
+      // los partidos que ya había (de otro día) se quedan: siguen siendo partidos, y
+      // borrarlos dejaba la liga vacía en la web hasta el reintento
+      ctx.cache.poner("calendario", codigo, { ...(meta || {}), rango, actualizado: ctx.ahoraIso(), en_lista: 0,
+        fallo: true, http_status: r.status });
     }
   }
   if (sentencias.length) await almacen.escribir([...sentencias, ...almacen.sentenciasCache(ctx.cache)]);

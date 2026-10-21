@@ -147,8 +147,18 @@ export class Almacen {
   }
 
   // ---------- calendario y predicciones ----------
-  sentenciaBorrarPartidos(liga) {
-    return this.db.prepare("DELETE FROM partidos WHERE liga = ?1").bind(liga);
+  // Los de una liga menos los de la lista (los que faltaron en la última descarga
+  // y se conservan una más).
+  sentenciaBorrarPartidosSalvo(liga, ids) {
+    return this.db.prepare("DELETE FROM partidos WHERE liga = ?1 AND id NOT IN (SELECT value FROM json_each(?2))")
+      .bind(liga, JSON.stringify(ids));
+  }
+
+  // Los partidos de una liga en la tabla que aún no han empezado.
+  async partidosPorJugar(liga, desdeUtc) {
+    const r = await this.consultar(() => this.db.prepare(
+      "SELECT id, utc FROM partidos WHERE liga = ?1 AND utc > ?2").bind(liga, desdeUtc).all());
+    return r.results;
   }
 
   sentenciaPartido(f) {

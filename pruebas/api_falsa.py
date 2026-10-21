@@ -1,8 +1,9 @@
 """football-data.org de mentira y determinista: la misma URL da siempre la misma
 respuesta, así Flask (app.py) y el Worker ven exactamente los mismos datos.
 Además de /v4/..., responde a /__stats (peticiones recibidas), /__reset,
-/__limite?n=N (un 429 cada N peticiones) y /__jugar?si=1 (los partidos del último
-calendario pasan a estar jugados, para el registro en vivo).
+/__limite?n=N (un 429 cada N peticiones), /__jugar?si=1 (los partidos del último
+calendario pasan a estar jugados, para el registro en vivo) y
+/__omitir?liga=PD&n=3&veces=1 (calendarios incompletos).
 Uso: python pruebas/api_falsa.py PUERTO [limite429]"""
 import hashlib, json, random, re, sys, threading
 from collections import Counter
@@ -43,6 +44,8 @@ for c in ("PL", "ELC"):
         LIGA_DE[e["id"]] = c
 ULTIMO_CAL = {}      # el último calendario servido de cada competición
 JUGAR = [False]      # /__jugar: lo jugado de esta temporada incluye esos partidos, terminados
+OMITIR = {}          # /__omitir?liga=PD&n=3&veces=1: las próximas `veces` respuestas del calendario
+                     # de esa liga llegan sin sus n primeros partidos (como hizo football-data el 21 oct 2026)
 FUERZA = {e["id"]: 0.6 + (int(hashlib.md5(str(e["id"]).encode()).hexdigest()[:6], 16) % 1000) / 1000 for c in EQ for e in EQ[c]}
 INICIO = datetime.now(timezone.utc)
 FALLA_EQUIPO = EQ["SA"][7]["id"]          # sus partidos devuelven 500: se calcula solo con el prior
@@ -124,6 +127,10 @@ def responder(ruta, q):
                     if t <= INICIO + timedelta(hours=2): continue
                     out.append(partido(r, c, 500000 + 1000 * list(EQ).index(c) + mid, h, a, t, False))
             ULTIMO_CAL[c] = out
+            n, veces = OMITIR.get(c, (0, 0))
+            if veces > 0:
+                OMITIR[c] = (n, veces - 1)
+                out = out[n:]
             return 200, {"matches": out}
         if "season" in q:
             s = int(q["season"])
@@ -176,6 +183,9 @@ class H(BaseHTTPRequestHandler):
             self.send_response(200); self.end_headers(); return
         if u.path == "/__jugar":
             JUGAR[0] = q.get("si", "1") == "1"
+            self.send_response(200); self.end_headers(); return
+        if u.path == "/__omitir":
+            OMITIR[q["liga"]] = (int(q.get("n", "3")), int(q.get("veces", "1")))
             self.send_response(200); self.end_headers(); return
         if u.path == "/__reset":
             with CANDADO: CONTADOR.clear(); TOTAL[0] = 0
