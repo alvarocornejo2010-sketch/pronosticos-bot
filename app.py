@@ -189,9 +189,11 @@ DEFENSA_RECIEN_LLEGADO = {"PL": 1.3}   # ...salvo en la Premier, donde el que su
 LIGA_DE_ARRIBA = {"ELC": "PL"}
 ATAQUE_DESCENDIDO = 1.2
 DEFENSA_DESCENDIDO = 0.85
-VERSION_MODELO = 2              # subirlo al cambiar el modelo: las fuerzas guardadas se
+VERSION_MODELO = 3              # subirlo al cambiar el modelo: las fuerzas guardadas se
                                 # recalculan, cada ficha dice con cuál se calculó y en
-                                # Cloudflare (donde D1 guarda la validación) esta se repite
+                                # Cloudflare (donde D1 guarda la validación) esta se repite.
+                                # 3 (oct 2026): sin los playoffs de la Championship
+FORMATO_LISTAS = 2              # partidos_liga sin playoffs (solo_liga): las de antes se bajan otra vez
 TOLERANCIA_FUERZAS = 1e-4       # el ajuste se repite hasta que nada cambia más que esto:
                                 # con 1e-6 harían falta el doble de vueltas y los goles
                                 # esperados (con dos decimales) salen iguales salvo algún
@@ -366,6 +368,16 @@ def dia_de(utc_date):
     return (date.fromisoformat(utc_date[:10]) - _EPOCA).days
 
 
+def solo_liga(matches):
+    """Los partidos de la fase de liga, sin playoffs: los de ascenso de la
+    Championship no son liga (afinar_liga.py tampoco los cuenta) y se colaban en
+    la media, las fuerzas y la validación (557 partidos en 2025/26 en vez de 552).
+    Un partido sin `stage` cuenta. Si el filtro dejara menos de la mitad (la API
+    marcara la fase de otra forma), se quedan todos."""
+    liga = [m for m in matches if m.get("stage") in (None, "REGULAR_SEASON")]
+    return liga if 2 * len(liga) >= len(matches) else matches
+
+
 def partidos_compactos(matches):
     """[[día, local, visita, goles local, goles visita], ...] de los partidos con
     resultado, por fecha: lo que necesita ajustar_fuerzas, ~25 bytes por partido
@@ -383,7 +395,7 @@ def partidos_compactos(matches):
 def _lista_vigente(cache, clave, temporada):
     """La lista de partidos guardada de una liga, si es de esa temporada."""
     e = cache.get("partidos_liga", {}).get(clave)
-    return e if e and e.get("temporada") == temporada else None
+    return e if e and e.get("temporada") == temporada and e.get("formato") == FORMATO_LISTAS else None
 
 
 def obtener_prior_liga(codigo_liga, cache):
@@ -420,6 +432,8 @@ def obtener_prior_liga(codigo_liga, cache):
         return respaldo
 
     matches = resp.json().get("matches", [])
+    if not es_torneo:
+        matches = solo_liga(matches)
     gl = gv = n = 0
     for m in matches:
         a, b = goles_90(m)
@@ -442,7 +456,7 @@ def obtener_prior_liga(codigo_liga, cache):
     else:
         cache.setdefault("partidos_liga", {})[codigo_liga + ":previa"] = {
             "temporada": season, "partidos": partidos_compactos(matches),
-            "actualizado": entry["actualizado"]}
+            "actualizado": entry["actualizado"], "formato": FORMATO_LISTAS}
     priors[codigo_liga] = entry
     return entry
 
@@ -471,6 +485,8 @@ def obtener_promedio_liga(codigo_liga, cache):
                 "partidos": 0, "prior": prior["origen"], "actualizado": None}
 
     matches = resp.json().get("matches", [])
+    if not es_torneo:
+        matches = solo_liga(matches)
     goles_local, goles_visita, partidos = 0, 0, 0
     for match in matches:
         gl, gv = goles_90(match)
@@ -497,7 +513,7 @@ def obtener_promedio_liga(codigo_liga, cache):
     else:
         cache.setdefault("partidos_liga", {})[codigo_liga + ":actual"] = {
             "temporada": temporada_actual(codigo_liga), "partidos": partidos_compactos(matches),
-            "actualizado": promedio["actualizado"]}
+            "actualizado": promedio["actualizado"], "formato": FORMATO_LISTAS}
     cache["ligas"][codigo_liga] = promedio
     return promedio
 

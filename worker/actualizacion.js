@@ -11,7 +11,7 @@
 import {
   CODIGOS_TORNEO, COMPETICIONES, DIAS_SEMANA, DIAS_VALIDEZ_LIGA_EQUIPO, DIAS_VALIDEZ_PRIOR, FACTOR_LIGA,
   FACTOR_OTRA_LIGA, HORAS_VALIDEZ_LIGA, HORAS_VALIDEZ_PREDICCION, K_LIGA, LIGAS, LIGAS_ANO_NATURAL,
-  LIGA_DE_ARRIBA, PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA, VERSION_MODELO,
+  FORMATO_LISTAS, LIGA_DE_ARRIBA, PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA, VERSION_MODELO,
 } from "./config.js";
 import {
   ajustarFuerzas, calcularPoisson, calcularXgChampions, calcularXgPartido, equiposDePartidos, fuerzaEquipo,
@@ -111,10 +111,19 @@ export function partidosCompactos(matches) {
   return out;
 }
 
-// La lista de partidos guardada de una liga, si es de esa temporada.
+// Los partidos de la fase de liga, sin playoffs (solo_liga en app.py): los de
+// ascenso de la Championship no son liga. Un partido sin stage cuenta; si el filtro
+// dejara menos de la mitad, se quedan todos.
+export function soloLiga(matches) {
+  const todos = matches || [];
+  const liga = todos.filter((m) => m.stage == null || m.stage === "REGULAR_SEASON");
+  return 2 * liga.length >= todos.length ? liga : todos;
+}
+
+// La lista de partidos guardada de una liga, si es de esa temporada (y sin playoffs).
 function listaVigente(ctx, clave, temporada) {
   const e = ctx.cache.get("partidos_liga", clave);
-  return e && e.temporada === temporada ? e : null;
+  return e && e.temporada === temporada && e.formato === FORMATO_LISTAS ? e : null;
 }
 
 async function obtenerPriorLiga(ctx, codigo) {
@@ -136,7 +145,8 @@ async function obtenerPriorLiga(ctx, codigo) {
     ctx.fallos.set("prior:" + codigo, true);
     return respaldo;
   }
-  const { gl, gv, n } = sumarGoles(r.cuerpo.matches);
+  const matches = esTorneo ? r.cuerpo.matches : soloLiga(r.cuerpo.matches);
+  const { gl, gv, n } = sumarGoles(matches);
   // con media temporada o menos sería un ancla tan ruidosa como el problema
   if (n < 100) {
     console.warn(`Prior ${codigo}: solo ${n} partidos en ${season}, insuficiente.`);
@@ -145,10 +155,10 @@ async function obtenerPriorLiga(ctx, codigo) {
   }
   const nueva = { avg_local: gl / n, avg_visita: gv / n, origen: `temporada ${season}`, partidos: n,
     temporada: season, actualizado: ctx.ahoraIso() };
-  if (esTorneo) nueva.historial = historialDePartidos(r.cuerpo.matches);
+  if (esTorneo) nueva.historial = historialDePartidos(matches);
   else {
     ctx.cache.poner("partidos_liga", codigo + ":previa", { temporada: season,
-      partidos: partidosCompactos(r.cuerpo.matches), actualizado: nueva.actualizado });
+      partidos: partidosCompactos(matches), actualizado: nueva.actualizado, formato: FORMATO_LISTAS });
   }
   ctx.cache.poner("priors", codigo, nueva);
   return nueva;
@@ -179,7 +189,9 @@ export async function obtenerPromedioLiga(ctx, codigo, forzar = false) {
     ctx.fallos.set("liga:" + codigo, soloPrior);
     return soloPrior;
   }
-  const { gl, gv, n } = sumarGoles(r.cuerpo.matches);
+  const esTorneo = CODIGOS_TORNEO.has(codigo);
+  const matches = esTorneo ? r.cuerpo.matches : soloLiga(r.cuerpo.matches);
+  const { gl, gv, n } = sumarGoles(matches);
   // se mezcla con el prior histórico, que pesa menos conforme avanza la temporada
   const promedio = {
     avg_local: (gl + K_LIGA * prior.avg_local) / (n + K_LIGA),
@@ -190,10 +202,10 @@ export async function obtenerPromedioLiga(ctx, codigo, forzar = false) {
     prior_visita: redondear(prior.avg_visita, 3),
     actualizado: ctx.ahoraIso(),
   };
-  if (CODIGOS_TORNEO.has(codigo)) promedio.historial = historialDePartidos(r.cuerpo.matches);
+  if (esTorneo) promedio.historial = historialDePartidos(matches);
   else {
     ctx.cache.poner("partidos_liga", codigo + ":actual", { temporada: temporadaActual(ctx.reloj, codigo),
-      partidos: partidosCompactos(r.cuerpo.matches), actualizado: promedio.actualizado });
+      partidos: partidosCompactos(matches), actualizado: promedio.actualizado, formato: FORMATO_LISTAS });
   }
   ctx.cache.poner("ligas", codigo, promedio);
   const goles = new Map();

@@ -255,7 +255,8 @@ liga de las dos temporadas, compactos, `fuerzas`, `calendario` y
 borra al empezar el partido: es lo que dijo la web), `resultados` (el marcador
 a los 90 minutos de cada partido con predicción, ya sumado al registro en
 vivo), `documentos` (`estado` que sirve `/api/estado`, `resumen`, `validacion`,
-`registro` y `registro_publico`, pedidos, temporadas terminadas compactas) y
+`registro` y `registro_publico`, pedidos, temporadas terminadas compactas,
+`temporada:liga:{código}:{año}`) y
 `candado` (que dos pasadas no se pisen, hora de la última petición, pasadas
 muertas).
 
@@ -437,6 +438,18 @@ guardan los partidos compactos (`partidos_compactos`: día, local, visita,
 goles) en `partidos_liga`. Ya no hay una petición por equipo
 (`/teams/{id}/matches`): llenar la semana cuesta ~45 peticiones en vez de ~220,
 y la fuerza se actualiza cada 12 h en vez de cada 3 días.
+
+**Solo partidos de liga** (`solo_liga`/`soloLiga`, modelo 3, oct 2026). La media,
+las listas de `partidos_liga` y las temporadas de la validación cuentan solo los
+partidos con `stage` `REGULAR_SEASON` (o sin `stage`). Sin esto, los playoffs de
+ascenso de la Championship se colaban: 557 partidos en la temporada 2025/26 en
+vez de 552. `afinar_liga.py` ya los quitaba, así que ahora producción mide lo
+mismo que se afinó. Si el filtro dejara menos de la mitad (la API marcara la fase
+de otra forma), se quedan todos. La Champions no pasa por el filtro. Las listas
+llevan `formato` (`FORMATO_LISTAS` = 2) y las de antes se vuelven a bajar. Las
+temporadas de la validación van con otro nombre: en D1, `temporada:liga:PD:2025`
+(las `temporada:PD:2025` de antes ya no se leen); en disco,
+`validacion_cache/PD_2025_liga.json`.
 
 **El de antes** (hasta oct 2026), para comparar: los últimos 20 partidos de
 cada equipo en 400 días, en casa y fuera por separado (el ataque en casa salía
@@ -646,7 +659,8 @@ Brasileirão         277    +1.1%     +3.5%   (-1.7 se)   (2026 hasta octubre)
   mide con la temporada completa y la anterior de football-data.
 - En la Championship se quitan los playoffs de ascenso: no son liga, y
   openfootball los escribe de tres formas distintas según la temporada (solo
-  vale `round` con "Matchday").
+  vale `round` con "Matchday"). En la app, desde el modelo 3, también
+  (`solo_liga`, ver "El modelo").
 
 `validacion.py` corre ese mismo backtest walk-forward **dentro de la app**
 (`/validar?token=...`, resultado en `/api/validacion`): importa
