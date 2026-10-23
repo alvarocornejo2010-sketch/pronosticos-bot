@@ -137,10 +137,22 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
   al de la ventana. Las columnas entran por prioridad: <640px compacta (equipos
   apilados + 1 X 2), ≥640px tabla con 1 X 2, ≥780px más de 2.5 y ambos marcan,
   ≥940px 1X/X2/12, ≥1080px goles esperados y muestra, ≥1280px la barra de
-  reparto. Al abrir un partido sale el detalle, con los mercados de goles
-  (histograma de goles totales, más/menos 1.5-3.5, ambos marcan, porterías a
-  cero, tres marcadores) y una nota con lo que mide su liga. La columna Liga
-  solo aparece en las vistas que mezclan ligas.
+  reparto. La columna Liga solo aparece en las vistas que mezclan ligas.
+- **El detalle de un partido** (al abrirlo, oct 2026; antes era una lista de
+  etiquetas con frases). Arriba, los dos equipos frente a frente (escudo,
+  nombre entero y "Seguir"), y en medio la liga, la hora y Compartir. Debajo,
+  bloques con título pequeño: Quién gana (una barra repartida 1/X/2, cada tramo
+  en el tono de la rampa de su probabilidad, con leyenda), Doble oportunidad
+  (tres casillas), Goles esperados (dos barras enfrentadas desde el centro, en
+  la tinta del texto: no son probabilidades), Portería a cero, Goles en el
+  partido (el histograma 0 a 5+), Más / menos (1.5, 2.5 y 3.5, una barra
+  repartida cada una), Ambos marcan y Marcadores más probables (tres
+  casillas). Al final, apagado, "Cómo se calculó": muestra, cuándo, lo de la
+  Champions y las notas. Los avisos (pocos partidos, liga fuera del plan,
+  números viejos) van justo debajo de los equipos. Con el panel central de
+  760px o más (container query `centro`), resultado y goles en dos columnas.
+  Todos los % son enteros, los mismos que la tabla (`reparto`); "menos de" y
+  "ambos marcan: no" son 100 menos el entero de "más de" y "sí".
 - Los % de 1/X/2 se redondean por resto mayor para que sumen 100, y la doble
   oportunidad se suma de esos mismos enteros: lo que se lee, cuadra. Igual el
   histograma de goles; "menos de" y "ambos marcan: no" se restan del número ya
@@ -389,7 +401,8 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
 
 ## Compartir y favoritos (oct 2026)
 
-- **Compartir:** cada partido abierto tiene un botón Compartir. En el móvil abre
+- **Compartir:** cada partido abierto tiene un botón Compartir (en la cabecera del
+  detalle, bajo la hora). En el móvil abre
   el menú del sistema (WhatsApp, Telegram...); si no lo hay, copia el enlace
   `/partido/123`. Esa ruta la sirve el Worker (`compartir.js`): pide `index.html`
   a los archivos estáticos (con sus cabeceras de `public/_headers`, CSP incluida)
@@ -403,7 +416,7 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
   de dominio, cambiarla ahí). La web, al ver `/partido/123`, abre ese partido en
   cuanto tiene datos y deja la dirección en `/#/dia/...` (`abrirEnlazado`); si ya
   empezó, lo dice y va a `#/`. En Render, `/partido/123` sirve la web sin tarjeta.
-- **Favoritos:** en el detalle, "Seguir a" con una estrella por equipo. Se
+- **Favoritos:** en el detalle, "Seguir" con una estrella bajo cada equipo. Se
   guardan en el navegador (`pronosticos.favoritos`, los nombres completos, hasta
   60), sin cuenta. Sus partidos salen en `#/favoritos` ("Mis equipos", en el
   tablero de Ligas y en la tira de ligas del móvil), en un grupo "Mis equipos"

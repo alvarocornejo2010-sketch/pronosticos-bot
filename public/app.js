@@ -319,42 +319,154 @@ function htmlFila(p, ctx, abierto) {
     + (abierto && !p.pendiente ? htmlDetalle(p) : "");
 }
 
+// El detalle de un partido, de un vistazo: arriba los dos equipos; luego el
+// resultado (1X2 repartido, doble oportunidad, goles esperados y porterías a cero)
+// y los goles (cuántos, más/menos, ambos marcan, marcadores), con los mismos
+// enteros que la tabla y la escala oro de la probabilidad; abajo, apagado, cómo se
+// calculó. En un panel ancho, resultado y goles van en dos columnas.
 function htmlDetalle(p) {
   const m = muestraDe(p);
-  const aviso = m.min < 4
+  const ch = p.champions;
+  const vieja = p.calculado && Date.now() - Date.parse(p.calculado) > 26 * 3600000;
+  const avisos = (ch ? htmlAvisoChampions(p, m) : htmlAvisoMuestra(m))
+    + (vieja ? '<p class="aviso">' + ICONO_AVISO + '<span>Calculado ' + esc(haceCuanto(p.calculado))
+      + ': la API no responde y estos son los números de entonces.</span></p>' : "");
+  const resultado = htmlBloque("Quién gana", htmlQuienGana(p))
+    + htmlBloque("Doble oportunidad", htmlDobleOportunidad(p))
+    + htmlBloque("Goles esperados", htmlGolesEsperados(p))
+    + (conGoles(p) ? htmlBloque("Portería a cero", htmlPorteriaCero(p)) : "");
+  const goles = conGoles(p)
+    ? htmlBloque("Goles en el partido", htmlGraficoGoles(p), f2(p.goles_total) + " esperados")
+      + htmlBloque("Más / menos", htmlMasMenos(p))
+      + htmlBloque("Ambos marcan", htmlAmbosMarcan(p))
+      + ((p.marcadores || []).length ? htmlBloque("Marcadores más probables", htmlMarcadores(p)) : "")
+    : "";
+  return '<div class="detalle">' + htmlCabeceraDetalle(p) + avisos
+    + '<div class="det-rejilla' + (goles ? "" : " una") + '"><div class="det-col">' + resultado + '</div>'
+    + (goles ? '<div class="det-col">' + goles + '</div>' : "") + '</div>'
+    + htmlComoSeCalculo(p, m) + '</div>';
+}
+
+function htmlBloque(titulo, cuerpo, meta) {
+  return '<section class="det-bloque"><h3>' + esc(titulo) + (meta ? ' <small>' + esc(meta) + '</small>' : "") + '</h3>'
+    + cuerpo + '</section>';
+}
+
+// Los dos equipos frente a frente, cada uno con su estrella para seguirlo, y en
+// medio la liga, la hora y Compartir.
+function htmlCabeceraDetalle(p) {
+  const eq = (lado) => {
+    const si = favoritos.has(p[lado]);
+    return '<div class="det-eq ' + lado + '">' + htmlEscudo(p[lado + "_escudo"], cortoDe(p, lado))
+      + '<span class="n">' + esc(p[lado]) + '</span><span class="rol">' + (lado === "local" ? "Local" : "Visitante") + '</span>'
+      + '<button class="accion" data-seguir="' + esc(p[lado]) + '" aria-pressed="' + si + '"'
+      + ' aria-label="' + esc((si ? "Dejar de seguir a " : "Seguir a ") + cortoDe(p, lado)) + '">'
+      + (si ? ICONO_ESTRELLA_LLENA : ICONO_ESTRELLA) + '<span>' + (si ? "Siguiendo" : "Seguir") + '</span></button></div>';
+  };
+  return '<div class="det-cab">' + eq("local")
+    + '<div class="det-cuando">' + htmlInsignia(p.liga_codigo) + '<span class="hora">' + esc(p.hora) + '</span>'
+    + '<span class="dia">' + esc(p.dia) + " " + esc(fechaCorta(p.fecha)) + '</span>'
+    + '<button class="accion" data-compartir="' + esc(p.id) + '">' + ICONO_COMPARTIR + '<span>Compartir</span></button></div>'
+    + eq("visita") + '</div>';
+}
+
+// Una barra repartida en tramos (1X2, más/menos, ambos marcan): cada uno con el
+// tono de la escala de su probabilidad y su número dentro si cabe; 2px de aire
+// entre tramos. partes: [{ v: entero, nombre }].
+function htmlReparto(partes, clase) {
+  const etiqueta = partes.map(x => x.nombre + " " + x.v + " %").join(", ");
+  return '<div class="reparto' + (clase ? " " + clase : "") + '" role="img" aria-label="' + esc(etiqueta) + '">'
+    + partes.map(x => '<i style="flex:' + Math.max(x.v, 1) + ";" + estiloTramo(x.v) + '">'
+      + (x.v >= 13 ? '<b>' + x.v + '</b>' : "") + '</i>').join("") + '</div>';
+}
+
+function htmlQuienGana(p) {
+  const r = reparto(p), g = veredictoDe(p).signo;
+  const partes = [
+    { v: r.l, nombre: cortoDe(p, "local"), s: "1" },
+    { v: r.x, nombre: "Empate", s: "X" },
+    { v: r.v, nombre: cortoDe(p, "visita"), s: "2" },
+  ];
+  return htmlReparto(partes, "grande")
+    + '<div class="rep-ley" aria-hidden="true">' + partes.map(x => '<span class="' + (x.s === g ? "fav" : "") + '">'
+      + '<span class="nom"><i style="' + estiloTramo(x.v) + '"></i><span class="k">' + esc(x.nombre) + '</span></span>'
+      + '<b>' + x.v + ' %</b></span>').join("") + '</div>';
+}
+
+// La doble oportunidad, sumada de los mismos enteros que la tabla.
+function htmlDobleOportunidad(p) {
+  const r = reparto(p);
+  return '<div class="casillas">' + [
+    ["1X", r.l + r.x, "Local o empate"],
+    ["X2", r.x + r.v, "Empate o visitante"],
+    ["12", r.l + r.v, "Sin empate"],
+  ].map(c => '<span class="cas" style="' + estiloTramo(c[1]) + '" aria-label="' + esc(c[2] + ": " + c[1] + " %") + '">'
+    + '<small aria-hidden="true">' + c[0] + '</small><b aria-hidden="true">' + c[1] + '</b>'
+    + '<span class="que" aria-hidden="true">' + esc(c[2]) + '</span></span>').join("") + '</div>';
+}
+
+// Los goles esperados de cada uno, enfrentados desde el centro (no es una
+// probabilidad: barras en la tinta del texto, no en oro).
+function htmlGolesEsperados(p) {
+  const tope = Math.max(3, p.xg_local, p.xg_visita);
+  const ancho = (v) => (Math.min(v, tope) / tope * 100).toFixed(1) + "%";
+  return '<div class="xg" role="img" aria-label="' + esc("Goles esperados: " + cortoDe(p, "local") + " " + f2(p.xg_local)
+      + ", " + cortoDe(p, "visita") + " " + f2(p.xg_visita)) + '">'
+    + '<b class="num">' + f2(p.xg_local) + '</b><span class="xg-b izq"><i style="width:' + ancho(p.xg_local) + '"></i></span>'
+    + '<span class="xg-b der"><i style="width:' + ancho(p.xg_visita) + '"></i></span><b class="num">' + f2(p.xg_visita) + '</b></div>'
+    + '<div class="xg-ley" aria-hidden="true"><span>' + esc(cortoDe(p, "local")) + '</span><span>' + esc(cortoDe(p, "visita")) + '</span></div>';
+}
+
+function htmlPorteriaCero(p) {
+  return ["local", "visita"].filter(lado => typeof p["prob_cero_" + lado] === "number").map(lado => {
+    const v = Math.round(p["prob_cero_" + lado]);
+    return '<div class="cero"><span class="k">' + esc(cortoDe(p, lado)) + ' no encaja</span>'
+      + '<span class="mini" aria-hidden="true"><i style="width:' + v + '%;' + estiloTramo(v) + '"></i></span><b>' + v + ' %</b></div>';
+  }).join("");
+}
+
+// "Menos de" es el complemento de "más de", del entero ya redondeado: cada barra suma 100.
+function htmlMasMenos(p) {
+  return '<div class="lineas"><div class="lin-cab" aria-hidden="true"><span></span><span>más</span><span>menos</span></div>'
+    + [["1.5", p.prob_mas_15], ["2.5", p.prob_mas_25], ["3.5", p.prob_mas_35]].filter(l => typeof l[1] === "number").map(l => {
+      const mas = Math.round(l[1]);
+      return '<div class="lin"><span class="k">' + l[0] + '</span>'
+        + htmlReparto([{ v: mas, nombre: "Más de " + l[0] }, { v: 100 - mas, nombre: "Menos de " + l[0] }]) + '</div>';
+    }).join("") + '</div>';
+}
+
+function htmlAmbosMarcan(p) {
+  const si = Math.round(p.prob_ambos);
+  return htmlReparto([{ v: si, nombre: "Sí" }, { v: 100 - si, nombre: "No" }])
+    + '<div class="rep-ley dos" aria-hidden="true"><span><span class="nom"><span class="k">Sí</span></span><b>' + si + ' %</b></span>'
+    + '<span><span class="nom"><span class="k">No</span></span><b>' + (100 - si) + ' %</b></span></div>';
+}
+
+function htmlMarcadores(p) {
+  return '<div class="marcs">' + p.marcadores.map((mk, i) => '<span class="marc' + (i === 0 ? " primero" : "") + '">'
+    + '<b>' + mk[0] + "–" + mk[1] + '</b><small>' + Math.round(mk[2]) + ' %</small></span>').join("") + '</div>';
+}
+
+function htmlAvisoMuestra(m) {
+  return m.min < 4
     ? '<p class="aviso">' + ICONO_AVISO + '<span>Solo ' + m.min + ' partido' + (m.min === 1 ? "" : "s")
       + ' de liga en la muestra: la estimación tira hacia un equipo medio (o, si acaba de subir, hacia lo'
       + ' habitual de un ascendido).</span></p>'
     : "";
-  const dato = (t, v) => '<div><dt>' + t + '</dt><dd>' + v + '</dd></div>';
+}
+
+/** Lo que no es el pronóstico sino de dónde sale: apagado, al final. */
+function htmlComoSeCalculo(p, m) {
   const ch = p.champions;
-  const muestraTxt = (ch ? "en su liga: " : "") + m.l + " partidos del local y " + m.v
+  const dato = (t, v) => '<div><dt>' + t + '</dt><dd>' + v + '</dd></div>';
+  const muestraTxt = (ch ? "En su liga: " : "") + m.l + " partidos del local y " + m.v
     + " del visitante, de esta temporada y la anterior";
-  return '<div class="detalle">' + htmlAcciones(p) + '<dl>'
-    + dato("Partido", esc(p.local) + " – " + esc(p.visita))
-    + dato("Competición", esc(p.liga) + ", " + esc(p.dia) + " " + fechaLarga(p.fecha) + ", " + esc(p.hora))
-    + dato("1 X 2", "local " + pct(p.prob_local) + ", empate " + pct(p.prob_empate) + ", visitante " + pct(p.prob_visita))
-    + dato("Doble oportunidad", "1X " + pct(p.prob_1x) + ", X2 " + pct(p.prob_x2) + ", 12 " + pct(p.prob_12))
-    + dato("Goles esperados", f2(p.xg_local) + " – " + f2(p.xg_visita))
+  return '<section class="det-datos"><h3>Cómo se calculó</h3><dl>'
     + dato("Muestra", muestraTxt)
     + (p.calculado ? dato("Calculado", htmlCalculado(p.calculado)) : "")
     + (ch ? dato("Nivel de liga", htmlNivelChampions(p)) : "")
     + (ch && ch.local && ch.local.partidos_cl !== undefined ? dato("En la Champions, frente a lo esperado", htmlHistorialChampions(p)) : "")
-    + (conGoles(p) ? htmlDetalleGoles(p, dato) : "")
-    + '</dl>' + (ch ? htmlAvisoChampions(p, m) : aviso) + (ch ? htmlNotaChampions() : "")
-    + (conGoles(p) ? htmlNotaGoles(p) : "") + '</div>';
-}
-
-/** Seguir a cada equipo (estrella) y compartir el partido. */
-function htmlAcciones(p) {
-  const seguir = (lado) => {
-    const si = favoritos.has(p[lado]);
-    return '<button class="accion" data-seguir="' + esc(p[lado]) + '" aria-pressed="' + si + '">'
-      + (si ? ICONO_ESTRELLA_LLENA : ICONO_ESTRELLA) + '<span>' + (si ? "Sigues a " : "Seguir a ") + esc(cortoDe(p, lado))
-      + '</span></button>';
-  };
-  return '<div class="acciones">' + seguir("local") + seguir("visita")
-    + '<button class="accion" data-compartir="' + esc(p.id) + '">' + ICONO_COMPARTIR + '<span>Compartir</span></button></div>';
+    + '</dl>' + (ch ? htmlNotaChampions() : "") + (conGoles(p) ? htmlNotaGoles(p) : "") + '</section>';
 }
 
 // Una predicción se rehace cada 24 h; si es más vieja, la API lleva tiempo sin
@@ -415,24 +527,6 @@ function htmlNotaChampions() {
     + 'la anterior: lo que marcó y encajó frente a lo esperado de un equipo de su liga contra esos mismos rivales. '
     + 'Medido con cuatro Champions (2022/23 a 2025/26, 628 partidos): acierta un 13 % mejor que no saber nada, y el '
     + 'historial suma casi 1 punto a lo que daba la liga sola.</p>';
-}
-
-function htmlDetalleGoles(p, dato) {
-  // "menos de" es el complemento de "más de", restado del número ya redondeado
-  // para que cada fila sume 100.0 a la vista
-  const uno = v => Math.round(v * 10) / 10;
-  const ou = '<table class="ou"><tr><th>Goles</th><th>Más</th><th>Menos</th></tr>'
-    + [["1.5", p.prob_mas_15], ["2.5", p.prob_mas_25], ["3.5", p.prob_mas_35]].map(l =>
-        '<tr><td>' + l[0] + '</td><td>' + pct(uno(l[1])) + '</td><td>' + pct(100 - uno(l[1])) + '</td></tr>').join("")
-    + '</table>';
-  const ambos = uno(p.prob_ambos);
-  const marcadores = (p.marcadores || []).map(m => '<span class="nw">' + m[0] + "-" + m[1] + " (" + pct(m[2]) + ")</span>").join(", ");
-  return dato("Goles en el partido", f2(p.goles_total) + " esperados" + htmlGraficoGoles(p))
-    + dato("Más / menos", ou)
-    + dato("Ambos marcan", "sí " + pct(ambos) + ", no " + pct(100 - ambos))
-    + dato("Portería a cero", esc(cortoDe(p, "local")) + " " + pct(p.prob_cero_local)
-           + ", " + esc(cortoDe(p, "visita")) + " " + pct(p.prob_cero_visita))
-    + (marcadores ? dato("Marcadores más probables", marcadores) : "");
 }
 
 /** Goles totales del partido, 0 a 5+: un histograma de seis barras con su valor
