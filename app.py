@@ -1249,6 +1249,14 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/partido/<int:id_partido>")
+def partido(id_partido):
+    """El enlace para compartir un partido: la misma web, que abre ese partido.
+    La tarjeta con sus números (Open Graph) solo la pone Cloudflare
+    (worker/compartir.js); aquí sale la de siempre."""
+    return render_template("index.html")
+
+
 @app.route("/app.js")
 def app_js():
     return send_from_directory(app.template_folder, "app.js", mimetype="text/javascript")

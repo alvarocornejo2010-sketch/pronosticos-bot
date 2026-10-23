@@ -5,7 +5,8 @@
 # /api/validacion; ninguna pasada puede morir; y, con la web llena, todas las
 # predicciones caducan a la vez y la web tiene que seguir enseñando números
 # (caducidad.py), un calendario que llega incompleto no le quita partidos a la
-# primera (calendario.py) y las visitas se cuentan como deben (visitas.py).
+# primera (calendario.py), /partido/123 lleva la tarjeta de ese partido
+# (compartir.py) y las visitas se cuentan como deben (visitas.py).
 #
 # Uso: bash pruebas/e2e.sh   (antes: npm ci y pip install -r requirements.txt)
 # Las variables del Worker van con --var, que manda sobre .dev.vars: tu token de
@@ -70,6 +71,9 @@ python3 "$REPO/pruebas/caducidad.py" "$P_W" "$TMP/d1" | tail -3
 
 echo "== Calendario incompleto"
 python3 "$REPO/pruebas/calendario.py" "$P_W" "$P_API" secreto_de_prueba_123
+
+echo "== Compartir"
+python3 "$REPO/pruebas/compartir.py" "$P_W"
 
 echo "== Visitas"
 python3 "$REPO/pruebas/visitas.py" "$P_W" secreto_de_prueba_123

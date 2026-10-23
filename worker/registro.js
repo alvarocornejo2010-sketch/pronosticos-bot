@@ -29,6 +29,28 @@ export const MARGEN_TERMINADO_MS = 150 * 60000;
 const ULTIMOS = 30;
 const MIN_CALIBRACION = 20;
 const MS_DIA = 86400000;
+// El resumen por días (la web enseña la última semana): se guardan 21 días.
+export const DIAS_RESUMEN = 21;
+// Tramos de confianza del favorito: su probabilidad en el 1X2, en %.
+export const TRAMOS = [["claros", 60], ["medios", 45], ["renidos", 0]];
+const tramoDe = (prob) => TRAMOS.find(([, min]) => prob >= min)[0];
+const cuatro = (x) => Math.round(x * 1e4) / 1e4;
+// Lo que se guarda de cada partido: lo justo para pintarlo como uno más de la web.
+const CAMPOS_PARTIDO = ["id", "liga_codigo", "liga", "local", "visita", "local_corto", "visita_corto",
+  "local_sigla", "visita_sigla", "prob_local", "prob_empate", "prob_visita"];
+
+function entradaDe(ficha, gl, gv, local) {
+  const e = { id: ficha.id, utcDate: ficha.utcDate, fecha: local.fecha, hora: local.hora };
+  for (const c of CAMPOS_PARTIDO) e[c] ??= ficha[c] ?? null;
+  e.gl = gl;
+  e.gv = gv;
+  return e;
+}
+
+// El favorito como en la web (veredictoDe): el mayor; si empatan, el primero (1, X, 2).
+export function favoritoDe(e) {
+  return [["1", e.prob_local], ["X", e.prob_empate], ["2", e.prob_visita]].reduce((a, b) => (b[1] > a[1] ? b : a));
+}
 
 const NOMBRES = Object.fromEntries(Object.entries(COMPETICIONES).map(([n, c]) => [c, n]));
 export const isoSinMs = (ms) => new Date(ms).toISOString().slice(0, 19) + "Z";
@@ -67,6 +89,29 @@ export class Registro {
     this.total = new Cuenta(g && g.total);
     this.ligas = Object.fromEntries(Object.entries((g && g.ligas) || {}).map(([c, x]) => [c, new Cuenta(x)]));
     this.ultimos = g ? g.ultimos : [];
+    // {fecha: {n, ac, esp, tramos: {claros: [n, ac, esp]...}, sorpresa}}: cuántos
+    // terminaron ese día, en cuántos acertó el favorito, cuántos aciertos
+    // esperaban sus propias probabilidades, y el fallo del favorito más claro.
+    // null: un registro de antes, que hay que rehacer (rehacerDias).
+    this.dias = g ? (g.dias ?? null) : {};
+  }
+
+  anotarDia(e) {
+    const [signo, prob] = favoritoDe(e);
+    const paso = e.gl > e.gv ? "1" : e.gl === e.gv ? "X" : "2";
+    const acierto = signo === paso;
+    const d = (this.dias[e.fecha] ??= { n: 0, ac: 0, esp: 0, tramos: {}, sorpresa: null });
+    const t = (d.tramos[tramoDe(prob)] ??= [0, 0, 0]);
+    d.n++;
+    t[0]++;
+    if (acierto) { d.ac++; t[1]++; }
+    d.esp = cuatro(d.esp + prob / 100);
+    t[2] = cuatro(t[2] + prob / 100);
+    if (!acierto && (!d.sorpresa || prob > favoritoDe(d.sorpresa)[1])) d.sorpresa = e;
+    const fechas = Object.keys(this.dias).sort();
+    const corte = new Date(Date.parse(fechas[fechas.length - 1] + "T00:00:00Z") - DIAS_RESUMEN * MS_DIA)
+      .toISOString().slice(0, 10);
+    for (const f of fechas) if (f <= corte) delete this.dias[f];
   }
 
   // Un partido terminado: la ficha que publicó la web y el marcador a los 90
@@ -94,14 +139,9 @@ export class Registro {
     const utc = ficha.utcDate;
     if (!this.desde || utc < this.desde) { this.desde = utc; this.desde_fecha = local.fecha; }
     if (!this.hasta || utc > this.hasta) this.hasta = utc;
-    // lo justo para pintarlo como un partido más de la web
-    this.ultimos.push({
-      id: ficha.id, utcDate: utc, fecha: local.fecha, hora: local.hora, liga_codigo: codigo, liga: ficha.liga,
-      local: ficha.local, visita: ficha.visita, local_corto: ficha.local_corto ?? null,
-      visita_corto: ficha.visita_corto ?? null, local_sigla: ficha.local_sigla ?? null,
-      visita_sigla: ficha.visita_sigla ?? null,
-      prob_local: ficha.prob_local, prob_empate: ficha.prob_empate, prob_visita: ficha.prob_visita, gl, gv,
-    });
+    const e = entradaDe(ficha, gl, gv, local);
+    this.ultimos.push(e);
+    this.anotarDia(e);
     this.ultimos.sort((a, b) => (a.utcDate < b.utcDate ? 1 : a.utcDate > b.utcDate ? -1 : a.id - b.id));
     this.ultimos.length = Math.min(this.ultimos.length, ULTIMOS);
   }
@@ -124,12 +164,31 @@ export class Registro {
       ligas,
       calibracion: this.total.modelo.calibracion(MIN_CALIBRACION),
       ultimos: this.ultimos.slice(0, 12),
+      // los últimos 14 días, de más viejo a más nuevo: la web suma los de su semana
+      semana: Object.keys(this.dias || {}).sort().slice(-14).map((fecha) => ({ fecha, ...this.dias[fecha] })),
     };
   }
 
   toJSON() {
     return { desde: this.desde, desde_fecha: this.desde_fecha, hasta: this.hasta, total: this.total, ligas: this.ligas,
-      ultimos: this.ultimos };
+      ultimos: this.ultimos, dias: this.dias };
+  }
+}
+
+// Un registro de antes del resumen por días se rehace una vez con lo ya
+// liquidado (resultados y la ficha publicada). json_extract: sin leer las fichas
+// enteras, que cuesta CPU.
+export async function rehacerDias(registro, almacen, reloj, ahora) {
+  registro.dias = {};
+  const db = almacen.db;
+  const cols = CAMPOS_PARTIDO.map((c) => `json_extract(p.ficha, '$.${c}') AS c_${c}`).join(", ");
+  const r = await almacen.consultar(() => db.prepare(
+    `SELECT r.gl, r.gv, p.utc, ${cols} FROM resultados r JOIN predicciones p ON p.id = r.id
+     WHERE r.contado = 1 AND r.utc >= ?1 ORDER BY r.utc, r.id`).bind(isoSinMs(ahora - DIAS_RESUMEN * MS_DIA)).all());
+  for (const f of r.results) {
+    const ficha = { utcDate: f.utc };
+    for (const c of CAMPOS_PARTIDO) ficha[c] = f["c_" + c];
+    registro.anotarDia(entradaDe(ficha, f.gl, f.gv, reloj.local(Date.parse(f.utc))));
   }
 }
 
@@ -156,7 +215,10 @@ export async function liquidar(ctx, almacen) {
     // empezados, pero una ficha rehecha por un cambio de hora podría quedar después)
     const cuenta = Date.parse(ficha.calculado) < Date.parse(ficha.utcDate);
     if (cuenta) {
-      registro ??= new Registro(await almacen.leerDoc("registro"));
+      if (!registro) {
+        registro = new Registro(await almacen.leerDoc("registro"));
+        if (registro.dias === null) await rehacerDias(registro, almacen, ctx.reloj, ahora);
+      }
       registro.anotar(ficha, g[0], g[1], r.media, ctx.reloj.local(Date.parse(ficha.utcDate)));
     }
     sentencias.push(almacen.sentenciaResultado(f.id, f.liga, f.utc, g[0], g[1], cuenta, ahora));
