@@ -204,7 +204,8 @@ resultado), `/api/registro` (el registro en vivo; en Render responde
 no hace nada). Solo en Cloudflare: `/visitas?token=...`, el panel de visitas, y
 `/api/visitas?token=...`, lo mismo en JSON (ver "Visitas"). Y `/partido/123`, la
 web con la tarjeta de ese partido para compartir (en Render, la web sin tarjeta;
-ver "Compartir y favoritos").
+ver "Compartir y favoritos"), y `/robots.txt` y `/sitemap.xml` para los buscadores
+(ver "Instalable y buscadores").
 
 **Efecto secundario de cada deploy:** el disco de Render free es efímero, cada
 deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
@@ -242,8 +243,8 @@ incluidos), `actualizacion.js` (la pasada), `validacion.js`, `metricas.js`
 (Brier, LogLoss, acierto y calibración, los de `validacion.py`), `registro.js`
 (el registro en vivo), `planificador.js` (el cron), `almacen.js` (D1), `api.js`
 (football-data con su presupuesto), `tiempo.js` (hora de Lima), `visitas.js`
-(el contador de visitas), `compartir.js` (la tarjeta de `/partido/123`) e
-`index.js` (rutas).
+(el contador de visitas), `compartir.js` (la tarjeta de `/partido/123`),
+`buscadores.js` (`robots.txt` y `sitemap.xml`) e `index.js` (rutas).
 
 **El ritmo lo marca la CPU.** El plan gratis da 10 ms por ejecución y leer el
 JSON de la API cuesta ~7 ms por MB, así que en vez de una pasada de 40
@@ -397,7 +398,9 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
 - **Compartir y favoritos** también se cuentan: veces que se pulsó Compartir
   (`compartir`, por partido), visitas que llegaron por un enlace `/partido/123`
   (`enlace`), estrellas puestas (`favorito`) y visitantes que siguen a algún
-  equipo (`con_favoritos`). En el panel, el tablero "Compartir y favoritos".
+  equipo (`con_favoritos`). Y la app: instalaciones (`instalada`) y visitantes
+  que entraron desde la app instalada (`en_app`, `display-mode: standalone`). En
+  el panel, el tablero "Compartir, favoritos y app".
 
 ## Compartir y favoritos (oct 2026)
 
@@ -423,6 +426,41 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
   al principio de cada día (sin repetirse en su liga), primero en Próximos y con
   una estrella junto al nombre. La estrella va en blanco: el oro es la
   probabilidad.
+
+## Instalable y buscadores (oct 2026)
+
+- **Instalar como app:** `public/manifest.webmanifest` (nombre, `standalone`,
+  colores de la web e iconos 192, 512 y 512 "maskable", más
+  `apple-touch-icon.png` para el iPhone; todos del logo Casilla, hechos con
+  Playwright) y `public/sw.js`, un service worker que solo toca las navegaciones:
+  si no hay red, responde una página "Sin conexión" (503) en vez del error del
+  navegador. No guarda nada en caché: la web va con `no-store` y los números
+  cambian cada minuto. Chrome la da por instalable (`Page.getInstallabilityErrors`
+  vacío). Cuando el navegador ofrece instalarla (`beforeinstallprompt`: Chrome,
+  Edge, Android), sale "Instalar app" en la cabecera ("App" en el móvil, que no
+  cabe; por debajo de 380px el estado se queda en su punto); en el iPhone se
+  instala desde Compartir → "Añadir a pantalla de inicio". La CSP lleva
+  `manifest-src 'self'` y `worker-src 'self'` en los dos sitios. En Flask, los
+  archivos de `public/` que no son la página van por una lista cerrada
+  (`ARCHIVOS_WEB`), y `sw.js` lleva la CSP de la web (su `connect-src 'self'` es
+  lo que le deja pedir la página).
+- **Buscadores:** toda la web va detrás del `#`, que Google no ve como páginas
+  distintas; lo que sí ve son los `/partido/123`, cada uno con su título, su
+  `meta description` (la misma que la tarjeta) y su `canonical`. El Worker sirve
+  `/robots.txt` (sí a la web y los partidos; no a `/api/`, `/visitas`,
+  `/actualizar` ni `/validar`) y `/sitemap.xml` con la portada y los partidos por
+  jugar (`buscadores.js`, una consulta a D1). Las direcciones salen del origen de
+  la petición. Solo en Cloudflare. Para que Google lo lea antes, falta darlo de
+  alta en Search Console (verificar la propiedad con una etiqueta `meta`, la
+  pondría el dueño de la cuenta).
+- **Ligas de fiabilidad baja:** la Championship (+2.7 % de mejora sobre "no
+  saber nada", 2.855 partidos) y el Brasileirão (+3.5 %, 277) aportan mucho menos
+  que las demás (+7.5 a +15.6 %, ver "Validación"). La web lo marca:
+  "fiabilidad baja" en la cabecera de su grupo (con un tooltip que lo explica),
+  en su fila del tablero de Ligas y en el título de su vista, y un aviso en el
+  detalle de cada partido. Los números están fijos en `POCO_FIABLES` (`app.js`),
+  medidos con `afinar_liga.py` en las temporadas de prueba: si se reajusta el
+  modelo, actualizarlos.
 
 ## Seguridad (revisada en oct 2026)
 
@@ -451,9 +489,10 @@ la cuenta; para que los siguientes no lo lleven: GitHub → Settings → Emails 
 **Cabeceras** (las mismas en `app.py` y `public/_headers`; `test_paridad.py`
 comprueba que coinciden): `nosniff`, `X-Frame-Options: DENY`, `no-referrer`,
 `no-store`, HSTS de un año y una **CSP** que solo deja cargar el JS de la propia
-web (`script-src 'self'`, nada en línea), las fuentes de Google y los escudos de
-`crests.football-data.org`; un escudo de otro dominio se bloquea y la web pinta
-el monograma. Probado en Chromium en los dos sitios: la web pinta igual, sin
+web (`script-src 'self'`, nada en línea), las fuentes de Google, los escudos de
+`crests.football-data.org`, y el manifiesto y el service worker de la propia web
+(`manifest-src 'self'`, `worker-src 'self'`); un escudo de otro dominio se
+bloquea y la web pinta el monograma. Probado en Chromium en los dos sitios: la web pinta igual, sin
 violaciones, y un `<img onerror=...>` inyectado a mano no se ejecuta. Las
 respuestas JSON llevan `default-src 'none'`.
 
@@ -939,13 +978,14 @@ Environment).
 ## Pendiente (por orden de lo que más mueve la aguja)
 
 - **Mirar `/visitas` a las dos semanas** (en marcha desde oct 2026), también
-  "Compartir y favoritos". Con eso se decide lo siguiente, ideas ya habladas:
-  instalarla como app, un dominio propio (más fácil de recordar, Search Console
-  y la regla de límite de peticiones; ojo, `og:url`/`og:image` de `index.html`
-  llevan workers.dev) y, si hay gente que vuelve, cuentas para una porra gratis
-  contra el modelo (entrar con Google o passkey, sin contraseñas; política de
-  privacidad por la Ley 29733; sin dinero ni premios). Hecho en oct 2026: el
-  enlace con vista previa, los favoritos y el resumen de la semana.
+  "Compartir, favoritos y app". Con eso se decide lo siguiente, ideas ya
+  habladas: un dominio propio (más fácil de recordar, Search Console y la regla
+  de límite de peticiones; ojo, `canonical`, `og:url` y `og:image` de
+  `index.html` llevan workers.dev) y, si hay gente que vuelve, cuentas para una
+  porra gratis contra el modelo (entrar con Google o passkey, sin contraseñas;
+  política de privacidad por la Ley 29733; sin dinero ni premios). Hecho en oct
+  2026: el enlace con vista previa, los favoritos, el resumen de la semana,
+  instalarla como app, el sitemap y la marca de las ligas de fiabilidad baja.
 
 - **Leer el registro en vivo cuando crezca** (en marcha desde oct 2026, ver
   "El registro en vivo"). Con unos pocos partidos por liga es ruido; con una
@@ -960,8 +1000,9 @@ Environment).
   `afinar_champions.py` y reajustar. Idea sin probar: meter la Champions en la
   validación de la app. (Las copas nacionales no están en el plan free.)
 - **Championship y Brasileirão aportan poco** (+2.7% y +3.5%, tabla en
-  "Validación"). La web lo enseña en Fiabilidad, pero la tabla los pinta igual
-  que los demás.
+  "Validación"). La web ya lo marca ("fiabilidad baja", ver "Instalable y
+  buscadores"); mejorar el modelo en ligas tan igualadas necesitaría otra
+  información (ver "xG real").
 - **Defensa de partida de un ascendido en las demás ligas:** 1.1 no se
   distingue de 1 en las temporadas de ajuste (-0.0001, -0.8 se) pero ayuda en
   las de prueba (-0.0003, -2.9 se). Con el protocolo no se puede poner; volver
@@ -974,9 +1015,10 @@ Environment).
 ## Pruebas automáticas (GitHub Actions, oct 2026)
 
 - `.github/workflows/pruebas.yml`, en cada PR y cada push a `main`, dos checks:
-  - **Paridad Python / Worker**: `node --check` de `worker/*.js` y `public/app.js`,
-    `python test_paridad.py` ("todo igual") y `node pruebas/semana.mjs` (el resumen
-    de la semana del registro y los textos de la tarjeta para compartir).
+  - **Paridad Python / Worker**: `node --check` de `worker/*.js`, `public/app.js` y `public/sw.js`,
+    `python test_paridad.py` ("todo igual"), `node pruebas/semana.mjs` (el resumen
+    de la semana del registro y los textos de la tarjeta para compartir) y `node
+    pruebas/sw.mjs` (el service worker: "Sin conexión" sin red, la web con red).
   - **Flask contra el Worker**: `bash pruebas/e2e.sh`. Levanta la API falsa
     (`pruebas/api_falsa.py`, determinista), corre `app.py` + `validacion.py` contra
     ella (`correr_flask.py`), arranca `wrangler dev --test-scheduled` con una D1
@@ -987,9 +1029,12 @@ Environment).
     la web sigue enseñando números mientras se recalculan (`caducidad.py`), y que
     un calendario que llega incompleto no quita partidos a la primera
     (`calendario.py`, con `/__omitir` de la API falsa). Que `/partido/123` lleva la
-    tarjeta de ese partido con la CSP de la web (`compartir.py`). Y que las visitas
-    se cuentan bien, que lo inventado no entra y que el tope corta (`visitas.py`,
-    con `MAX_VISITAS_DIA=60`). En GitHub, 1-2 minutos; en local, unos 10.
+    tarjeta de ese partido, con su descripción y su `canonical`, y la CSP de la web
+    (`compartir.py`). Que la web es instalable (manifiesto, iconos, service worker,
+    CSP) y que `robots.txt` y `sitemap.xml` traen lo que deben (`descubrir.py`). Y
+    que las visitas se cuentan bien, que lo inventado no entra y que el tope corta
+    (`visitas.py`, con `MAX_VISITAS_DIA=60`). En GitHub, 1-2 minutos; en local,
+    unos 10.
   - Las variables del Worker van con `--var`, que manda sobre `.dev.vars`: el token
     de verdad, si está ahí, no se usa ni sale a ningún sitio.
   - En local, lo mismo: `npm ci`, `pip install -r requirements.txt` y

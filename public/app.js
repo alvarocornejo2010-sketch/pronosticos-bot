@@ -80,6 +80,27 @@ const LIGAS = {
   BSA: { sigla: "BRA", tono: "var(--liga-BSA)", tinta: "var(--oscura)" },
 };
 const ORDEN_LIGAS = Object.keys(LIGAS);
+
+// Las ligas donde el modelo aporta poco: su mejora sobre "no saber nada" (skill del
+// 1X2 frente a la base "equipo medio"), medida con afinar_liga.py en las temporadas
+// de prueba. En las demás ligas va de +7.5 a +15.6 %. Son las más igualadas: el
+// número es tan honesto como en las otras, pero se separa poco de la moneda al aire.
+const POCO_FIABLES = {
+  ELC: { skill: 2.7, partidos: "2.855", cuando: "las temporadas 2021/22 a 2025/26" },
+  BSA: { skill: 3.5, partidos: "277", cuando: "2026 hasta octubre" },
+};
+function textoPocoFiable(cod, nombre) {
+  const f = POCO_FIABLES[cod];
+  return "En " + (nombre || cod) + " el modelo acierta poco más que no saber nada: mejora un +" + f.skill
+    + " % medido en " + f.partidos + " partidos (" + f.cuando + "), frente a entre +7.5 y +15.6 % en las demás ligas."
+    + " Es de las ligas más igualadas: tómalo con cautela.";
+}
+function htmlMarcaPocoFiable(cod, nombre) {
+  return POCO_FIABLES[cod]
+    ? '<span class="poco-fiable" data-tip="' + esc(textoPocoFiable(cod, nombre)) + '" tabindex="0">' + ICONO_AVISO
+      + '<span>fiabilidad baja</span></span>'
+    : "";
+}
 function ligaDe(cod) {
   return LIGAS[cod] || { sigla: (cod || "?").slice(0, 3).toUpperCase(), tono: "var(--tinta-3)", tinta: "var(--oscura)" };
 }
@@ -329,6 +350,8 @@ function htmlDetalle(p) {
   const ch = p.champions;
   const vieja = p.calculado && Date.now() - Date.parse(p.calculado) > 26 * 3600000;
   const avisos = (ch ? htmlAvisoChampions(p, m) : htmlAvisoMuestra(m))
+    + (POCO_FIABLES[p.liga_codigo] ? '<p class="aviso">' + ICONO_AVISO + '<span>'
+      + esc(textoPocoFiable(p.liga_codigo, p.liga)) + '</span></p>' : "")
     + (vieja ? '<p class="aviso">' + ICONO_AVISO + '<span>Calculado ' + esc(haceCuanto(p.calculado))
       + ': la API no responde y estos son los números de entonces.</span></p>' : "");
   const resultado = htmlBloque("Quién gana", htmlQuienGana(p))
@@ -603,7 +626,8 @@ function bloqueGrupo(clave, texto, cuenta, codLiga, clase) {
     clase: "grupo" + (clase ? " " + clase : ""),
     html: '<span class="g-nom">' + (codLiga === FAV ? htmlInsigniaFav() : codLiga ? htmlInsignia(codLiga) : "")
       + '<span class="txt">' + esc(texto) + '</span>'
-      + '<span class="cuenta">' + cuenta + " partido" + (cuenta === 1 ? "" : "s") + '</span></span>'
+      + '<span class="cuenta">' + cuenta + " partido" + (cuenta === 1 ? "" : "s") + '</span>'
+      + (codLiga && codLiga !== FAV ? htmlMarcaPocoFiable(codLiga, texto) : "") + '</span>'
       + '<span class="g-col">1</span><span class="g-col">X</span><span class="g-col">2</span>',
   };
 }
@@ -681,7 +705,8 @@ function bloquesCentro(todos, ruta) {
     const suyos = todos.filter(p => (p.liga_codigo || p.liga) === ruta.liga);
     const sel = ruta.fecha ? suyos.filter(p => p.fecha === ruta.fecha) : suyos;
     const nombre = suyos.length ? suyos[0].liga : ruta.liga;
-    const out = { titulo: nombre, sub: ruta.fecha ? fechaLarga(ruta.fecha) : "toda la semana", mezcla: false, bloques: [] };
+    const out = { titulo: nombre, sub: (ruta.fecha ? fechaLarga(ruta.fecha) : "toda la semana")
+      + (POCO_FIABLES[ruta.liga] ? " · fiabilidad baja" : ""), mezcla: false, bloques: [] };
     if (!sel.length) { out.vacio = ["Nada ese día", "Esta liga no juega en la fecha elegida."]; return out; }
     if (orden !== "hora" || ruta.fecha) {
       out.bloques = bloquesDePartidos(ordenar(sel), { conDia: !ruta.fecha });
@@ -984,11 +1009,13 @@ function pintarLigasPane(todos, ruta) {
   const ligas = porLigas(todos);
   const filas = ligas.map(L => {
     const i = (infoLigas || {})[L.codigo] || {};
-    const stats = i.media_usada_local
-      ? "Goles: " + f2(i.media_usada_local) + " casa, " + f2(i.media_usada_visita) + " fuera" : "";
-    const jugados = stats ? "Media de goles que usa el modelo: " + f2(i.media_usada_local) + " del local y "
+    const stats = (i.media_usada_local
+      ? "Goles: " + f2(i.media_usada_local) + " casa, " + f2(i.media_usada_visita) + " fuera" : "")
+      + (POCO_FIABLES[L.codigo] ? (i.media_usada_local ? " · " : "") + "fiabilidad baja" : "");
+    const jugados = (i.media_usada_local ? "Media de goles que usa el modelo: " + f2(i.media_usada_local) + " del local y "
       + f2(i.media_usada_visita) + " del visitante"
-      + (i.partidos_esta_temporada ? ", con " + i.partidos_esta_temporada + " partidos jugados esta temporada" : "") : "";
+      + (i.partidos_esta_temporada ? ", con " + i.partidos_esta_temporada + " partidos jugados esta temporada" : "") + "." : "")
+      + (POCO_FIABLES[L.codigo] ? (i.media_usada_local ? " " : "") + textoPocoFiable(L.codigo, L.nombre) : "");
     return '<button class="liga-fila' + (stats ? "" : " sin-stats") + '" data-liga="' + esc(L.codigo) + '" aria-current="' + (activa === L.codigo) + '">'
       + htmlInsignia(L.codigo, "grande") + '<span class="nom">' + esc(L.nombre) + '</span>'
       + (stats ? '<span class="stats" title="' + esc(jugados) + '">' + esc(stats) + '</span>' : "")
@@ -1470,11 +1497,41 @@ function contar(evento) {
   const ev = { t: "entrada", v, d: ancho >= 1180 ? "escritorio" : ancho >= 880 ? "intermedio" : "movil", o };
   if (enlacePartido) ev.via = "partido";
   if (favoritos.size) ev.f = 1;
+  if (window.matchMedia("(display-mode: standalone)").matches || navigator.standalone) ev.app = 1;
   if (v === "vuelve") ev.hace = Math.round((Date.parse(hoy) - Date.parse(ultima)) / 86400000);
   contar(ev);
   enviarVisitas();
 })();
 window.addEventListener("pagehide", enviarVisitas);
+
+// ==========================================
+// INSTALAR COMO APP
+// El manifiesto (manifest.webmanifest) y un service worker que solo dice "sin
+// conexión" cuando no hay red (sw.js). Si el navegador ofrece instalarla
+// (Chrome, Edge, Android), sale el botón "Instalar app" en la cabecera; en el
+// iPhone se instala desde Compartir → "Añadir a pantalla de inicio".
+// ==========================================
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+const botonInstalar = $("instalar");
+let ofertaInstalar = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  ofertaInstalar = e;
+  botonInstalar.hidden = false;
+});
+botonInstalar.addEventListener("click", async () => {
+  if (!ofertaInstalar) return;
+  const oferta = ofertaInstalar;
+  ofertaInstalar = null;
+  botonInstalar.hidden = true;
+  try { await oferta.prompt(); } catch (e) { /* el navegador ya no la ofrece */ }
+});
+window.addEventListener("appinstalled", () => {
+  ofertaInstalar = null;
+  botonInstalar.hidden = true;
+  contar({ t: "instalada" });
+  enviarVisitas();
+});
 
 // ==========================================
 // SONDEO

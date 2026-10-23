@@ -45,6 +45,8 @@ export function textosPartido(f, reloj) {
 export function etiquetasOg(origen, ruta, titulo, descripcion) {
   return `<!-- og -->
 <title>${esc(titulo)} · Pronósticos</title>
+<meta name="description" content="${esc(descripcion)}">
+<link rel="canonical" href="${esc(origen + ruta)}">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Pronósticos">
 <meta property="og:locale" content="es_ES">

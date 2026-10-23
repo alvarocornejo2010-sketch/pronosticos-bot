@@ -11,6 +11,7 @@
 //   /api/contar       POST: los avisos de visita de la web (visitas.js)
 //   /visitas?token=...       el panel de visitas (y /api/visitas?token=..., en JSON)
 //   /partido/123      la web con la tarjeta de ese partido para compartir (compartir.js)
+//   /robots.txt, /sitemap.xml   para los buscadores (buscadores.js)
 //
 // El trabajo de verdad lo hace el cron (planificador.js), una vez por minuto.
 
@@ -23,6 +24,7 @@ import { tick, tocaActualizar } from "./planificador.js";
 import { Reloj } from "./tiempo.js";
 import { contar, resumenVisitas, htmlVisitas } from "./visitas.js";
 import { paginaPartido } from "./compartir.js";
+import { robots, sitemap } from "./buscadores.js";
 
 // Las mismas cabeceras que pone app.py a sus respuestas JSON (la web y app.js
 // llevan las suyas en public/_headers). no-store: el JSON cambia cada pocos
@@ -40,6 +42,7 @@ const respuesta = (texto, status = 200) => new Response(texto, {
   status, headers: { ...CABECERAS, "Content-Type": "application/json; charset=utf-8" },
 });
 const json = (obj, status = 200) => respuesta(JSON.stringify(obj), status);
+const texto = (cuerpo, tipo) => new Response(cuerpo, { headers: { ...CABECERAS, "Content-Type": tipo } });
 
 const ESTADO_VACIO = { estado: "sin_datos", dias: [], total: 0, pendientes: 0, ultima_actualizacion: null,
   plataforma: "cloudflare" };
@@ -165,6 +168,8 @@ export default {
       "/api/contar": (almacen) => contar(request, env, almacen, CABECERAS),
       "/api/visitas": (almacen) => apiVisitas(url, env, almacen),
       "/visitas": (almacen) => panelVisitas(url, env, almacen),
+      "/robots.txt": async () => texto(robots(url.origin), "text/plain; charset=utf-8"),
+      "/sitemap.xml": async (almacen) => texto(await sitemap(almacen, url.origin), "application/xml; charset=utf-8"),
     };
     const enlace = url.pathname.match(/^\/partido\/(\d{1,12})\/?$/);
     const ruta = rutas[url.pathname]

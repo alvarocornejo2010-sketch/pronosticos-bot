@@ -3,15 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="description" content="Pronósticos 1X2 y doble oportunidad de la Champions League, LaLiga, Premier League, Ligue 1, Bundesliga, Serie A, Eredivisie, Primeira Liga, Championship y Brasileirão con un modelo Poisson de fuerzas de ataque y defensa ajustadas por rival.">
 <meta name="theme-color" content="#0b130f">
 <meta name="color-scheme" content="dark">
-<!-- La tarjeta que enseñan WhatsApp, Telegram o X al compartir la web. En
-     /partido/123 el Worker cambia este bloque por el del partido
-     (worker/compartir.js). og:image necesita la dirección entera: si la web
-     cambia de dominio, cambiarla aquí. -->
+<!-- Título, descripción, dirección canónica y la tarjeta que enseñan WhatsApp,
+     Telegram o X al compartir la web. En /partido/123 el Worker cambia este
+     bloque por el del partido (worker/compartir.js). canonical, og:url y
+     og:image llevan la dirección entera: si la web cambia de dominio,
+     cambiarlas aquí. -->
 <!-- og -->
 <title>Pronósticos</title>
+<meta name="description" content="Pronósticos 1X2 y doble oportunidad de la Champions League, LaLiga, Premier League, Ligue 1, Bundesliga, Serie A, Eredivisie, Primeira Liga, Championship y Brasileirão con un modelo Poisson de fuerzas de ataque y defensa ajustadas por rival.">
+<link rel="canonical" href="https://pronosticos-bot.alvarocornejo2010.workers.dev/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Pronósticos">
 <meta property="og:locale" content="es_ES">
@@ -25,6 +27,10 @@
 <meta name="twitter:card" content="summary_large_image">
 <!-- /og -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b130f'/%3E%3Crect x='3' y='8.5' width='7.6' height='15' rx='2' fill='%23ffd24c'/%3E%3Crect x='12.2' y='8.5' width='7.6' height='15' rx='2' fill='%23a18047'/%3E%3Crect x='21.4' y='8.5' width='7.6' height='15' rx='2' fill='%23594d39'/%3E%3C/svg%3E">
+<!-- instalarla como app: manifiesto e iconos (el service worker, sw.js, lo registra app.js) -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Pronósticos">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400..800&family=Saira:wdth,wght@75..100,500..800&display=swap">
@@ -152,6 +158,11 @@
   /* la Champions: torneo, insignia de contorno en la tinta del texto */
   .insignia.copa { background: none; box-shadow: inset 0 0 0 1.5px currentColor; }
   .tira-ligas button[aria-current="true"] .insignia.copa { color: var(--oscura); }
+  /* liga de fiabilidad baja (Championship, Brasileirão): aviso discreto, con icono y texto */
+  .poco-fiable { display: inline-flex; align-items: center; gap: 5px; margin-left: 4px; padding: 2px 8px;
+                 border: 1px solid var(--linea-viva); border-radius: 999px; font-family: var(--f-txt); font-size: var(--t-12);
+                 font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--tinta-2); white-space: nowrap; cursor: help; }
+  .poco-fiable svg { width: 12px; height: 12px; }
   /* Mis equipos: la estrella en blanco sobre el fondo del tablero (el oro es la probabilidad) */
   .insignia.fav { background: var(--panel-hondo); color: var(--tinta); box-shadow: inset 0 0 0 1px var(--linea-viva); }
   .insignia.fav svg { width: 55%; height: 55%; max-width: 18px; max-height: 18px; }
@@ -293,6 +304,24 @@
   .prox .p-fav .v { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-28); font-weight: 800; }
   .prox .p-fav.nada { background: var(--panel-alto); color: var(--tinta-3); font-size: var(--t-20); }
 
+  /* "Instalar app": solo sale cuando el navegador lo ofrece (beforeinstallprompt) */
+  .instalar {
+    order: 2; margin-left: auto; display: flex; align-items: center; gap: 7px;
+    padding: 6px 12px; border: 1px solid var(--linea-viva); border-radius: 999px; background: var(--panel-alto);
+    font: inherit; font-size: var(--t-13); font-weight: 600; color: var(--tinta); cursor: pointer; white-space: nowrap;
+  }
+  .instalar:hover { border-color: var(--tinta-2); }
+  .instalar:not([hidden]) + .estado-corto { margin-left: 0; }
+  .instalar .largo { display: none; }   /* en el móvil no cabe con la marca y el estado */
+  @media (max-width: 379px) {   /* en los más estrechos, con el botón, el estado se queda en su punto */
+    .instalar:not([hidden]) + .estado-corto { padding: 9px; }
+    .instalar:not([hidden]) + .estado-corto .txt { display: none; }
+  }
+  @media (min-width: 880px) {
+    .instalar { order: 0; margin-left: 0; padding: 8px 14px; }
+    .instalar .corto { display: none; }
+    .instalar .largo { display: inline; }
+  }
   .estado-corto {
     order: 2; margin-left: auto; display: flex; align-items: center; gap: 8px;
     padding: 6px 12px; border: 1px solid var(--linea-viva); border-radius: 999px;
@@ -861,6 +890,9 @@
       </svg>
       <span class="nombre">Pronósticos</span>
     </a>
+    <button class="instalar" id="instalar" aria-label="Instalar app" hidden>
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v7.5M4.8 7 8 10.2 11.2 7"></path><path d="M3 12.5h10"></path></svg>
+      <span class="corto" aria-hidden="true">App</span><span class="largo" aria-hidden="true">Instalar app</span></button>
     <div class="estado-corto" id="estado-corto" data-modo="reposo"><span class="punto"></span><span class="txt">Cargando</span></div>
     <label class="buscar">
       <svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.6"></circle><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>

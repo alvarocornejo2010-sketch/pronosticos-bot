@@ -31,11 +31,13 @@ jobs:
           node-version: "22"
       - run: pip install -r requirements.txt
       - name: Sintaxis del Worker y de la web
-        run: for f in worker/*.js public/app.js; do node --check "$f"; done
+        run: for f in worker/*.js public/app.js public/sw.js; do node --check "$f"; done
       - name: El modelo da lo mismo en los dos lenguajes
         run: python test_paridad.py
       - name: Resumen de la semana y tarjeta para compartir
         run: node pruebas/semana.mjs
+      - name: Service worker (sin conexión)
+        run: node pruebas/sw.mjs
 
   punta-a-punta:
     name: Flask contra el Worker
