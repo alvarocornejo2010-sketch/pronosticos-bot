@@ -163,6 +163,12 @@
                  border: 1px solid var(--linea-viva); border-radius: 999px; font-family: var(--f-txt); font-size: var(--t-12);
                  font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--tinta-2); white-space: nowrap; cursor: help; }
   .poco-fiable svg { width: 12px; height: 12px; }
+  /* con la tabla estrecha, en la cabecera del grupo solo el icono: el nombre de la liga no cabría */
+  @container centro (max-width: 639px) {
+    .grupo .poco-fiable { margin-left: -4px; padding: 4px 2px; border: 0; color: var(--tinta-2); }
+    .grupo .poco-fiable svg { width: 14px; height: 14px; }
+    .grupo .poco-fiable span { display: none; }
+  }
   /* Mis equipos: la estrella en blanco sobre el fondo del tablero (el oro es la probabilidad) */
   .insignia.fav { background: var(--panel-hondo); color: var(--tinta); box-shadow: inset 0 0 0 1px var(--linea-viva); }
   .insignia.fav svg { width: 55%; height: 55%; max-width: 18px; max-height: 18px; }

@@ -97,7 +97,8 @@ function textoPocoFiable(cod, nombre) {
 }
 function htmlMarcaPocoFiable(cod, nombre) {
   return POCO_FIABLES[cod]
-    ? '<span class="poco-fiable" data-tip="' + esc(textoPocoFiable(cod, nombre)) + '" tabindex="0">' + ICONO_AVISO
+    ? '<span class="poco-fiable" data-tip="' + esc(textoPocoFiable(cod, nombre)) + '" tabindex="0" role="note"'
+      + ' aria-label="' + esc("Fiabilidad baja. " + textoPocoFiable(cod, nombre)) + '">' + ICONO_AVISO
       + '<span>fiabilidad baja</span></span>'
     : "";
 }

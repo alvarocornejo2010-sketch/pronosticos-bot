@@ -456,7 +456,8 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
 - **Ligas de fiabilidad baja:** la Championship (+2.7 % de mejora sobre "no
   saber nada", 2.855 partidos) y el Brasileirão (+3.5 %, 277) aportan mucho menos
   que las demás (+7.5 a +15.6 %, ver "Validación"). La web lo marca:
-  "fiabilidad baja" en la cabecera de su grupo (con un tooltip que lo explica),
+  "fiabilidad baja" en la cabecera de su grupo (con un tooltip que lo explica; con
+  la tabla de menos de 640px, solo el icono, para que quepa el nombre de la liga),
   en su fila del tablero de Ligas y en el título de su vista, y un aviso en el
   detalle de cada partido. Los números están fijos en `POCO_FIABLES` (`app.js`),
   medidos con `afinar_liga.py` en las temporadas de prueba: si se reajusta el
