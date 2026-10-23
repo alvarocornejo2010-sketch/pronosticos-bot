@@ -1323,6 +1323,13 @@ def api_registro():
                             "se borra en cada despliegue."})
 
 
+@app.route("/api/contar", methods=["POST"])
+def api_contar():
+    """La web avisa aquí de cada visita (public/app.js). Contarlas necesita una base
+    que no se borre, así que solo se cuentan en Cloudflare (worker/visitas.js)."""
+    return "", 204
+
+
 @app.route("/validar")
 def validar():
     """Lanza el backtest. Mismo token que /actualizar.

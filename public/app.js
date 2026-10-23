@@ -28,6 +28,7 @@ let validacion = null;   // /api/validacion: puede no haberse ejecutado nunca
 let registro = null;     // /api/registro: lo publicado contra lo que pasó (solo en Cloudflare)
 let infoLigas = null;    // /api/ligas: medias de goles que usa el modelo
 let rutaPintada = null;
+let ligaContada = null;   // la liga en la que ya se contó la entrada (visitas)
 let orden = "hora";
 let mercadoFiab = "1x2";   // qué mercado enseña el panel de fiabilidad
 let fuenteFiab = "validacion";   // y de dónde: la temporada pasada o el registro en vivo
@@ -974,6 +975,9 @@ function render() {
     history.replaceState(null, "", ruta.vista === "liga" ? "#/liga/" + encodeURIComponent(ruta.liga) : "#/");
     ruta = leerRuta();
   }
+  const ligaVista = ruta.vista === "liga" ? ruta.liga : null;
+  if (ligaVista && ligaVista !== ligaContada) contar({ t: "liga", c: ligaVista });
+  ligaContada = ligaVista;
   const clave = JSON.stringify(ruta) + "|" + orden + "|" + (busqueda ? "b" : "") + "|" + mqEscritorio.matches;
   const reconstruir = clave !== rutaPintada;
   rutaPintada = clave;
@@ -1010,6 +1014,7 @@ function limpiarBusqueda() { busqueda = ""; inputBuscar.value = ""; }
 
 function abrirPartido(fecha, id) {
   limpiarBusqueda();
+  if (!abiertos.has(String(id))) contar({ t: "partido", id: Number(id) });
   abiertos.add(String(id));
   ponerPestana("partidos");
   irA("#/dia/" + fecha);
@@ -1021,7 +1026,10 @@ function abrirPartido(fecha, id) {
 document.addEventListener("click", (e) => {
   const t = e.target;
   const pest = t.closest(".pestanas button");
-  if (pest) { ponerPestana(pest.dataset.p); window.scrollTo(0, 0); return; }
+  if (pest) {
+    if (app.dataset.pestana !== pest.dataset.p) contar({ t: "pestana", p: pest.dataset.p });
+    ponerPestana(pest.dataset.p); window.scrollTo(0, 0); return;
+  }
 
   const liga = t.closest("[data-liga]");
   if (liga && (liga.classList.contains("liga-fila") || liga.closest(".tira-ligas"))) {
@@ -1048,12 +1056,14 @@ document.addEventListener("click", (e) => {
   const fila = t.closest(".fila");
   if (fila) {
     const id = fila.dataset.id;
-    if (abiertos.has(id)) abiertos.delete(id); else abiertos.add(id);
+    if (abiertos.has(id)) abiertos.delete(id); else { abiertos.add(id); contar({ t: "partido", id: Number(id) }); }
     render();
   }
 });
 
 inputBuscar.addEventListener("input", () => { busqueda = inputBuscar.value.trim() ? inputBuscar.value : ""; rutaPintada = null; render(); });
+// "change" salta al salir del buscador: una búsqueda, no una por letra
+inputBuscar.addEventListener("change", () => { if (inputBuscar.value.trim()) contar({ t: "busqueda" }); });
 
 // "/" para buscar y Escape para salir, como en los buscadores de código
 document.addEventListener("keydown", (e) => {
@@ -1113,7 +1123,48 @@ function ruedaHorizontal(el) {
 mqEscritorio.addEventListener("change", () => { rutaPintada = null; render(); });
 
 // ==========================================
+// VISITAS
+// Cuánta gente entra, si vuelve y qué mira, sin cookies: el navegador solo guarda
+// el día de su última visita. Los avisos van a /api/contar (worker/visitas.js), uno
+// al entrar y el resto juntos al irse. En Render, /api/contar no hace nada.
+// ==========================================
+const CLAVE_VISITA = "pronosticos.ultima_visita";
+let colaVisitas = [];
+function enviarVisitas() {
+  if (!colaVisitas.length) return;
+  const cuerpo = JSON.stringify(colaVisitas);
+  colaVisitas = [];
+  try {
+    if (navigator.sendBeacon && navigator.sendBeacon("/api/contar", cuerpo)) return;
+    fetch("/api/contar", { method: "POST", body: cuerpo, keepalive: true }).catch(() => {});
+  } catch (e) { /* sin aviso: la web no lo necesita para nada */ }
+}
+function contar(evento) {
+  colaVisitas.push(evento);
+  if (colaVisitas.length >= 20) enviarVisitas();
+}
+(function entrada() {
+  const hoy = hoyLima();
+  let ultima = null;
+  try { ultima = localStorage.getItem(CLAVE_VISITA); localStorage.setItem(CLAVE_VISITA, hoy); }
+  catch (e) { /* sin memoria (modo privado estricto): cuenta como nuevo */ }
+  if (ultima && !/^\d{4}-\d{2}-\d{2}$/.test(ultima)) ultima = null;
+  const v = !ultima ? "nuevo" : ultima < hoy ? "vuelve" : "repite";
+  let o = "";
+  try { if (document.referrer) o = new URL(document.referrer).hostname; } catch (e) { /* sin origen: directo */ }
+  const ancho = window.innerWidth;
+  const ev = { t: "entrada", v, d: ancho >= 1180 ? "escritorio" : ancho >= 880 ? "intermedio" : "movil", o };
+  if (v === "vuelve") ev.hace = Math.round((Date.parse(hoy) - Date.parse(ultima)) / 86400000);
+  contar(ev);
+  enviarVisitas();
+})();
+window.addEventListener("pagehide", enviarVisitas);
+
+// ==========================================
 // SONDEO
+// Con la pestaña oculta no se pregunta: una pestaña olvidada costaba hasta 2.880
+// peticiones al día, y el plan gratis de Cloudflare da 100.000 para todos.
+// Al volver a ella, se pide en el acto.
 // ==========================================
 let periodo = 4000;
 let estadoPrevio = null;
@@ -1164,9 +1215,22 @@ async function cargarRegistro() {
   } catch (e) { /* sin registro: los paneles no lo enseñan */ }
 }
 
-async function bucle() { await refrescar(); setTimeout(bucle, periodo); }
+let espera = null, pidiendo = false;
+async function bucle() {
+  clearTimeout(espera);
+  espera = null;
+  if (pidiendo) return;
+  pidiendo = true;
+  await refrescar();
+  pidiendo = false;
+  if (!document.hidden) espera = setTimeout(bucle, periodo);
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { clearTimeout(espera); espera = null; enviarVisitas(); }
+  else if (!espera && !pidiendo) bucle();
+});
 bucle();
 cargarLigas();
 cargarValidacion();
 cargarRegistro();
-setInterval(cargarRegistro, 15 * 60000);
+setInterval(() => { if (!document.hidden) cargarRegistro(); }, 15 * 60000);

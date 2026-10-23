@@ -86,5 +86,8 @@ export function ajustes(env = {}) {
     maxBytes: num("MAX_BYTES_PASADA", 350000),
     maxCalculos: num("MAX_CALCULOS_PASADA", 40),
     autoValidar: si("AUTO_VALIDAR", "1"),
+    // escrituras al día para las visitas (visitas.js): D1 da 100.000 y la
+    // actualización necesita las suyas
+    maxVisitasDia: num("MAX_VISITAS_DIA", 20000),
   };
 }
