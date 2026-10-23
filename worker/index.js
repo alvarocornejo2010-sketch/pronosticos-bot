@@ -10,6 +10,7 @@
 //   /validar?token=...[&temporada=N] lanzar el backtest
 //   /api/contar       POST: los avisos de visita de la web (visitas.js)
 //   /visitas?token=...       el panel de visitas (y /api/visitas?token=..., en JSON)
+//   /partido/123      la web con la tarjeta de ese partido para compartir (compartir.js)
 //
 // El trabajo de verdad lo hace el cron (planificador.js), una vez por minuto.
 
@@ -21,6 +22,7 @@ import { REGISTRO_VACIO } from "./registro.js";
 import { tick, tocaActualizar } from "./planificador.js";
 import { Reloj } from "./tiempo.js";
 import { contar, resumenVisitas, htmlVisitas } from "./visitas.js";
+import { paginaPartido } from "./compartir.js";
 
 // Las mismas cabeceras que pone app.py a sus respuestas JSON (la web y app.js
 // llevan las suyas en public/_headers). no-store: el JSON cambia cada pocos
@@ -164,7 +166,9 @@ export default {
       "/api/visitas": (almacen) => apiVisitas(url, env, almacen),
       "/visitas": (almacen) => panelVisitas(url, env, almacen),
     };
-    const ruta = rutas[url.pathname];
+    const enlace = url.pathname.match(/^\/partido\/(\d{1,12})\/?$/);
+    const ruta = rutas[url.pathname]
+      || (enlace && ((almacen) => paginaPartido(request, env, almacen, Number(enlace[1]))));
     if (!ruta) return env.ASSETS.fetch(request);   // lo demás: los archivos de public/
     const metodos = url.pathname === "/api/contar" ? ["POST"] : ["GET", "HEAD"];
     if (!metodos.includes(request.method)) {

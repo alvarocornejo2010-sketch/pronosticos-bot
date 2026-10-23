@@ -33,7 +33,7 @@ resumen = lambda: get(W + f"/api/visitas?token={SECRETO}")
 r = resumen()
 assert r["semana"]["visitas"] == 0 and r["dias"][-1]["dia"] == r["hoy"] and len(r["dias"]) == 30, r["semana"]
 
-mandar([{"t": "entrada", "v": "nuevo", "d": "escritorio", "o": "www.google.com"}])
+mandar([{"t": "entrada", "v": "nuevo", "d": "escritorio", "o": "www.google.com", "via": "partido", "f": 1}])
 mandar([{"t": "entrada", "v": "repite", "d": "escritorio", "o": ""}])
 mandar([{"t": "entrada", "v": "vuelve", "hace": 3, "d": "movil", "o": ""}])
 r = resumen()
@@ -43,26 +43,31 @@ assert d["origen"] == {"google": 1, "directo": 1}, d["origen"]
 assert d["dispositivo"] == {"escritorio": 1, "movil": 1}, d["dispositivo"]
 assert d["vuelta"] == {"2-7": 1}, d["vuelta"]
 assert sum(d["hora"].values()) == 3, d["hora"]
-print("entradas: 3 visitas de 2 visitantes (1 nuevo de Google, 1 que vuelve), por hora y pantalla")
+assert (s["llegadas"], s["con_favoritos"]) == (1, 1), s
+print("entradas: 3 visitas de 2 visitantes (1 nuevo de Google, 1 que vuelve), por hora y pantalla;"
+      " 1 llegó por un enlace compartido y sigue a algún equipo")
 
 estado = get(W + "/api/estado")
 fecha, uno = next((dia["fecha"], p) for dia in estado["dias"] for p in dia["partidos"])
 mandar([{"t": "partido", "id": uno["id"]}, {"t": "partido", "id": uno["id"]}, {"t": "partido", "id": 999999999},
         {"t": "partido", "id": "1; DROP TABLE visitas"}, {"t": "liga", "c": "PD"}, {"t": "liga", "c": "<b>XX</b>"},
         {"t": "busqueda"}, {"t": "pestana", "p": "panorama"}, {"t": "pestana", "p": "otra"}, {"t": "inventado"},
-        "texto", None, {"t": "entrada", "v": "nuevo", "o": "evil.example"}, {"t": "entrada", "v": "nuevo"}])
+        "texto", None, {"t": "entrada", "v": "nuevo", "o": "evil.example"}, {"t": "entrada", "v": "nuevo"},
+        {"t": "compartir", "id": uno["id"]}, {"t": "compartir", "id": 999999999}, {"t": "favorito"}])
 r = resumen()
 s, d = r["semana"], r["desglose"]
 assert s["partidos"] == 2 and s["busquedas"] == 1, s
 assert d["liga"] == {"PD": 1} and d["pestana"] == {"panorama": 1}, d
 assert d["origen"] == {"google": 1, "directo": 1, "otro": 1}, d["origen"]   # una sola entrada por petición
 assert s["visitas"] == 4, s
+assert (s["compartidos"], s["estrellas"]) == (1, 1), s
 assert len(r["partidos"]) == 1, r["partidos"]
 top = r["partidos"][0]
 assert (top["id"], top["n"], top["liga"], top["utc"], top["fecha"], top["local"], top["visita"]) == (
     uno["id"], 2, uno["liga_codigo"], uno["utcDate"], fecha, uno.get("local_corto") or uno["local"],
     uno.get("visita_corto") or uno["visita"]), top
-print("eventos: cuentan el partido que existe, la liga y la pestaña de verdad; lo inventado no")
+print("eventos: cuentan el partido que existe (abierto o compartido), la liga, la pestaña y la estrella;"
+      " lo inventado no")
 
 antes = resumen()["semana"]
 mandar([{"t": "entrada", "v": "nuevo"}], origen="https://otra-web.example")
@@ -87,7 +92,7 @@ html = pan.read().decode()
 csp = pan.headers["Content-Security-Policy"]
 assert pan.headers["Content-Type"].startswith("text/html") and pan.headers["X-Robots-Tag"] == "noindex"
 assert "script-src" not in csp and "default-src 'none'" in csp, csp
-assert "<script" not in html and "Partidos más abiertos" in html and ">2<" in html
+assert "<script" not in html and "Partidos más abiertos" in html and ">2<" in html and "Compartir y favoritos" in html
 print("panel: con token, en HTML, sin JavaScript y fuera de Google")
 
 # el tope del día: con MAX_VISITAS_DIA=60, unas pocas búsquedas lo alcanzan

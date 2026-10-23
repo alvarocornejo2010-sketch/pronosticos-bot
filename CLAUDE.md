@@ -119,9 +119,11 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
   1X2 / +2.5 / Ambos y, en Cloudflare, Temporada / En vivo: el registro en
   vivo de `/api/registro`). Centro: tira de días + tabla. Derecha: Los más
   claros (los 8 favoritos más fuertes de la semana; un clic abre el partido),
-  Confianza del favorito (histograma) y Resultados (los últimos 8 partidos
-  terminados del registro: lo que la web le dio a lo que pasó y si acertó el
-  favorito; solo en Cloudflare). Abajo, barra de estado. Entre 880 y
+  Confianza del favorito (histograma), Últimos 7 días (en cuántos acertó el
+  favorito frente a lo que esperaban sus probabilidades, por tramo, y la mayor
+  sorpresa) y Resultados (los últimos 8 partidos terminados del registro: lo que
+  la web le dio a lo que pasó y si acertó el favorito); los dos últimos, solo en
+  Cloudflare. Abajo, barra de estado. Entre 880 y
   1179px los laterales se apilan en una sola columna. En móvil, una columna con
   pestañas fijas abajo: Partidos / Panorama / Ligas; la cabecera no es pegajosa
   (se va al bajar y las cabeceras de grupo se anclan arriba del todo).
@@ -145,8 +147,9 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
   redondeado. La casilla de los próximos y la de los más claros usan el mismo
   entero que la tabla (`pctFavorito`).
 - Rutas por hash: `#/`, `#/semana`, `#/dia/2026-10-10`, `#/liga/PD`,
-  `#/liga/PD/2026-10-10`. `#/` es toda la semana en escritorio y el primer día
-  en móvil.
+  `#/liga/PD/2026-10-10`, `#/favoritos`. `#/` es toda la semana en escritorio y
+  el primer día en móvil. Y una sin hash, `/partido/123`, para compartir (ver
+  "Compartir y favoritos").
 - Tipografía: Saira (marca, títulos y todos los números) y Figtree (nombres y
   textos), de Google Fonts. Las dos tienen cifras tabulares, comprobadas en el
   navegador: las columnas de números no bailan.
@@ -187,7 +190,9 @@ cada liga), `/salud`, `/actualizar?token=...&forzar=1`,
 resultado), `/api/registro` (el registro en vivo; en Render responde
 `no_disponible`) y `/api/contar` (POST: los avisos de visita de la web; en Render
 no hace nada). Solo en Cloudflare: `/visitas?token=...`, el panel de visitas, y
-`/api/visitas?token=...`, lo mismo en JSON (ver "Visitas").
+`/api/visitas?token=...`, lo mismo en JSON (ver "Visitas"). Y `/partido/123`, la
+web con la tarjeta de ese partido para compartir (en Render, la web sin tarjeta;
+ver "Compartir y favoritos").
 
 **Efecto secundario de cada deploy:** el disco de Render free es efímero, cada
 deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
@@ -224,8 +229,9 @@ modelo y un `redondear` que imita a `round()` de Python, empates al par
 incluidos), `actualizacion.js` (la pasada), `validacion.js`, `metricas.js`
 (Brier, LogLoss, acierto y calibración, los de `validacion.py`), `registro.js`
 (el registro en vivo), `planificador.js` (el cron), `almacen.js` (D1), `api.js`
-(football-data con su presupuesto), `tiempo.js` (hora de Lima) e `index.js`
-(rutas).
+(football-data con su presupuesto), `tiempo.js` (hora de Lima), `visitas.js`
+(el contador de visitas), `compartir.js` (la tarjeta de `/partido/123`) e
+`index.js` (rutas).
 
 **El ritmo lo marca la CPU.** El plan gratis da 10 ms por ejecución y leer el
 JSON de la API cuesta ~7 ms por MB, así que en vez de una pasada de 40
@@ -297,8 +303,17 @@ sumadas en el documento `registro` (no se releen las fichas) y lo que sirve
 `/api/registro` va montado aparte (`registro_publico`): pedirlo es leer una
 fila. Probado contra la API falsa: 149 partidos liquidados en 10 pasadas, una
 por competición, sin contar ninguno dos veces. En la web: Fiabilidad medida →
-En vivo, y el tablero Resultados. En Render no existe (disco efímero):
-`/api/registro` responde `no_disponible` y la web no lo enseña.
+En vivo, y los tableros Últimos 7 días y Resultados. En Render no existe (disco
+efímero): `/api/registro` responde `no_disponible` y la web no lo enseña.
+
+El registro lleva además un **resumen por día** (`dias`, 21 días; la web recibe
+los 14 últimos en `semana` y suma los suyos): cuántos terminaron, en cuántos
+acertó el favorito (el de la web, `veredictoDe`: el mayor, y si empatan, el
+primero), cuántos aciertos esperaban sus propias probabilidades, lo mismo por
+tramo de confianza (claros, 60 % o más; intermedios, 45-60; reñidos, menos de 45)
+y el fallo del favorito más claro. Un registro de antes (sin `dias`) se rehace
+una vez con `resultados` y la ficha publicada (`rehacerDias`, con `json_extract`
+para no leer las fichas enteras). Lo prueba `pruebas/semana.mjs`.
 
 **Cambios respecto a `app.py`** (ninguno toca el modelo):
 - un 429 de la API no se calcula a ciegas: el partido espera al minuto
@@ -367,6 +382,34 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
   pestaña olvidada pedía `/api/estado` cada 30 s todo el día, hasta 2.880
   peticiones de las 100.000 diarias del plan gratis. El registro en vivo (cada
   15 min) tampoco se pide con la pestaña oculta.
+- **Compartir y favoritos** también se cuentan: veces que se pulsó Compartir
+  (`compartir`, por partido), visitas que llegaron por un enlace `/partido/123`
+  (`enlace`), estrellas puestas (`favorito`) y visitantes que siguen a algún
+  equipo (`con_favoritos`). En el panel, el tablero "Compartir y favoritos".
+
+## Compartir y favoritos (oct 2026)
+
+- **Compartir:** cada partido abierto tiene un botón Compartir. En el móvil abre
+  el menú del sistema (WhatsApp, Telegram...); si no lo hay, copia el enlace
+  `/partido/123`. Esa ruta la sirve el Worker (`compartir.js`): pide `index.html`
+  a los archivos estáticos (con sus cabeceras de `public/_headers`, CSP incluida)
+  y cambia el bloque entre `<!-- og -->` y `<!-- /og -->` por las etiquetas Open
+  Graph del partido: título con los equipos y descripción con la liga, la hora de
+  Lima y el 1X2 con los mismos enteros que la tabla (`enterosQueSuman`). Cuesta
+  una fila de D1. La imagen es `public/og.png` (1200×630, la misma para todos: un
+  PNG por partido no cabe en 10 ms de CPU), hecha con Playwright desde un HTML con
+  Saira y Figtree. Un partido que no existe da la tarjeta de siempre (la de
+  `index.html`, que lleva la dirección de workers.dev escrita: si la web cambia
+  de dominio, cambiarla ahí). La web, al ver `/partido/123`, abre ese partido en
+  cuanto tiene datos y deja la dirección en `/#/dia/...` (`abrirEnlazado`); si ya
+  empezó, lo dice y va a `#/`. En Render, `/partido/123` sirve la web sin tarjeta.
+- **Favoritos:** en el detalle, "Seguir a" con una estrella por equipo. Se
+  guardan en el navegador (`pronosticos.favoritos`, los nombres completos, hasta
+  60), sin cuenta. Sus partidos salen en `#/favoritos` ("Mis equipos", en el
+  tablero de Ligas y en la tira de ligas del móvil), en un grupo "Mis equipos"
+  al principio de cada día (sin repetirse en su liga), primero en Próximos y con
+  una estrella junto al nombre. La estrella va en blanco: el oro es la
+  probabilidad.
 
 ## Seguridad (revisada en oct 2026)
 
@@ -882,14 +925,14 @@ Environment).
 
 ## Pendiente (por orden de lo que más mueve la aguja)
 
-- **Mirar `/visitas` a las dos semanas** (en marcha desde oct 2026). Con eso se
-  decide lo siguiente, ideas ya habladas: un link por partido con vista previa
-  para WhatsApp (rutas sin `#`, servidas por el Worker con etiquetas Open Graph),
-  equipos favoritos en el navegador, instalarla como app, un dominio propio (más
-  fácil de recordar, Search Console y la regla de límite de peticiones) y, si hay
-  gente que vuelve, cuentas para una porra gratis contra el modelo (entrar con
-  Google o passkey, sin contraseñas; política de privacidad por la Ley 29733;
-  sin dinero ni premios).
+- **Mirar `/visitas` a las dos semanas** (en marcha desde oct 2026), también
+  "Compartir y favoritos". Con eso se decide lo siguiente, ideas ya habladas:
+  instalarla como app, un dominio propio (más fácil de recordar, Search Console
+  y la regla de límite de peticiones; ojo, `og:url`/`og:image` de `index.html`
+  llevan workers.dev) y, si hay gente que vuelve, cuentas para una porra gratis
+  contra el modelo (entrar con Google o passkey, sin contraseñas; política de
+  privacidad por la Ley 29733; sin dinero ni premios). Hecho en oct 2026: el
+  enlace con vista previa, los favoritos y el resumen de la semana.
 
 - **Leer el registro en vivo cuando crezca** (en marcha desde oct 2026, ver
   "El registro en vivo"). Con unos pocos partidos por liga es ruido; con una
@@ -918,8 +961,9 @@ Environment).
 ## Pruebas automáticas (GitHub Actions, oct 2026)
 
 - `.github/workflows/pruebas.yml`, en cada PR y cada push a `main`, dos checks:
-  - **Paridad Python / Worker**: `node --check` de `worker/*.js` y `public/app.js`, y
-    `python test_paridad.py` ("todo igual").
+  - **Paridad Python / Worker**: `node --check` de `worker/*.js` y `public/app.js`,
+    `python test_paridad.py` ("todo igual") y `node pruebas/semana.mjs` (el resumen
+    de la semana del registro y los textos de la tarjeta para compartir).
   - **Flask contra el Worker**: `bash pruebas/e2e.sh`. Levanta la API falsa
     (`pruebas/api_falsa.py`, determinista), corre `app.py` + `validacion.py` contra
     ella (`correr_flask.py`), arranca `wrangler dev --test-scheduled` con una D1
@@ -929,9 +973,10 @@ Environment).
     pasada muerta. Después caduca todas las predicciones a la vez y comprueba que
     la web sigue enseñando números mientras se recalculan (`caducidad.py`), y que
     un calendario que llega incompleto no quita partidos a la primera
-    (`calendario.py`, con `/__omitir` de la API falsa). Y que las visitas se
-    cuentan bien, que lo inventado no entra y que el tope corta (`visitas.py`, con
-    `MAX_VISITAS_DIA=60`). En GitHub, 1-2 minutos; en local, unos 10.
+    (`calendario.py`, con `/__omitir` de la API falsa). Que `/partido/123` lleva la
+    tarjeta de ese partido con la CSP de la web (`compartir.py`). Y que las visitas
+    se cuentan bien, que lo inventado no entra y que el tope corta (`visitas.py`,
+    con `MAX_VISITAS_DIA=60`). En GitHub, 1-2 minutos; en local, unos 10.
   - Las variables del Worker van con `--var`, que manda sobre `.dev.vars`: el token
     de verdad, si está ahí, no se usa ni sale a ningún sitio.
   - En local, lo mismo: `npm ci`, `pip install -r requirements.txt` y

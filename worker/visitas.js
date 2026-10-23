@@ -10,9 +10,13 @@
 //   {t: "liga", c: "PD"}             entró en una liga
 //   {t: "busqueda"}                  buscó un equipo
 //   {t: "pestana", p: "panorama"}    cambió de pestaña en el móvil
+//   {t: "compartir", id: 123}        pulsó Compartir en un partido
+//   {t: "favorito"}                  marcó un equipo con la estrella
 // "nuevo", "vuelve" y "repite" los decide el navegador, que guarda solo el día de
 // su última visita: un visitante es un navegador en un día. hace: días desde esa
 // visita. o: el dominio de la página de la que llegó (vacío si no se sabe).
+// via: "partido" si entró por un enlace compartido (/partido/123). f: 1 si sigue
+// a algún equipo.
 //
 // Todo lo que llega se coteja con listas fijas: nadie puede meter una clave
 // inventada. Y como cada aviso es una escritura en D1 (100.000 al día en el plan
@@ -59,8 +63,8 @@ export function tramoVuelta(dias) {
   return dias <= 1 ? "1" : dias <= 7 ? "2-7" : dias <= 30 ? "8-30" : "31+";
 }
 
-// Los avisos, sumados por (tipo, clave). Los partidos van aparte: solo cuentan
-// si el partido existe (lo comprueba la propia sentencia).
+// Los avisos, sumados por (tipo, clave). Los partidos (abiertos o compartidos)
+// solo cuentan si el partido existe (lo comprueba la propia sentencia).
 export function contadores(eventos, propio, hora) {
   const sumas = new Map();
   const sumar = (tipo, clave) => {
@@ -75,13 +79,17 @@ export function contadores(eventos, propio, hora) {
       entrada = true;   // una por petición: la web manda una sola al cargar
       sumar("visitas", "");
       sumar("hora", hora);
+      if (e.via === "partido") sumar("enlace", "partido");
       if (e.v !== "nuevo" && e.v !== "vuelve") continue;
       sumar("visitantes", e.v);
+      if (e.f === 1) sumar("con_favoritos", "");
       if (DISPOSITIVOS.has(e.d)) sumar("dispositivo", e.d);
       sumar("origen", origen(e.o, propio));
       if (e.v === "vuelve" && Number.isSafeInteger(e.hace) && e.hace >= 1) sumar("vuelta", tramoVuelta(e.hace));
-    } else if (e.t === "partido" && Number.isSafeInteger(e.id) && e.id > 0) {
-      sumar("partido", String(e.id));
+    } else if ((e.t === "partido" || e.t === "compartir") && Number.isSafeInteger(e.id) && e.id > 0) {
+      sumar(e.t, String(e.id));
+    } else if (e.t === "favorito") {
+      sumar("favorito", "");
     } else if (e.t === "liga" && CODIGOS.has(e.c)) {
       sumar("liga", e.c);
     } else if (e.t === "busqueda") {
@@ -127,7 +135,7 @@ export async function contar(request, env, almacen, cabeceras, ahora = Date.now(
   const sumas = contadores(eventos, url.hostname, hora.slice(0, 2));
   if (!sumas.length) return nada(cabeceras);
   const db = almacen.db;
-  const sentencias = sumas.map((s) => s.tipo === "partido"
+  const sentencias = sumas.map((s) => s.tipo === "partido" || s.tipo === "compartir"
     ? db.prepare(SUMAR_PARTIDO).bind(fecha, s.tipo, s.clave, s.n, aj.maxVisitasDia, Number(s.clave))
     : db.prepare(SUMAR).bind(fecha, s.tipo, s.clave, s.n, aj.maxVisitasDia));
   // la última, para que todas miren el tope de antes de esta petición
@@ -138,7 +146,8 @@ export async function contar(request, env, almacen, cabeceras, ahora = Date.now(
 
 // ---------- lo que enseña /visitas ----------
 
-const vacio = () => ({ visitas: 0, visitantes: 0, nuevos: 0, vuelven: 0, partidos: 0, busquedas: 0 });
+const vacio = () => ({ visitas: 0, visitantes: 0, nuevos: 0, vuelven: 0, partidos: 0, busquedas: 0,
+  compartidos: 0, llegadas: 0, estrellas: 0, con_favoritos: 0 });
 
 function sumarDias7(dias) {
   const s = vacio();
@@ -153,8 +162,9 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
   const desde30 = sumarDias(hoy, -29), desde7 = sumarDias(hoy, -6);
   const db = almacen.db;
   const [serie, desglose, top] = await almacen.consultar(() => db.batch([
-    db.prepare(`SELECT dia, tipo, CASE WHEN tipo = 'partido' THEN '' ELSE clave END AS c, SUM(n) AS n
-      FROM visitas WHERE dia >= ?1 AND tipo IN ('visitas', 'visitantes', 'partido', 'busqueda', 'escrituras')
+    db.prepare(`SELECT dia, tipo, CASE WHEN tipo IN ('partido', 'compartir') THEN '' ELSE clave END AS c, SUM(n) AS n
+      FROM visitas WHERE dia >= ?1 AND tipo IN ('visitas', 'visitantes', 'partido', 'busqueda', 'escrituras',
+        'compartir', 'enlace', 'favorito', 'con_favoritos')
       GROUP BY dia, tipo, c`).bind(desde30),
     db.prepare(`SELECT tipo, clave, SUM(n) AS n FROM visitas
       WHERE dia >= ?1 AND tipo IN ('origen', 'dispositivo', 'vuelta', 'hora', 'liga', 'pestana')
@@ -174,7 +184,8 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
     dias.push(d);
     porDia.set(d.dia, d);
   }
-  const CAMPO = { visitas: "visitas", partido: "partidos", busqueda: "busquedas", escrituras: "escrituras" };
+  const CAMPO = { visitas: "visitas", partido: "partidos", busqueda: "busquedas", escrituras: "escrituras",
+    compartir: "compartidos", enlace: "llegadas", favorito: "estrellas", con_favoritos: "con_favoritos" };
   for (const f of serie.results) {
     const d = porDia.get(f.dia);
     if (!d) continue;
@@ -230,6 +241,8 @@ function variacion(ahora, antes) {
   const d = Math.round((100 * (ahora - antes)) / antes);
   return (d > 0 ? "+" : d < 0 ? "−" : "±") + Math.abs(d) + "% frente a los 7 días anteriores";
 }
+
+const par = (n, texto) => `<p><b>${miles(n)}</b> <span>${esc(texto)}</span></p>`;
 
 function cifra(titulo, valor, nota) {
   return `<div class="cifra"><span class="eti">${esc(titulo)}</span><span class="num">${esc(valor)}</span>`
@@ -322,6 +335,12 @@ ${lista("Ligas que más se abren", r.desglose.liga, NOMBRE_LIGA)}
 ${lista("Pestañas en el móvil", r.desglose.pestana, NOMBRES.pestana, ["partidos", "panorama", "ligas"])}
 <section class="tablero"><h2>Búsquedas</h2><p class="grande">${miles(s.busquedas)}</p>
 <p class="vacia">veces que alguien buscó un equipo esta semana</p></section>
+<section class="tablero"><h2>Compartir y favoritos</h2><div class="pares">
+${par(s.compartidos, "veces que se pulsó Compartir en un partido")}
+${par(s.llegadas, "visitas que llegaron por un enlace compartido")}
+${par(s.estrellas, "equipos marcados con la estrella")}
+${par(s.con_favoritos, `visitantes que siguen a algún equipo (${pct(s.con_favoritos, s.visitantes)})`)}
+</div></section>
 </div>
 <footer><h2>Cómo se cuenta</h2><ul>
 <li>Sin cookies y sin guardar IPs: cada navegador recuerda solo el día de su última visita. Un visitante es un navegador en un día; quien entra desde el móvil y el ordenador cuenta dos veces, y quien borra los datos del navegador vuelve a ser nuevo.</li>
@@ -380,6 +399,10 @@ table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: .85r
 th, td { padding: 4px 8px; text-align: right; border-bottom: 1px solid var(--linea); white-space: nowrap; }
 th:first-child, td:first-child { text-align: left; }
 th { color: var(--tinta-2); font-weight: 600; }
+.pares { display: grid; gap: 8px; }
+.pares p { margin: 0; display: grid; grid-template-columns: 4.5em minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.pares b { font-size: 1.4rem; text-align: right; }
+.pares span { color: var(--tinta-2); font-size: .9rem; }
 .aviso { margin: 0; padding: 12px 16px; border: 1px solid var(--aviso); border-radius: 14px; }
 footer { color: var(--tinta-2); font-size: .85rem; }
 footer h2 { font-size: .9rem; }
