@@ -465,9 +465,10 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
 
 ## Seguridad (revisada en oct 2026)
 
-**El repo es público.** Revisados el árbol y los 36 commits de todas las ramas
-(y las descripciones de las PRs): no hay ni una clave. Lo único que parece un
-secreto son valores de ejemplo (`tu_token`, `*_dummy_secret`) y dos
+**El repo es público.** Revisados el 16 oct 2026 el árbol y los 36 commits que
+había entonces en todas las ramas (y las descripciones de las PRs): no había ni
+una clave; los commits posteriores no se han revisado igual. Lo único que
+parece un secreto son valores de ejemplo (`tu_token`, `*_dummy_secret`) y dos
 identificadores que no dan acceso a nada sin una clave: el id de la base D1
 (`wrangler.jsonc`; Cloudflare lo pone ahí a propósito) y el del servicio de
 Render. Los commits de fusión hechos desde la web de GitHub llevan el email de
@@ -844,52 +845,17 @@ el total de goles de un partido apenas se predice mejor que con la media de su
 liga. La web lo dice en el detalle de cada partido y en el panel Fiabilidad. No
 vender estos números como el 1X2.
 
-## Afinado del modelo — dos decisiones de sept 2026, reabiertas en oct 2026
+## Afinado del modelo en sept 2026: por qué entonces no se cambió nada
 
-Con 35.586 partidos de openfootball (ver "El modelo") las dos se reabrieron, como
-pedía esta misma sección: la corrección de empates sale real (`RHO_EMPATES` =
--0.05) y el prior de ascendidos también (`ATAQUE_RECIEN_LLEGADO` = 0.8), las
-dos elegidas en las temporadas de ajuste y confirmadas en las de prueba.
-`PSEUDO_PARTIDOS` ya no existe: el encogimiento son `PSEUDO_GOLES_*`. Lo que
-sigue es lo que se concluyó en sept 2026 con los datos de entonces.
-
-Datos disponibles entonces: solo LaLiga 2023+2024 (2021/2022 dan 403 en plan free).
-
-### 1. Hiperparámetros (`PSEUDO_PARTIDOS=6`, `rho=0`): se quedan como están
-
-No porque estén demostrados óptimos, sino porque con 760 partidos no se puede
-distinguir ninguna configuración de otra:
-
-- Train 2023 → gana `pseudo=3, rho=-0.2`; validado en 2024, pierde.
-- Train 2024 → gana `pseudo=6, rho=0` (la config actual).
-- Mínimo global de LogLoss sobre las dos temporadas juntas: `(pseudo=4,
-  rho=-0.1)` = 1.0052 vs 1.0073 actual — diferencia 0.0021, y el test pareado da
-  `+0.0021 ± 0.0029`: no significativo. Ídem para las otras comparaciones
-  probadas.
-- Matiz para el futuro: en las 7 configuraciones de la tabla, `rho` entre -0.05 y
-  -0.15 sale sistemáticamente algo mejor que `rho=0`, coherente con el sesgo de
-  empates de la calibración (25.3% predicho vs 27.6% real). Pero son los mismos
-  760 partidos reutilizados 7 veces, no pruebas independientes. Si algún día hay
-  más temporadas, esta es la primera hipótesis a reprobar.
-
-### 2. Prior de equipos ascendidos: medido, real, y aun así descartado
-
-Ascendidos a 2024 (Espanyol, Leganés, Valladolid), 57 partidos local + 57
-visitante: ataque local 0.688 vs 1.055 del resto, ataque visitante 0.722 vs
-1.049, defensa visitante 1.425 vs 0.925 (3 de 4 efectos superan 2 errores
-estándar — el fenómeno es real, el modelo no lo captura).
-
-No se implementa. Razones: la magnitud solo se puede medir en 2024, que es
-también el único set de validación disponible — ajustar y evaluar sobre los
-mismos datos es circular (exactamente lo que el punto 1 mostró que no sirve). Son
-3 equipos de una sola temporada; el 0.688 concreto casi seguro no se repite. La
-web ya avisa "⚠ Pocos partidos previos" en predicciones con poca muestra, así que
-el usuario tiene la señal aunque el número no la tenga.
-
-Si se retoma: no hace falta lista de ascendidos. Un equipo con muy pocos partidos
-en la ventana de 400 días es un recién llegado — basta con cambiar el objetivo del
-encogimiento (`_encoger`) para esos equipos en vez de añadir un campo nuevo. El
-efecto se diluye solo conforme acumulan partidos.
+En sept 2026 solo se podían bajar LaLiga 2023 y 2024 (760 partidos; 2021 y 2022
+dan 403 en el plan free), y con eso ninguna configuración se distinguía de otra:
+la que ganaba en una temporada perdía al validarla en la otra, y el mínimo de
+LogLoss de las dos juntas ganaba por 0.0021 ± 0.0029. Por eso entonces no se
+tocaron la corrección de empates ni el prior de los ascendidos, aunque los dos
+efectos se veían. Con los 35.586 partidos de openfootball se reabrieron y los dos
+salieron reales: `RHO_EMPATES` = -0.05 y `ATAQUE_RECIEN_LLEGADO` = 0.8, elegidos
+en las temporadas de ajuste y confirmados en las de prueba (ver "El modelo"). De
+ahí la regla de "Convenciones": elegir con unas temporadas y juzgar con otras.
 
 ## Herramientas de afinado
 
@@ -920,15 +886,16 @@ Create → Import a repository): **un push a `main` despliega solo**, con
 llamarse `pronosticos-bot`, como `name` en `wrangler.jsonc`, o el build falla.
 La base D1 va enlazada por su id en `wrangler.jsonc`; el cron, también ahí.
 
-**Builds de las otras ramas: desactivados** (Settings → Build → Branch control
-→ "Enable Preview Builds" sin marcar). Un Worker creado desde el 22 sept 2026
-compila las ramas que no son `main` como Worker Previews (`npx wrangler
-preview`), que exige un bloque `previews` en `wrangler.jsonc`. Sin él, el check
-"Workers Builds" de cada PR sale en rojo (pasó en las PR #9 y #10), aunque
-producción despliegue bien. No se añade el bloque a propósito: cada rama tendría
-una URL pública propia, sin la base ni los secretos (la página saldría rota), y el
-proyecto evita URLs de más (`preview_urls: false`). Los checks de las PR salen de
-GitHub Actions (ver "Pruebas automáticas").
+**Builds de las otras ramas: hay que desactivarlos** (Settings → Build → Branch
+control → desmarcar "Enable Preview Builds"). Un Worker creado desde el 22 sept
+2026 compila las ramas que no son `main` como Worker Previews (`npx wrangler
+preview`), que exige un bloque `previews` en `wrangler.jsonc`. Mientras sigan
+activos, el check "Workers Builds: pronosticos-bot" de cada PR sale en rojo
+aunque producción despliegue bien: no es un fallo de la PR. No se añade el
+bloque a propósito: cada rama tendría una URL pública propia, sin la base ni los
+secretos (la página saldría rota), y el proyecto evita URLs de más
+(`preview_urls: false`). Los checks de las PR salen de GitHub Actions (ver
+"Pruebas automáticas").
 
 Secretos, en el panel (Settings → Variables and Secrets, tipo Secret):
 `FOOTBALL_DATA_TOKEN` y `UPDATE_SECRET`, los mismos valores que en Render →
