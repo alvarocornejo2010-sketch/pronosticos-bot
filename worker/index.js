@@ -8,6 +8,8 @@
 //   /salud            estado de un vistazo
 //   /actualizar?token=...&forzar=1   rehacer la pasada sin esperar
 //   /validar?token=...[&temporada=N] lanzar el backtest
+//   /api/contar       POST: los avisos de visita de la web (visitas.js)
+//   /visitas?token=...       el panel de visitas (y /api/visitas?token=..., en JSON)
 //
 // El trabajo de verdad lo hace el cron (planificador.js), una vez por minuto.
 
@@ -18,6 +20,7 @@ import { SIN_EJECUTAR } from "./validacion.js";
 import { REGISTRO_VACIO } from "./registro.js";
 import { tick, tocaActualizar } from "./planificador.js";
 import { Reloj } from "./tiempo.js";
+import { contar, resumenVisitas, htmlVisitas } from "./visitas.js";
 
 // Las mismas cabeceras que pone app.py a sus respuestas JSON (la web y app.js
 // llevan las suyas en public/_headers). no-store: el JSON cambia cada pocos
@@ -114,6 +117,23 @@ async function validar(url, env, almacen) {
     consulta: "/api/validacion" });
 }
 
+// El panel de visitas va ya pintado, sin JavaScript: su CSP solo deja los estilos
+// en línea. noindex: no tiene que salir en Google.
+async function panelVisitas(url, env, almacen) {
+  const no = await exigirToken(url, env);
+  if (no) return no;
+  const html = htmlVisitas(await resumenVisitas(almacen, env));
+  return new Response(html, { headers: { ...CABECERAS, "Content-Type": "text/html; charset=utf-8",
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; "
+      + "form-action 'none'; frame-ancestors 'none'",
+    "X-Robots-Tag": "noindex" } });
+}
+
+async function apiVisitas(url, env, almacen) {
+  const no = await exigirToken(url, env);
+  return no || json(await resumenVisitas(almacen, env));
+}
+
 async function salud(almacen, env) {
   const e = (await almacen.leerDoc("resumen")) || {};
   return {
@@ -140,11 +160,15 @@ export default {
       "/salud": async (almacen) => json(await salud(almacen, env)),
       "/actualizar": (almacen) => actualizar(url, env, almacen),
       "/validar": (almacen) => validar(url, env, almacen),
+      "/api/contar": (almacen) => contar(request, env, almacen, CABECERAS),
+      "/api/visitas": (almacen) => apiVisitas(url, env, almacen),
+      "/visitas": (almacen) => panelVisitas(url, env, almacen),
     };
     const ruta = rutas[url.pathname];
     if (!ruta) return env.ASSETS.fetch(request);   // lo demás: los archivos de public/
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      return new Response("Método no permitido", { status: 405, headers: { ...CABECERAS, Allow: "GET, HEAD" } });
+    const metodos = url.pathname === "/api/contar" ? ["POST"] : ["GET", "HEAD"];
+    if (!metodos.includes(request.method)) {
+      return new Response("Método no permitido", { status: 405, headers: { ...CABECERAS, Allow: metodos.join(", ") } });
     }
     try {
       return await ruta(new Almacen(env.DB));

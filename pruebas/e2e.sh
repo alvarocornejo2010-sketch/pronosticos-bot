@@ -4,8 +4,8 @@
 # Los dos tienen que servir exactamente lo mismo en /api/estado, /api/ligas y
 # /api/validacion; ninguna pasada puede morir; y, con la web llena, todas las
 # predicciones caducan a la vez y la web tiene que seguir enseñando números
-# (caducidad.py), y un calendario que llega incompleto no le quita partidos a la
-# primera (calendario.py).
+# (caducidad.py), un calendario que llega incompleto no le quita partidos a la
+# primera (calendario.py) y las visitas se cuentan como deben (visitas.py).
 #
 # Uso: bash pruebas/e2e.sh   (antes: npm ci y pip install -r requirements.txt)
 # Las variables del Worker van con --var, que manda sobre .dev.vars: tu token de
@@ -52,7 +52,7 @@ echo "== Worker"
   --var FOOTBALL_DATA_TOKEN:token_falso_de_prueba --var UPDATE_SECRET:secreto_de_prueba_123 \
   --var "API_BASE:http://127.0.0.1:$P_API/v4" --var PAUSA_ENTRE_REQUESTS:0 \
   --var MIN_MINUTOS_ACTUALIZACION:25 --var AUTO_VALIDAR:1 --var PRESUPUESTO_REQUESTS:6 \
-  --var MAX_BYTES_PASADA:350000 --var MAX_CALCULOS_PASADA:40 > "$TMP/wrangler.log" 2>&1) &
+  --var MAX_BYTES_PASADA:350000 --var MAX_CALCULOS_PASADA:40 --var MAX_VISITAS_DIA:60 > "$TMP/wrangler.log" 2>&1) &
 esperar "http://127.0.0.1:$P_W/salud"
 python3 "$REPO/pruebas/correr_cron.py" "$P_W" 600 "$MAX_MS" | tail -4
 
@@ -70,4 +70,7 @@ python3 "$REPO/pruebas/caducidad.py" "$P_W" "$TMP/d1" | tail -3
 
 echo "== Calendario incompleto"
 python3 "$REPO/pruebas/calendario.py" "$P_W" "$P_API" secreto_de_prueba_123
+
+echo "== Visitas"
+python3 "$REPO/pruebas/visitas.py" "$P_W" secreto_de_prueba_123
 echo "e2e: OK"

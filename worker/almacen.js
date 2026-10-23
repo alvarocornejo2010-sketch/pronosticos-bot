@@ -62,6 +62,15 @@ export const ESQUEMA = [
      nombre TEXT PRIMARY KEY,
      hasta  INTEGER NOT NULL,
      dueno  TEXT NOT NULL DEFAULT '')`,
+  // Las visitas, sumadas por día de Lima (visitas.js): una fila por contador, sin
+  // nada de quién es quién. WITHOUT ROWID: la clave primaria es la propia tabla y
+  // cada suma escribe una fila, no dos (la fila y su índice).
+  `CREATE TABLE IF NOT EXISTS visitas (
+     dia   TEXT NOT NULL,
+     tipo  TEXT NOT NULL,
+     clave TEXT NOT NULL,
+     n     INTEGER NOT NULL,
+     PRIMARY KEY (dia, tipo, clave)) WITHOUT ROWID`,
 ];
 
 const SIN_TABLA = /no such table/i;

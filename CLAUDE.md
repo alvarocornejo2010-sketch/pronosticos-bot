@@ -93,7 +93,8 @@ ni una etiqueta `{{ }}`: Flask la sirve como plantilla (`template_folder=
 `public/_headers`. Es un shell estático con el CSS en línea y el JS en
 `public/app.js` (Flask lo sirve en `/app.js`), que se pinta entero en
 el cliente sondeando `/api/estado` (cada 4s mientras hay cálculo en curso, cada
-30s el resto del tiempo). No hay `static/`, ni build, ni dependencias de JS; de
+30s el resto del tiempo y nada con la pestaña oculta: al volver a ella pide en el
+acto). No hay `static/`, ni build, ni dependencias de JS; de
 fuera solo llegan las fuentes Saira y Figtree (Google Fonts, con fallback del
 sistema) y los escudos (URLs de football-data.org). Al tocar la web se trabaja
 sobre las funciones `pintar*` y `html*` de `app.js`, no sobre bucles de
@@ -183,8 +184,10 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
 **Endpoints:** `/` (web), `/api/estado`, `/api/ligas` (qué ancla y qué media usa
 cada liga), `/salud`, `/actualizar?token=...&forzar=1`,
 `/validar?token=...[&temporada=N]` (lanza el backtest), `/api/validacion` (su
-resultado) y `/api/registro` (el registro en vivo; en Render responde
-`no_disponible`).
+resultado), `/api/registro` (el registro en vivo; en Render responde
+`no_disponible`) y `/api/contar` (POST: los avisos de visita de la web; en Render
+no hace nada). Solo en Cloudflare: `/visitas?token=...`, el panel de visitas, y
+`/api/visitas?token=...`, lo mismo en JSON (ver "Visitas").
 
 **Efecto secundario de cada deploy:** el disco de Render free es efímero, cada
 deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
@@ -258,7 +261,7 @@ vivo), `documentos` (`estado` que sirve `/api/estado`, `resumen`, `validacion`,
 `registro` y `registro_publico`, pedidos, temporadas terminadas compactas,
 `temporada:liga:{código}:{año}`) y
 `candado` (que dos pasadas no se pisen, hora de la última petición, pasadas
-muertas).
+muertas) y `visitas` (los contadores de visitas por día, ver "Visitas").
 
 **Si una pasada muere** (lo más probable, por CPU) deja el candado puesto; la
 siguiente lo nota y hace la mitad (presupuesto, bytes y cálculos), hasta un
@@ -321,13 +324,49 @@ En vivo, y el tablero Resultados. En Render no existe (disco efímero):
   el tope de 3 no frenaba nada);
 - `/actualizar?forzar=1` y `/validar` dejan un pedido en D1 que el cron recoge
   en menos de un minuto: una petición web no puede durar lo que una pasada;
-- el registro en vivo (`/api/registro`) solo existe aquí.
+- el registro en vivo (`/api/registro`) y las visitas (`/visitas`) solo existen
+  aquí.
 
 **En local:** `npm install`, copiar `.dev.vars.example` a `.dev.vars`, `npm run
 dev` y lanzar el cron a mano con
 `curl "http://localhost:8787/cdn-cgi/local/scheduled?cron=*+*+*+*+*"`. Con
 `API_BASE` en `.dev.vars` se apunta a una API falsa y con
 `PAUSA_ENTRE_REQUESTS=0` no espera entre peticiones.
+
+## Visitas (oct 2026)
+
+Para saber cuánta gente entra, si vuelve y qué mira, sin cookies, sin guardar IPs
+y sin servicios de fuera (la CSP sigue igual). Lo cuenta `worker/visitas.js`; se
+ve en `/visitas?token=...` (el mismo `UPDATE_SECRET`), una página ya pintada por
+el Worker, sin JavaScript, con su propia CSP y `noindex`.
+
+- **La web avisa** (`app.js`, sección VISITAS) con una petición al entrar
+  (`entrada`: nuevo, vuelve o repite, días desde la última visita, ancho de
+  pantalla y dominio de la página de la que llegó) y otra al irse, con lo demás
+  junto (`sendBeacon` al ocultar la pestaña): partidos abiertos, ligas, búsquedas
+  y pestañas del móvil. Para saber si vuelve, el navegador guarda en
+  `localStorage` solo el día de su última visita
+  (`pronosticos.ultima_visita`). Un visitante es un navegador en un día.
+- **Se guarda sumado** en la tabla `visitas` (día de Lima, tipo, clave, n), sin
+  nada de quién es quién: unas 200 filas al día, casi todas de partidos.
+  `WITHOUT ROWID`, para que cada suma sea una escritura y no dos.
+- **Nada inventado entra:** cada clave se coteja con una lista fija (ligas,
+  pantallas, pestañas, orígenes por dominio) y un partido solo cuenta si tiene
+  predicción. No cuenta lo que llega de otra web (`Origin`), de un bot que ejecuta
+  JavaScript (`bot/`, `headless`, `lighthouse`...) ni lo de más de 4 KB.
+- **Tope diario** (`MAX_VISITAS_DIA`, 20.000 escrituras): D1 da 100.000 al día y
+  la actualización necesita las suyas. Si alguien machaca
+  `/api/contar`, se pierden las cuentas de ese día, no las predicciones; el
+  panel avisa de los días en que se llegó al tope. Con ~6 escrituras por
+  visitante nuevo, da para unos 2.000-3.000 visitantes al día; si se llega, subir
+  el tope o juntar más los avisos.
+- **Lo que no se sabe:** WhatsApp y las demás apps casi nunca mandan de dónde
+  viene la gente (sale como "Directo o desde una app"); quien entra desde dos
+  aparatos cuenta dos veces.
+- **El sondeo, con la pestaña oculta, para** (`bucle` en `app.js`): antes una
+  pestaña olvidada pedía `/api/estado` cada 30 s todo el día, hasta 2.880
+  peticiones de las 100.000 diarias del plan gratis. El registro en vivo (cada
+  15 min) tampoco se pide con la pestaña oculta.
 
 ## Seguridad (revisada en oct 2026)
 
@@ -382,7 +421,8 @@ Worker cuenta para las 100.000 diarias del plan gratis. Alguien que las
 machacara a propósito dejaría `/api/estado` sin servicio hasta la medianoche
 UTC (la web en sí, que es estática, seguiría cargando). En `workers.dev` no hay
 reglas de WAF; con un dominio propio en Cloudflare sí habría una regla de
-límite de peticiones gratis.
+límite de peticiones gratis. `/api/contar` es la única ruta pública que escribe
+en D1, con tope diario (ver "Visitas").
 
 ## El modelo (oct 2026)
 
@@ -842,6 +882,15 @@ Environment).
 
 ## Pendiente (por orden de lo que más mueve la aguja)
 
+- **Mirar `/visitas` a las dos semanas** (en marcha desde oct 2026). Con eso se
+  decide lo siguiente, ideas ya habladas: un link por partido con vista previa
+  para WhatsApp (rutas sin `#`, servidas por el Worker con etiquetas Open Graph),
+  equipos favoritos en el navegador, instalarla como app, un dominio propio (más
+  fácil de recordar, Search Console y la regla de límite de peticiones) y, si hay
+  gente que vuelve, cuentas para una porra gratis contra el modelo (entrar con
+  Google o passkey, sin contraseñas; política de privacidad por la Ley 29733;
+  sin dinero ni premios).
+
 - **Leer el registro en vivo cuando crezca** (en marcha desde oct 2026, ver
   "El registro en vivo"). Con unos pocos partidos por liga es ruido; con una
   temporada (unos 300 por liga) ya se puede comparar con el backtest de
@@ -880,8 +929,9 @@ Environment).
     pasada muerta. Después caduca todas las predicciones a la vez y comprueba que
     la web sigue enseñando números mientras se recalculan (`caducidad.py`), y que
     un calendario que llega incompleto no quita partidos a la primera
-    (`calendario.py`, con `/__omitir` de la API falsa). En GitHub, 1-2 minutos; en
-    local, unos 10.
+    (`calendario.py`, con `/__omitir` de la API falsa). Y que las visitas se
+    cuentan bien, que lo inventado no entra y que el tope corta (`visitas.py`, con
+    `MAX_VISITAS_DIA=60`). En GitHub, 1-2 minutos; en local, unos 10.
   - Las variables del Worker van con `--var`, que manda sobre `.dev.vars`: el token
     de verdad, si está ahí, no se usa ni sale a ningún sitio.
   - En local, lo mismo: `npm ci`, `pip install -r requirements.txt` y
