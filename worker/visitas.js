@@ -12,11 +12,12 @@
 //   {t: "pestana", p: "panorama"}    cambió de pestaña en el móvil
 //   {t: "compartir", id: 123}        pulsó Compartir en un partido
 //   {t: "favorito"}                  marcó un equipo con la estrella
+//   {t: "instalada"}                 instaló la web como app
 // "nuevo", "vuelve" y "repite" los decide el navegador, que guarda solo el día de
 // su última visita: un visitante es un navegador en un día. hace: días desde esa
 // visita. o: el dominio de la página de la que llegó (vacío si no se sabe).
 // via: "partido" si entró por un enlace compartido (/partido/123). f: 1 si sigue
-// a algún equipo.
+// a algún equipo. app: 1 si la abrió desde la app instalada.
 //
 // Todo lo que llega se coteja con listas fijas: nadie puede meter una clave
 // inventada. Y como cada aviso es una escritura en D1 (100.000 al día en el plan
@@ -83,13 +84,14 @@ export function contadores(eventos, propio, hora) {
       if (e.v !== "nuevo" && e.v !== "vuelve") continue;
       sumar("visitantes", e.v);
       if (e.f === 1) sumar("con_favoritos", "");
+      if (e.app === 1) sumar("en_app", "");
       if (DISPOSITIVOS.has(e.d)) sumar("dispositivo", e.d);
       sumar("origen", origen(e.o, propio));
       if (e.v === "vuelve" && Number.isSafeInteger(e.hace) && e.hace >= 1) sumar("vuelta", tramoVuelta(e.hace));
     } else if ((e.t === "partido" || e.t === "compartir") && Number.isSafeInteger(e.id) && e.id > 0) {
       sumar(e.t, String(e.id));
-    } else if (e.t === "favorito") {
-      sumar("favorito", "");
+    } else if (e.t === "favorito" || e.t === "instalada") {
+      sumar(e.t, "");
     } else if (e.t === "liga" && CODIGOS.has(e.c)) {
       sumar("liga", e.c);
     } else if (e.t === "busqueda") {
@@ -147,7 +149,7 @@ export async function contar(request, env, almacen, cabeceras, ahora = Date.now(
 // ---------- lo que enseña /visitas ----------
 
 const vacio = () => ({ visitas: 0, visitantes: 0, nuevos: 0, vuelven: 0, partidos: 0, busquedas: 0,
-  compartidos: 0, llegadas: 0, estrellas: 0, con_favoritos: 0 });
+  compartidos: 0, llegadas: 0, estrellas: 0, con_favoritos: 0, instaladas: 0, en_app: 0 });
 
 function sumarDias7(dias) {
   const s = vacio();
@@ -164,7 +166,7 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
   const [serie, desglose, top] = await almacen.consultar(() => db.batch([
     db.prepare(`SELECT dia, tipo, CASE WHEN tipo IN ('partido', 'compartir') THEN '' ELSE clave END AS c, SUM(n) AS n
       FROM visitas WHERE dia >= ?1 AND tipo IN ('visitas', 'visitantes', 'partido', 'busqueda', 'escrituras',
-        'compartir', 'enlace', 'favorito', 'con_favoritos')
+        'compartir', 'enlace', 'favorito', 'con_favoritos', 'instalada', 'en_app')
       GROUP BY dia, tipo, c`).bind(desde30),
     db.prepare(`SELECT tipo, clave, SUM(n) AS n FROM visitas
       WHERE dia >= ?1 AND tipo IN ('origen', 'dispositivo', 'vuelta', 'hora', 'liga', 'pestana')
@@ -185,7 +187,8 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
     porDia.set(d.dia, d);
   }
   const CAMPO = { visitas: "visitas", partido: "partidos", busqueda: "busquedas", escrituras: "escrituras",
-    compartir: "compartidos", enlace: "llegadas", favorito: "estrellas", con_favoritos: "con_favoritos" };
+    compartir: "compartidos", enlace: "llegadas", favorito: "estrellas", con_favoritos: "con_favoritos",
+    instalada: "instaladas", en_app: "en_app" };
   for (const f of serie.results) {
     const d = porDia.get(f.dia);
     if (!d) continue;
@@ -335,11 +338,13 @@ ${lista("Ligas que más se abren", r.desglose.liga, NOMBRE_LIGA)}
 ${lista("Pestañas en el móvil", r.desglose.pestana, NOMBRES.pestana, ["partidos", "panorama", "ligas"])}
 <section class="tablero"><h2>Búsquedas</h2><p class="grande">${miles(s.busquedas)}</p>
 <p class="vacia">veces que alguien buscó un equipo esta semana</p></section>
-<section class="tablero"><h2>Compartir y favoritos</h2><div class="pares">
+<section class="tablero"><h2>Compartir, favoritos y app</h2><div class="pares">
 ${par(s.compartidos, "veces que se pulsó Compartir en un partido")}
 ${par(s.llegadas, "visitas que llegaron por un enlace compartido")}
 ${par(s.estrellas, "equipos marcados con la estrella")}
 ${par(s.con_favoritos, `visitantes que siguen a algún equipo (${pct(s.con_favoritos, s.visitantes)})`)}
+${par(s.instaladas, "veces que se instaló como app")}
+${par(s.en_app, `visitantes que entraron desde la app (${pct(s.en_app, s.visitantes)})`)}
 </div></section>
 </div>
 <footer><h2>Cómo se cuenta</h2><ul>

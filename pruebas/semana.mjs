@@ -79,6 +79,8 @@ const og = etiquetasOg("https://x.workers.dev", "/partido/7", t.titulo, t.descri
 assert.ok(og.includes("Shakhtar &lt;b&gt;") && !og.includes("<b>"));
 assert.ok(og.includes('content="https://x.workers.dev/og.png"') && og.includes('content="https://x.workers.dev/partido/7"'));
 assert.ok(og.startsWith("<!-- og -->") && og.endsWith("<!-- /og -->"));
+assert.ok(og.includes('<meta name="description" content="Champions League · jue 22 oct')
+  && og.includes('<link rel="canonical" href="https://x.workers.dev/partido/7">'));
 const sin = textosPartido({ local: "A", visita: "B", liga: "La Liga", utcDate: "2026-10-25T01:30:00Z" }, reloj);
 assert.equal(sin.descripcion, "La Liga · sáb 24 oct, 20:30 (hora de Lima). Pronóstico en cálculo.");
 console.log("tarjeta: 1X2 como en la web, hora de Lima y nombres escapados");

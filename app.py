@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import numpy as np
 import requests
-from flask import Flask, jsonify, redirect, render_template, request, send_from_directory
+from flask import Flask, abort, jsonify, redirect, render_template, request, send_from_directory
 from scipy.stats import poisson
 
 # La web vive en public/: el mismo archivo lo sirve el Worker de Cloudflare
@@ -1222,7 +1222,8 @@ CSP_WEB = ("default-src 'none'; script-src 'self'; "
            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
            "font-src https://fonts.gstatic.com; "
            "img-src 'self' data: https://crests.football-data.org; "
-           "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+           "connect-src 'self'; manifest-src 'self'; worker-src 'self'; "
+           "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 # El JSON no carga nada.
 CSP_API = "default-src 'none'; frame-ancestors 'none'"
 
@@ -1234,7 +1235,9 @@ def agregar_headers_seguridad(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Content-Security-Policy"] = CSP_WEB if response.mimetype == "text/html" else CSP_API
+    # sw.js lleva la de la web: su connect-src 'self' es lo que le deja pedir la página
+    web = response.mimetype == "text/html" or request.path == "/sw.js"
+    response.headers["Content-Security-Policy"] = CSP_WEB if web else CSP_API
     # Solo por HTTPS (Render ya redirige el HTTP; esto evita hasta el primer salto).
     response.headers["Strict-Transport-Security"] = "max-age=31536000"
     # Esto es un panel en vivo: cachear el HTML solo consigue que después de un
@@ -1260,6 +1263,27 @@ def partido(id_partido):
 @app.route("/app.js")
 def app_js():
     return send_from_directory(app.template_folder, "app.js", mimetype="text/javascript")
+
+
+# Los demás archivos de public/ que pide la web: instalarla como app (manifiesto,
+# service worker e iconos) y la imagen para compartir. Lista cerrada: nada más de
+# public/ se sirve por esta ruta.
+ARCHIVOS_WEB = {
+    "manifest.webmanifest": "application/manifest+json",
+    "sw.js": "text/javascript",
+    "icono-192.png": "image/png",
+    "icono-512.png": "image/png",
+    "icono-maskable-512.png": "image/png",
+    "apple-touch-icon.png": "image/png",
+    "og.png": "image/png",
+}
+
+
+@app.route("/<nombre>")
+def archivo_web(nombre):
+    if nombre not in ARCHIVOS_WEB:
+        abort(404)
+    return send_from_directory(app.template_folder, nombre, mimetype=ARCHIVOS_WEB[nombre])
 
 
 def token_valido():

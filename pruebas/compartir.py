@@ -41,7 +41,12 @@ l, x, v = enteros([p["prob_local"], p["prob_empate"], p["prob_visita"]])
 assert f"{local} {l} % · empate {x} % · {visita} {v} %." in og(pag, "description"), og(pag, "description")
 assert og(pag, "url") == f"{W}/partido/{p['id']}" and og(pag, "image") == f"{W}/og.png"
 assert f"<title>{html.escape(local)} – {html.escape(visita)} · Pronósticos</title>" in pag
-print(f"/partido/{p['id']}: la web con la tarjeta de {local} – {visita} ({l}/{x}/{v}), con su CSP")
+# para Google: la misma descripción que la tarjeta y su dirección canónica
+desc = html.unescape(re.search(r'<meta name="description" content="([^"]*)">', pag).group(1))
+assert desc == og(pag, "description") and pag.count('<meta name="description"') == 1, desc
+assert f'<link rel="canonical" href="{W}/partido/{p["id"]}">' in pag
+print(f"/partido/{p['id']}: la web con la tarjeta de {local} – {visita} ({l}/{x}/{v}), su descripción y su"
+      " dirección canónica, con su CSP")
 
 st, _, pag = pedir("/partido/999999999")
 assert st == 200 and og(pag, "title") == "Pronósticos de fútbol: 1 X 2 y goles" and "<title>Pronósticos</title>" in pag

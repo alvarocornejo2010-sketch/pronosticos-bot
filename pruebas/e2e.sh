@@ -6,7 +6,8 @@
 # predicciones caducan a la vez y la web tiene que seguir enseñando números
 # (caducidad.py), un calendario que llega incompleto no le quita partidos a la
 # primera (calendario.py), /partido/123 lleva la tarjeta de ese partido
-# (compartir.py) y las visitas se cuentan como deben (visitas.py).
+# (compartir.py), la web es instalable y tiene robots.txt y sitemap
+# (descubrir.py), y las visitas se cuentan como deben (visitas.py).
 #
 # Uso: bash pruebas/e2e.sh   (antes: npm ci y pip install -r requirements.txt)
 # Las variables del Worker van con --var, que manda sobre .dev.vars: tu token de
@@ -74,6 +75,9 @@ python3 "$REPO/pruebas/calendario.py" "$P_W" "$P_API" secreto_de_prueba_123
 
 echo "== Compartir"
 python3 "$REPO/pruebas/compartir.py" "$P_W"
+
+echo "== Instalable y buscadores"
+python3 "$REPO/pruebas/descubrir.py" "$P_W"
 
 echo "== Visitas"
 python3 "$REPO/pruebas/visitas.py" "$P_W" secreto_de_prueba_123
