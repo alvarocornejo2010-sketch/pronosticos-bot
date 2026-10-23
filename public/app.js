@@ -487,19 +487,10 @@ function htmlComoSeCalculo(p, m) {
     + " del visitante, de esta temporada y la anterior";
   return '<section class="det-datos"><h3>Cómo se calculó</h3><dl>'
     + dato("Muestra", muestraTxt)
-    + (p.calculado ? dato("Calculado", htmlCalculado(p.calculado)) : "")
+    + (p.calculado ? dato("Calculado", esc(haceCuanto(p.calculado))) : "")
     + (ch ? dato("Nivel de liga", htmlNivelChampions(p)) : "")
     + (ch && ch.local && ch.local.partidos_cl !== undefined ? dato("En la Champions, frente a lo esperado", htmlHistorialChampions(p)) : "")
     + '</dl>' + (ch ? htmlNotaChampions() : "") + (conGoles(p) ? htmlNotaGoles(p) : "") + '</section>';
-}
-
-// Una predicción se rehace cada 24 h; si es más vieja, la API lleva tiempo sin
-// responder y se ven los números de entonces (se siguen enseñando hasta tener los nuevos).
-function htmlCalculado(iso) {
-  const vieja = Date.now() - Date.parse(iso) > 26 * 3600000;
-  return vieja ? '<span class="viejo">' + ICONO_AVISO + esc(haceCuanto(iso))
-      + ': la API no responde y estos son los números de entonces</span>'
-    : esc(haceCuanto(iso));
 }
 
 /** De qué liga sale cada equipo de la Champions y con qué nivel. */
@@ -724,8 +715,11 @@ function bloquesCentro(todos, ruta) {
     const out = { titulo: "Toda la semana", sub: todos.length + " partidos", mezcla: true, bloques: [] };
     if (orden !== "hora") { out.bloques = bloquesDePartidos(ordenar(todos), { conDia: true }); return out; }
     porDias(todos).forEach(d => {
+      // los de tus equipos, primero en su día (en la vista de un día van en su grupo)
+      const lista = ordenar(d.partidos);
       out.bloques.push(bloqueGrupo(d.fecha, nombreDia(d), d.partidos.length, null, "dia"));
-      out.bloques.push.apply(out.bloques, bloquesDePartidos(ordenar(d.partidos), { conDia: false }));
+      out.bloques.push.apply(out.bloques, bloquesDePartidos(
+        lista.filter(esFavorito).concat(lista.filter(p => !esFavorito(p))), { conDia: false }));
     });
     return out;
   }
@@ -1310,6 +1304,17 @@ function alternarFavorito(nombre, boton) {
   nuevo.focus({ preventScroll: true });
 }
 
+// Las estrellas que cambió otra pestaña: esta las toma, para no borrarlas al guardar
+// las suyas.
+window.addEventListener("storage", (e) => {
+  if (e.key !== CLAVE_FAVORITOS && e.key !== null) return;
+  favoritos.clear();
+  leerFavoritos().forEach(n => favoritos.add(n));
+  versionFav++;
+  paneLigas.dataset.huella = "";
+  if (datos) render();
+});
+
 // La caja que se desplaza con el elemento dentro (la tabla en escritorio), o null si es la página.
 function contenedorDeScroll(el) {
   for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
@@ -1328,8 +1333,11 @@ async function compartir(id) {
   const url = location.origin + "/partido/" + p.id;
   const r = reparto(p);
   const titulo = cortoDe(p, "local") + " – " + cortoDe(p, "visita");
-  const texto = titulo + " (" + p.liga + ", " + diaCorto(p.dia) + " " + p.hora + "): " + cortoDe(p, "local") + " " + r.l
-    + " %, empate " + r.x + " %, " + cortoDe(p, "visita") + " " + r.v + " %.";
+  // como la tarjeta (compartir.js): el mensaje se lee otro día y quizá en otro país,
+  // así que la fecha va escrita y la hora con su zona, no "Mañana 14:00"
+  const dia = NOMBRES_DIA[new Date(p.fecha + "T00:00:00Z").getUTCDay()].slice(0, 3).toLowerCase();
+  const texto = titulo + ". " + p.liga + " · " + dia + " " + fechaCorta(p.fecha) + ", " + p.hora + " (hora de Lima). "
+    + cortoDe(p, "local") + " " + r.l + " % · empate " + r.x + " % · " + cortoDe(p, "visita") + " " + r.v + " %.";
   contar({ t: "compartir", id: Number(p.id) });
   if (navigator.share) {
     try { await navigator.share({ title: titulo, text: texto, url: url }); return; }
@@ -1341,9 +1349,9 @@ async function compartir(id) {
 
 // El partido de un enlace /partido/123, cuando ya hay datos.
 function abrirEnlazado() {
-  const id = partidoEnlazado;
+  const id = Number(partidoEnlazado);
   partidoEnlazado = null;
-  const p = aplanar(datos.dias).find(x => String(x.id) === id);
+  const p = aplanar(datos.dias).find(x => Number(x.id) === id);
   history.replaceState(null, "", "/" + (p ? "#/dia/" + p.fecha : "#/"));
   if (p) { ponerPestana("partidos"); abrirPartido(p.fecha, p.id); return; }
   render();
@@ -1544,13 +1552,15 @@ let periodo = 4000;
 let estadoPrevio = null;
 async function refrescar() {
   try {
-    datos = await (await fetch("/api/estado")).json();
+    const r = await fetch("/api/estado");
+    if (!r.ok) throw new Error("HTTP " + r.status);   // un 500 no pisa los datos que ya hay
+    datos = await r.json();
     periodo = (datos.estado === "actualizando") ? 4000 : 30000;
     // las medias de liga y el registro en vivo solo cambian cuando termina una pasada
     if (estadoPrevio === "actualizando" && datos.estado !== "actualizando") { cargarLigas(); cargarRegistro(); }
     estadoPrevio = datos.estado;
     render();
-    if (partidoEnlazado) abrirEnlazado();
+    if (partidoEnlazado && datos.dias && datos.dias.length) abrirEnlazado();
   } catch (e) {
     estadoCorto.dataset.modo = "error";
     estadoCorto.querySelector(".txt").textContent = "Sin conexión";

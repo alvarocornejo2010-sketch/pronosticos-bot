@@ -15,6 +15,7 @@
 import { COMPETICIONES } from "./config.js";
 import { calcularPoisson, mercadosDeGoles, redondear } from "./modelo.js";
 import { Acumulador, Binario, MERCADOS, resultado, resumenMercado } from "./metricas.js";
+import { enterosQueSuman } from "./compartir.js";
 
 export const REGISTRO_VACIO = {
   estado: "sin_datos", partidos: 0, plataforma: "cloudflare",
@@ -31,7 +32,8 @@ const MIN_CALIBRACION = 20;
 const MS_DIA = 86400000;
 // El resumen por días (la web enseña la última semana): se guardan 21 días.
 export const DIAS_RESUMEN = 21;
-// Tramos de confianza del favorito: su probabilidad en el 1X2, en %.
+// Tramos de confianza del favorito: su probabilidad en el 1X2, en %, con el entero
+// que enseña la web (un favorito que sale con 60 cuenta en los claros).
 export const TRAMOS = [["claros", 60], ["medios", 45], ["renidos", 0]];
 const tramoDe = (prob) => TRAMOS.find(([, min]) => prob >= min)[0];
 const cuatro = (x) => Math.round(x * 1e4) / 1e4;
@@ -101,7 +103,8 @@ export class Registro {
     const paso = e.gl > e.gv ? "1" : e.gl === e.gv ? "X" : "2";
     const acierto = signo === paso;
     const d = (this.dias[e.fecha] ??= { n: 0, ac: 0, esp: 0, tramos: {}, sorpresa: null });
-    const t = (d.tramos[tramoDe(prob)] ??= [0, 0, 0]);
+    const enteros = enterosQueSuman([e.prob_local, e.prob_empate, e.prob_visita]);
+    const t = (d.tramos[tramoDe(enteros["1X2".indexOf(signo)])] ??= [0, 0, 0]);
     d.n++;
     t[0]++;
     if (acierto) { d.ac++; t[1]++; }

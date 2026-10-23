@@ -34,6 +34,7 @@ p = next(p for d in estado["dias"] for p in d["partidos"] if not p.get("pendient
 local, visita = p.get("local_corto") or p["local"], p.get("visita_corto") or p["visita"]
 st, cab, pag = pedir(f"/partido/{p['id']}")
 assert st == 200 and cab["Content-Type"].startswith("text/html"), (st, cab["Content-Type"])
+assert cab.get("X-Robots-Tag") is None, cab.get("X-Robots-Tag")
 assert "script-src 'self'" in cab["Content-Security-Policy"], cab["Content-Security-Policy"]
 assert pag.count("<!-- og -->") == 1 and '<script src="/app.js"></script>' in pag
 assert og(pag, "title") == f"{local} – {visita}", og(pag, "title")
@@ -48,13 +49,14 @@ assert f'<link rel="canonical" href="{W}/partido/{p["id"]}">' in pag
 print(f"/partido/{p['id']}: la web con la tarjeta de {local} – {visita} ({l}/{x}/{v}), su descripción y su"
       " dirección canónica, con su CSP")
 
-st, _, pag = pedir("/partido/999999999")
+st, cab, pag = pedir("/partido/999999999")
 assert st == 200 and og(pag, "title") == "Pronósticos de fútbol: 1 X 2 y goles" and "<title>Pronósticos</title>" in pag
+assert cab["X-Robots-Tag"] == "noindex"   # la portada con otra dirección: fuera de Google
 st, _, cuerpo = pedir(f"/partido/{p['id']}", "HEAD")
 assert st == 200 and cuerpo == ""
 assert pedir(f"/partido/{p['id']}", "POST")[0] == 405
 assert pedir("/partido/12abc")[0] == 404
 st, cab, _ = pedir("/og.png")
 assert st == 200 and cab["Content-Type"] == "image/png"
-print("un partido que no existe: la tarjeta de siempre; HEAD, POST y rutas raras, bien; og.png se sirve")
+print("un partido que no existe: la tarjeta de siempre, fuera de Google; HEAD, POST y rutas raras, bien; og.png se sirve")
 print("compartir: OK")

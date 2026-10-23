@@ -224,7 +224,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const miles = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 const pct = (a, b) => (b ? Math.round((100 * a) / b) + "%" : "–");
-const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sept", "oct", "nov", "dic"];
+const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const DIAS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
 const fechaCorta = (f) => `${+f.slice(8, 10)} ${MESES[+f.slice(5, 7) - 1]}`;
 const diaSemana = (f) => DIAS[new Date(f + "T00:00:00Z").getUTCDay()];

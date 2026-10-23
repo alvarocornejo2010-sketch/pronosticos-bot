@@ -323,8 +323,9 @@ El registro lleva además un **resumen por día** (`dias`, 21 días; la web reci
 los 14 últimos en `semana` y suma los suyos): cuántos terminaron, en cuántos
 acertó el favorito (el de la web, `veredictoDe`: el mayor, y si empatan, el
 primero), cuántos aciertos esperaban sus propias probabilidades, lo mismo por
-tramo de confianza (claros, 60 % o más; intermedios, 45-60; reñidos, menos de 45)
-y el fallo del favorito más claro. Un registro de antes (sin `dias`) se rehace
+tramo de confianza (claros, 60 % o más; intermedios, 45-60; reñidos, menos de 45,
+con el entero que enseña la web: un favorito que sale con 60 es claro) y el fallo
+del favorito más claro. Un registro de antes (sin `dias`) se rehace
 una vez con `resultados` y la ficha publicada (`rehacerDias`, con `json_extract`
 para no leer las fichas enteras). Lo prueba `pruebas/semana.mjs`.
 
@@ -407,7 +408,8 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
 - **Compartir:** cada partido abierto tiene un botón Compartir (en la cabecera del
   detalle, bajo la hora). En el móvil abre
   el menú del sistema (WhatsApp, Telegram...); si no lo hay, copia el enlace
-  `/partido/123`. Esa ruta la sirve el Worker (`compartir.js`): pide `index.html`
+  `/partido/123`. El texto lleva la fecha escrita y la hora de Lima, como la
+  tarjeta: se lee otro día y quizá en otro país, así que nada de "Mañana 14:00". Esa ruta la sirve el Worker (`compartir.js`): pide `index.html`
   a los archivos estáticos (con sus cabeceras de `public/_headers`, CSP incluida)
   y cambia el bloque entre `<!-- og -->` y `<!-- /og -->` por las etiquetas Open
   Graph del partido: título con los equipos y descripción con la liga, la hora de
@@ -416,16 +418,19 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
   PNG por partido no cabe en 10 ms de CPU), hecha con Playwright desde un HTML con
   Saira y Figtree. Un partido que no existe da la tarjeta de siempre (la de
   `index.html`, que lleva la dirección de workers.dev escrita: si la web cambia
-  de dominio, cambiarla ahí). La web, al ver `/partido/123`, abre ese partido en
-  cuanto tiene datos y deja la dirección en `/#/dia/...` (`abrirEnlazado`); si ya
-  empezó, lo dice y va a `#/`. En Render, `/partido/123` sirve la web sin tarjeta.
+  de dominio, cambiarla ahí), con `X-Robots-Tag: noindex`. La web, al ver
+  `/partido/123`, abre ese partido en cuanto tiene partidos (con la web vacía o un
+  error, espera a la siguiente vez) y deja la dirección en `/#/dia/...`
+  (`abrirEnlazado`); si ya empezó, lo dice y va a `#/`. En Render, `/partido/123` sirve la web sin tarjeta.
 - **Favoritos:** en el detalle, "Seguir" con una estrella bajo cada equipo. Se
   guardan en el navegador (`pronosticos.favoritos`, los nombres completos, hasta
   60), sin cuenta. Sus partidos salen en `#/favoritos` ("Mis equipos", en el
-  tablero de Ligas y en la tira de ligas del móvil), en un grupo "Mis equipos"
-  al principio de cada día (sin repetirse en su liga), primero en Próximos y con
-  una estrella junto al nombre. La estrella va en blanco: el oro es la
-  probabilidad.
+  tablero de Ligas y en la tira de ligas del móvil), en la vista de un día en un
+  grupo "Mis equipos" al principio (sin repetirse en su liga), en "Toda la
+  semana" los primeros de su día, primero en Próximos y con una estrella junto al
+  nombre. La estrella va en blanco: el oro es la probabilidad. Con la web abierta
+  en dos pestañas, cada una toma al momento las estrellas de la otra (evento
+  `storage`), para no borrarlas al guardar las suyas.
 
 ## Instalable y buscadores (oct 2026)
 
@@ -447,8 +452,9 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
 - **Buscadores:** toda la web va detrás del `#`, que Google no ve como páginas
   distintas; lo que sí ve son los `/partido/123`, cada uno con su título, su
   `meta description` (la misma que la tarjeta) y su `canonical`. El Worker sirve
-  `/robots.txt` (sí a la web y los partidos; no a `/api/`, `/visitas`,
-  `/actualizar` ni `/validar`) y `/sitemap.xml` con la portada y los partidos por
+  `/robots.txt` (sí a la web, los partidos y los datos que pinta: Google pinta la
+  página pidiendo `/api/estado`, y sin él indexaría "Cargando"; no a
+  `/api/contar`, `/api/visitas`, `/visitas`, `/actualizar` ni `/validar`) y `/sitemap.xml` con la portada y los partidos por
   jugar (`buscadores.js`, una consulta a D1). Las direcciones salen del origen de
   la petición. Solo en Cloudflare. Para que Google lo lea antes, falta darlo de
   alta en Search Console (verificar la propiedad con una etiqueta `meta`, la

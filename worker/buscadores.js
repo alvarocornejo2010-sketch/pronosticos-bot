@@ -4,14 +4,16 @@
 // descripción y su dirección canónica. El sitemap los lista todos, los de los
 // partidos por jugar, para que Google los encuentre sin que nadie los enlace.
 // Las direcciones salen del origen de la petición: si la web cambia de dominio,
-// cambian solas.
+// cambian solas. Los datos de la web (/api/estado y los demás de solo lectura) no
+// se cierran: Google pinta la página con ellos, y sin ellos indexaría "Cargando".
 
 import { isoSinMs } from "./registro.js";
 
 export function robots(origen) {
-  return `# La web y los partidos sí; la API, el panel de visitas y las rutas con token, no.
+  return `# La web, los partidos y los datos que pinta sí; las visitas y las rutas con token, no.
 User-agent: *
-Disallow: /api/
+Disallow: /api/contar
+Disallow: /api/visitas
 Disallow: /visitas
 Disallow: /actualizar
 Disallow: /validar

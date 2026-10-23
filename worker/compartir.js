@@ -80,10 +80,12 @@ export async function paginaPartido(request, env, almacen, id) {
     // sin base, la página sale igual (con la tarjeta de siempre): es la web
     console.error(`/partido/${id}: ${(e && e.stack) || e}`);
   }
-  // sin el partido, la tarjeta de siempre (la de index.html)
-  const cuerpo = og ? html.replace(BLOQUE, og) : html;
+  // sin el partido, la tarjeta de siempre (la de index.html), fuera de Google.
+  // Con función: un "$'" en un nombre sería un patrón de reemplazo.
+  const cuerpo = og ? html.replace(BLOQUE, () => og) : html;
   const cabeceras = new Headers(pagina.headers);   // las de public/_headers (CSP incluida)
   cabeceras.delete("Content-Length");
   cabeceras.delete("ETag");
+  if (!og) cabeceras.set("X-Robots-Tag", "noindex");
   return new Response(request.method === "HEAD" ? null : cuerpo, { status: 200, headers: cabeceras });
 }
