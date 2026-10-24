@@ -328,6 +328,25 @@
     .instalar .corto { display: none; }
     .instalar .largo { display: inline; }
   }
+  /* la cuenta (básica, app.js sección CUENTA): solo en Cloudflare. En el móvil, un
+     icono detrás del estado; en el escritorio, al final de la cabecera. */
+  .boton-cuenta {
+    order: 2; flex-shrink: 0; display: flex; align-items: center; justify-content: center; gap: 7px;
+    min-width: 2.25rem; height: 2.25rem; padding: 0 8px; border: 1px solid var(--linea-viva); border-radius: 999px;
+    background: var(--panel-alto); color: var(--tinta); font: inherit; font-size: var(--t-13); font-weight: 600;
+    cursor: pointer; white-space: nowrap;
+  }
+  .boton-cuenta:hover { border-color: var(--tinta-2); }
+  .boton-cuenta .txt { display: none; }
+  .boton-cuenta[data-con] svg circle { fill: currentColor; }   /* con la sesión abierta, la cabeza rellena */
+  @media (max-width: 379px) {
+    .cab:has(.boton-cuenta:not([hidden])) .estado-corto { padding: 9px; }
+    .cab:has(.boton-cuenta:not([hidden])) .estado-corto .txt { display: none; }
+  }
+  @media (min-width: 880px) {
+    .boton-cuenta { order: 5; height: 2.5rem; padding: 0 14px; }
+    .boton-cuenta .txt { display: inline; }
+  }
   .estado-corto {
     order: 2; margin-left: auto; display: flex; align-items: center; gap: 8px;
     padding: 6px 12px; border: 1px solid var(--linea-viva); border-radius: 999px;
@@ -694,7 +713,6 @@
   .goles-graf .k { width: 100%; padding-top: 3px; border-top: 1px solid var(--linea-viva);
                    text-align: center; font-size: var(--t-12); color: var(--tinta-3); }
   .detalle .nw { white-space: nowrap; }
-  .detalle .viejo svg { color: var(--critico); margin-right: 6px; vertical-align: -2px; }
   .detalle .nota-goles { margin: 14px 0 0; max-width: 72ch; font-size: var(--t-13); color: var(--tinta-3); }
 
   .vacio { padding: 40px 20px; max-width: 600px; }
@@ -710,7 +728,7 @@
   .modulo h2 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 14px;
                font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-20); font-weight: 800; letter-spacing: -0.01em; }
   .modulo h2 .meta { margin-left: auto; font-family: var(--f-txt); font-size: var(--t-13); font-weight: 500; color: var(--tinta-3);
-                     letter-spacing: 0; }
+                     letter-spacing: 0; white-space: nowrap; }
   .modulo .nota { margin: 14px 0 0; font-size: var(--t-13); color: var(--tinta-3); }
   .placeholder { margin: 0; font-size: var(--t-14); color: var(--tinta-3); }
   @media (min-width: 1180px) { .pane-izq .modulo:last-child, .pane-der .modulo:last-child { border-bottom: 0; } }
@@ -836,6 +854,51 @@
   }
   @media (max-width: 879px) { .aviso-flotante { bottom: calc(88px + env(safe-area-inset-bottom)); } }
 
+  /* la ventana de la cuenta: blanco para lo que se pulsa, rojo solo para borrar */
+  .dialogo {
+    width: min(29rem, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; overflow-y: auto;
+    border: 1px solid var(--linea-viva); border-radius: var(--r-tablero); background: var(--panel); color: var(--tinta);
+  }
+  .dialogo::backdrop { background: rgba(0, 0, 0, 0.62); }
+  .dialogo .cerrar {
+    position: absolute; top: 12px; right: 12px; display: grid; place-items: center; width: 2.25rem; height: 2.25rem;
+    border: 0; border-radius: 999px; background: none; color: var(--tinta-2); cursor: pointer;
+  }
+  .dialogo .cerrar:hover { background: var(--panel-alto); color: var(--tinta); }
+  .dialogo .dentro { display: flex; flex-direction: column; gap: 14px; padding: 22px 22px 20px; }
+  .dialogo h2 { margin: 0 2.5rem 0 0; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-24); font-weight: 800;
+                letter-spacing: -0.01em; text-wrap: balance; }
+  .dialogo p { margin: 0; font-size: var(--t-15); line-height: 1.5; color: var(--tinta-2); }
+  .dialogo p strong { color: var(--tinta); font-weight: 600; }
+  .dialogo .nota { font-size: var(--t-13); color: var(--tinta-3); }
+  .dialogo .error { color: var(--critico); font-weight: 600; }
+  .dialogo .acciones { display: flex; flex-direction: column; gap: 8px; }
+  .dialogo .accion { justify-content: center; min-height: 2.75rem; text-decoration: none; }
+  .dialogo .accion.principal { background: var(--tinta); border-color: var(--tinta); color: var(--oscura); }
+  .dialogo .accion.borrar { color: var(--critico); }
+  .dialogo .accion.borrar.principal { background: var(--critico); border-color: var(--critico); color: #ffffff; }
+  .dialogo .accion[disabled] { opacity: 0.55; cursor: progress; }
+  .dialogo .bloque { display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid var(--linea); }
+  .dialogo .bloque h3 { margin: 0; font-size: var(--t-13); font-weight: 700; color: var(--tinta-3);
+                        text-transform: uppercase; letter-spacing: 0.06em; }
+  .dialogo form { display: flex; flex-wrap: wrap; gap: 8px; }   /* en el móvil, Entrar debajo */
+  .dialogo form .accion { flex: 1 0 auto; }
+  .dialogo input {
+    flex: 1 1 15rem; min-width: 0; height: 2.75rem; padding: 0 12px; border: 1px solid var(--linea-viva); border-radius: var(--r-control);
+    background: var(--fondo); color: var(--tinta); font-family: var(--f-disp); font-size: var(--t-16); font-weight: 600;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .dialogo input::placeholder { color: var(--tinta-3); letter-spacing: 0.04em; }
+  .dialogo input:focus { outline: 2px solid var(--tinta-2); outline-offset: 1px; }
+  .dialogo .codigo-grande {
+    margin: 0; padding: 16px 12px; border-radius: var(--r-tarjeta); background: var(--panel-alto); text-align: center;
+    font-family: var(--f-disp); font-size: clamp(1.25rem, 6vw, var(--t-28)); font-weight: 800; letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums; color: var(--tinta); user-select: all;
+    word-break: keep-all; text-wrap: balance;   /* si no cabe, se parte en un guion (<wbr>) */
+  }
+  .dialogo .equipos { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .dialogo .equipos li { padding: 3px 10px; border-radius: 999px; background: var(--panel-alto); font-size: var(--t-13); }
+
   /* ---------------- barra de estado ---------------- */
   .estado-barra {
     align-items: stretch; height: 2.5rem;
@@ -900,6 +963,9 @@
       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v7.5M4.8 7 8 10.2 11.2 7"></path><path d="M3 12.5h10"></path></svg>
       <span class="corto" aria-hidden="true">App</span><span class="largo" aria-hidden="true">Instalar app</span></button>
     <div class="estado-corto" id="estado-corto" data-modo="reposo"><span class="punto"></span><span class="txt">Cargando</span></div>
+    <button class="boton-cuenta" id="boton-cuenta" type="button" aria-haspopup="dialog" aria-label="Entrar: guarda tus equipos" hidden>
+      <svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="5.4" r="2.7"></circle><path d="M2.8 14c.6-2.8 2.7-4.3 5.2-4.3s4.6 1.5 5.2 4.3"></path></svg>
+      <span class="txt">Entrar</span></button>
     <label class="buscar">
       <svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.6"></circle><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
       <input id="buscador" type="search" autocomplete="off" spellcheck="false" placeholder="Buscar equipo" aria-label="Buscar equipo">
@@ -948,6 +1014,11 @@
 
 <div class="tip" id="tip" role="tooltip" hidden></div>
 <div class="aviso-flotante" id="aviso-flotante" role="status" aria-live="polite" hidden></div>
+<dialog class="dialogo" id="dialogo-cuenta" aria-labelledby="cuenta-titulo">
+  <button class="cerrar" type="button" data-cuenta="cerrar" aria-label="Cerrar">
+    <svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"></path></svg></button>
+  <div class="dentro" id="cuenta-dentro"></div>
+</dialog>
 
 <script src="/app.js"></script>
 </body>

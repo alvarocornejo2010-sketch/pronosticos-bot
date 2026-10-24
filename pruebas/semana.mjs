@@ -3,7 +3,7 @@
 // Uso: node pruebas/semana.mjs
 import assert from "node:assert/strict";
 import { Registro, rehacerDias, favoritoDe, DIAS_RESUMEN } from "../worker/registro.js";
-import { enterosQueSuman, textosPartido, etiquetasOg } from "../worker/compartir.js";
+import { enterosQueSuman, textosPartido, etiquetasOg, paginaPartido } from "../worker/compartir.js";
 import { Reloj } from "../worker/tiempo.js";
 
 const reloj = new Reloj("America/Lima");
@@ -36,7 +36,12 @@ assert.deepEqual(d20.tramos, { claros: [3, 1, 2.21], medios: [1, 0, 0.5] });
 assert.equal(d20.sorpresa.prob_local, 86);
 assert.equal(d20.sorpresa.gl, 1);
 assert.deepEqual(r.dias["2026-10-21"].tramos, { renidos: [1, 1, 0.38] });
-console.log("por día: aciertos, lo esperado, los tramos y la sorpresa, en el día de Lima");
+// el tramo, con el entero que enseña la web: 59.6 sale como 60 y cuenta en los claros
+const borde = new Registro(null);
+anotar(borde, ficha("2026-10-20T19:00:00Z", 59.6, 20.2, 20.2), 1, 0);
+anotar(borde, ficha("2026-10-20T21:00:00Z", 44.6, 30.2, 25.2), 0, 0);
+assert.deepEqual(Object.keys(borde.dias["2026-10-20"].tramos).sort(), ["claros", "medios"]);
+console.log("por día: aciertos, lo esperado, los tramos (con el entero de la web) y la sorpresa, en el día de Lima");
 
 // solo se guardan DIAS_RESUMEN días, y publico() da los 14 últimos en orden
 for (let i = 0; i < 30; i++) {
@@ -76,6 +81,18 @@ assert.equal(t.titulo, "Inter – Shakhtar <b>");
 assert.equal(t.descripcion, "Champions League · jue 22 oct, 14:00 (hora de Lima). Inter 86 % · empate 9 % · Shakhtar <b> 5 %."
   + " Más de 2.5 goles: 73 %.");
 const og = etiquetasOg("https://x.workers.dev", "/partido/7", t.titulo, t.descripcion);
+// la página de un partido: un "$'" en un nombre no es un patrón de reemplazo, y uno
+// que no existe sale con la tarjeta de siempre y fuera de Google
+const env = { ASSETS: { fetch: async () => new Response("<head><!-- og --><title>x</title><!-- /og --></head><body>cola</body>",
+  { headers: { "Content-Type": "text/html", ETag: "1" } }) } };
+const conFila = (fila) => ({ db: { prepare: () => ({ bind: () => ({ first: async () => fila }) }) }, consultar: (fn) => fn() });
+const raro = JSON.stringify({ local: "A$'B", visita: "C$&D", liga: "L", utcDate: "2026-10-22T19:00:00Z" });
+const pag = await paginaPartido(new Request("https://x.dev/partido/1"), env, conFila({ f: raro }), 1);
+const cuerpo = await pag.text();
+assert.ok(cuerpo.includes("<title>A$&#39;B – C$&amp;D · Pronósticos</title>") && cuerpo.endsWith("</head><body>cola</body>"), cuerpo);
+assert.ok(!pag.headers.has("X-Robots-Tag") && !pag.headers.has("ETag"));
+const nadie = await paginaPartido(new Request("https://x.dev/partido/2"), env, conFila(null), 2);
+assert.ok((await nadie.text()).includes("<title>x</title>") && nadie.headers.get("X-Robots-Tag") === "noindex");
 assert.ok(og.includes("Shakhtar &lt;b&gt;") && !og.includes("<b>"));
 assert.ok(og.includes('content="https://x.workers.dev/og.png"') && og.includes('content="https://x.workers.dev/partido/7"'));
 assert.ok(og.startsWith("<!-- og -->") && og.endsWith("<!-- /og -->"));

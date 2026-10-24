@@ -12,6 +12,8 @@
 //   /visitas?token=...       el panel de visitas (y /api/visitas?token=..., en JSON)
 //   /partido/123      la web con la tarjeta de ese partido para compartir (compartir.js)
 //   /robots.txt, /sitemap.xml   para los buscadores (buscadores.js)
+//   /api/cuenta[/...] las cuentas básicas: crear, entrar con el código, los equipos
+//                     que sigue, descargar y borrar (cuentas.js)
 //
 // El trabajo de verdad lo hace el cron (planificador.js), una vez por minuto.
 
@@ -25,6 +27,7 @@ import { Reloj } from "./tiempo.js";
 import { contar, resumenVisitas, htmlVisitas } from "./visitas.js";
 import { paginaPartido } from "./compartir.js";
 import { robots, sitemap } from "./buscadores.js";
+import { Cuentas, RUTAS_CUENTA } from "./cuentas.js";
 
 // Las mismas cabeceras que pone app.py a sus respuestas JSON (la web y app.js
 // llevan las suyas en public/_headers). no-store: el JSON cambia cada pocos
@@ -171,11 +174,12 @@ export default {
       "/robots.txt": async () => texto(robots(url.origin), "text/plain; charset=utf-8"),
       "/sitemap.xml": async (almacen) => texto(await sitemap(almacen, url.origin), "application/xml; charset=utf-8"),
     };
+    for (const r of Object.keys(RUTAS_CUENTA)) rutas[r] = (almacen) => new Cuentas(request, env, almacen, CABECERAS).atender();
     const enlace = url.pathname.match(/^\/partido\/(\d{1,12})\/?$/);
     const ruta = rutas[url.pathname]
       || (enlace && ((almacen) => paginaPartido(request, env, almacen, Number(enlace[1]))));
     if (!ruta) return env.ASSETS.fetch(request);   // lo demás: los archivos de public/
-    const metodos = url.pathname === "/api/contar" ? ["POST"] : ["GET", "HEAD"];
+    const metodos = url.pathname === "/api/contar" ? ["POST"] : RUTAS_CUENTA[url.pathname] || ["GET", "HEAD"];
     if (!metodos.includes(request.method)) {
       return new Response("Método no permitido", { status: 405, headers: { ...CABECERAS, Allow: metodos.join(", ") } });
     }

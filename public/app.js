@@ -487,19 +487,10 @@ function htmlComoSeCalculo(p, m) {
     + " del visitante, de esta temporada y la anterior";
   return '<section class="det-datos"><h3>Cómo se calculó</h3><dl>'
     + dato("Muestra", muestraTxt)
-    + (p.calculado ? dato("Calculado", htmlCalculado(p.calculado)) : "")
+    + (p.calculado ? dato("Calculado", esc(haceCuanto(p.calculado))) : "")
     + (ch ? dato("Nivel de liga", htmlNivelChampions(p)) : "")
     + (ch && ch.local && ch.local.partidos_cl !== undefined ? dato("En la Champions, frente a lo esperado", htmlHistorialChampions(p)) : "")
     + '</dl>' + (ch ? htmlNotaChampions() : "") + (conGoles(p) ? htmlNotaGoles(p) : "") + '</section>';
-}
-
-// Una predicción se rehace cada 24 h; si es más vieja, la API lleva tiempo sin
-// responder y se ven los números de entonces (se siguen enseñando hasta tener los nuevos).
-function htmlCalculado(iso) {
-  const vieja = Date.now() - Date.parse(iso) > 26 * 3600000;
-  return vieja ? '<span class="viejo">' + ICONO_AVISO + esc(haceCuanto(iso))
-      + ': la API no responde y estos son los números de entonces</span>'
-    : esc(haceCuanto(iso));
 }
 
 /** De qué liga sale cada equipo de la Champions y con qué nivel. */
@@ -724,8 +715,11 @@ function bloquesCentro(todos, ruta) {
     const out = { titulo: "Toda la semana", sub: todos.length + " partidos", mezcla: true, bloques: [] };
     if (orden !== "hora") { out.bloques = bloquesDePartidos(ordenar(todos), { conDia: true }); return out; }
     porDias(todos).forEach(d => {
+      // los de tus equipos, primero en su día (en la vista de un día van en su grupo)
+      const lista = ordenar(d.partidos);
       out.bloques.push(bloqueGrupo(d.fecha, nombreDia(d), d.partidos.length, null, "dia"));
-      out.bloques.push.apply(out.bloques, bloquesDePartidos(ordenar(d.partidos), { conDia: false }));
+      out.bloques.push.apply(out.bloques, bloquesDePartidos(
+        lista.filter(esFavorito).concat(lista.filter(p => !esFavorito(p))), { conDia: false }));
     });
     return out;
   }
@@ -1291,9 +1285,10 @@ function avisar(texto) {
 
 function alternarFavorito(nombre, boton) {
   if (favoritos.has(nombre)) favoritos.delete(nombre);
-  else if (favoritos.size < MAX_FAVORITOS) { favoritos.add(nombre); contar({ t: "favorito" }); }
+  else if (favoritos.size < MAX_FAVORITOS) { favoritos.add(nombre); contar({ t: "favorito" }); avisoCuenta(); }
   else { avisar("Ya sigues a " + MAX_FAVORITOS + " equipos: quita alguno antes."); return; }
   guardarFavoritos();
+  if (cuenta) encolar(nombre, favoritos.has(nombre));
   versionFav++;
   paneLigas.dataset.huella = "";
   const bloque = boton.closest(".partido");
@@ -1309,6 +1304,17 @@ function alternarFavorito(nombre, boton) {
   if (caja) caja.scrollTop += dy; else window.scrollBy(0, dy);
   nuevo.focus({ preventScroll: true });
 }
+
+// Las estrellas que cambió otra pestaña: esta las toma, para no borrarlas al guardar
+// las suyas.
+window.addEventListener("storage", (e) => {
+  if (e.key !== CLAVE_FAVORITOS && e.key !== null) return;
+  favoritos.clear();
+  leerFavoritos().forEach(n => favoritos.add(n));
+  versionFav++;
+  paneLigas.dataset.huella = "";
+  if (datos) render();
+});
 
 // La caja que se desplaza con el elemento dentro (la tabla en escritorio), o null si es la página.
 function contenedorDeScroll(el) {
@@ -1328,8 +1334,11 @@ async function compartir(id) {
   const url = location.origin + "/partido/" + p.id;
   const r = reparto(p);
   const titulo = cortoDe(p, "local") + " – " + cortoDe(p, "visita");
-  const texto = titulo + " (" + p.liga + ", " + diaCorto(p.dia) + " " + p.hora + "): " + cortoDe(p, "local") + " " + r.l
-    + " %, empate " + r.x + " %, " + cortoDe(p, "visita") + " " + r.v + " %.";
+  // como la tarjeta (compartir.js): el mensaje se lee otro día y quizá en otro país,
+  // así que la fecha va escrita y la hora con su zona, no "Mañana 14:00"
+  const dia = NOMBRES_DIA[new Date(p.fecha + "T00:00:00Z").getUTCDay()].slice(0, 3).toLowerCase();
+  const texto = titulo + ". " + p.liga + " · " + dia + " " + fechaCorta(p.fecha) + ", " + p.hora + " (hora de Lima). "
+    + cortoDe(p, "local") + " " + r.l + " % · empate " + r.x + " % · " + cortoDe(p, "visita") + " " + r.v + " %.";
   contar({ t: "compartir", id: Number(p.id) });
   if (navigator.share) {
     try { await navigator.share({ title: titulo, text: texto, url: url }); return; }
@@ -1341,9 +1350,9 @@ async function compartir(id) {
 
 // El partido de un enlace /partido/123, cuando ya hay datos.
 function abrirEnlazado() {
-  const id = partidoEnlazado;
+  const id = Number(partidoEnlazado);
   partidoEnlazado = null;
-  const p = aplanar(datos.dias).find(x => String(x.id) === id);
+  const p = aplanar(datos.dias).find(x => Number(x.id) === id);
   history.replaceState(null, "", "/" + (p ? "#/dia/" + p.fecha : "#/"));
   if (p) { ponerPestana("partidos"); abrirPartido(p.fecha, p.id); return; }
   render();
@@ -1535,6 +1544,281 @@ window.addEventListener("appinstalled", () => {
 });
 
 // ==========================================
+// CUENTA (básica)
+// Sin email ni contraseña: crear una cuenta da un código de acceso para entrar
+// desde otro aparato o después de borrar los datos del navegador. Con la sesión
+// abierta (una cookie que esta página no puede leer), los equipos de la cuenta son
+// los de este navegador y cada estrella se guarda también en ella
+// (worker/cuentas.js), en orden y con reintento (la cola). Solo en Cloudflare: el
+// botón sale con plataforma "cloudflare" en /api/estado, y /api/cuenta solo se pide
+// si este navegador entró (pronosticos.sesion): sin cuenta no cuesta una petición.
+// ==========================================
+const botonCuenta = $("boton-cuenta");
+const dialogoCuenta = $("dialogo-cuenta");
+const dentroCuenta = $("cuenta-dentro");
+let cuenta = null;             // { creada, equipos } con la sesión abierta
+let vistaCuenta = "inicio";    // inicio | codigo | borrar
+let codigoVisible = null, cuentaNueva = false, errorCuenta = "", ocupado = false, codigoEscrito = "";
+const CLAVE_SESION = "pronosticos.sesion";   // "1" si este navegador entró: las otras pestañas se enteran
+const CLAVE_COLA = "pronosticos.cola_cuenta";
+
+function leerLocal(clave, defecto) {
+  try { const v = localStorage.getItem(clave); return v === null ? defecto : JSON.parse(v); } catch (e) { return defecto; }
+}
+function guardarLocal(clave, valor) {
+  try { localStorage.setItem(clave, JSON.stringify(valor)); } catch (e) { /* sin memoria */ }
+}
+
+async function pedirCuenta(ruta, cuerpo) {
+  let r;
+  try {
+    r = await fetch("/api/cuenta" + ruta, cuerpo === undefined ? {} : {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo) });
+  } catch (e) { throw Object.assign(new Error("sin conexión; inténtalo otra vez."), { estado: 0 }); }
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401 && ruta !== "/entrar") ponerCuenta(null);   // la sesión caducó o se cerró en otro aparato
+  if (!r.ok) throw Object.assign(new Error(d.error || "no hubo respuesta; inténtalo otra vez."), { estado: r.status });
+  return d;
+}
+
+// Las estrellas, a la cuenta de una en una y en el orden en que se pusieron (sin
+// eso, quitar y poner rápido podía llegar al revés). Si falla la red o el tope del
+// día, se quedan en la cola, guardada en el navegador, y se reintentan con la
+// siguiente estrella o al volver a abrir la web; lo que el servidor no puede
+// aceptar nunca (un equipo de más), se descarta.
+let cola = leerLocal(CLAVE_COLA, []);
+if (!Array.isArray(cola)) cola = [];
+let enviando = null;
+function encolar(equipo, seguir) {
+  cola.push({ equipo, seguir });
+  if (cola.length > 200) cola = cola.slice(-200);
+  guardarLocal(CLAVE_COLA, cola);
+  return vaciarCola();
+}
+function vaciarCola() {
+  enviando = enviando || (async () => {
+    try {
+      while (cola.length && cuenta) {
+        try { await pedirCuenta("/equipo", cola[0]); }
+        catch (e) {
+          if (e.estado === 0 || e.estado === 429 || e.estado >= 500) {
+            avisar("No se guardó en tu cuenta (" + e.message + ") Se reintenta luego; aquí sí está.");
+            return false;
+          }
+          if (e.estado !== 401) avisar("No se guardó en tu cuenta: " + e.message);
+        }
+        cola.shift();
+        guardarLocal(CLAVE_COLA, cola);
+      }
+      return true;
+    } finally { enviando = null; }
+  })();
+  return enviando;
+}
+
+// La cuenta manda: al entrar (o al cargar con la sesión abierta), sus equipos son
+// los de este navegador. Al salir, los de este navegador se quedan.
+function ponerCuenta(c) {
+  cuenta = c;
+  if (!c) { cola = []; guardarLocal(CLAVE_COLA, cola); }
+  if (c) {
+    favoritos.clear();
+    c.equipos.forEach(n => favoritos.add(n));
+    guardarFavoritos();
+    versionFav++;
+    paneLigas.dataset.huella = "";
+    if (datos) render();
+  }
+  try { localStorage.setItem(CLAVE_SESION, c ? "1" : "0"); } catch (e) { /* sin memoria */ }
+  botonCuenta.toggleAttribute("data-con", !!c);
+  botonCuenta.querySelector(".txt").textContent = c ? "Mi cuenta" : "Entrar";
+  botonCuenta.setAttribute("aria-label", c ? "Mi cuenta" : "Entrar: guarda tus equipos");
+}
+
+async function cargarCuenta() {
+  if (leerLocal(CLAVE_SESION, 0) !== 1) return;   // este navegador no entró: nada que pedir
+  try {
+    const r = await fetch("/api/cuenta");
+    if (!r.ok) return;
+    let d = await r.json();
+    if (!d.disponible) return;
+    botonCuenta.hidden = false;
+    // lo que quedó sin guardar va antes de traer la lista de la cuenta; si sigue sin
+    // poder guardarse, manda lo de este navegador
+    if (d.cuenta && cola.length) {
+      cuenta = d.cuenta;
+      if (!(await vaciarCola())) { ponerCuenta({ ...d.cuenta, equipos: [...favoritos] }); return; }
+      d = await (await fetch("/api/cuenta")).json();
+    }
+    ponerCuenta(d.cuenta);
+  } catch (e) { /* sin cuenta: las estrellas siguen en el navegador */ }
+}
+
+// La primera estrella sin cuenta: dónde se guarda y cómo llevarla a otros aparatos.
+function avisoCuenta() {
+  if (cuenta || botonCuenta.hidden) return;
+  try {
+    if (localStorage.getItem("pronosticos.aviso_cuenta")) return;
+    localStorage.setItem("pronosticos.aviso_cuenta", "1");
+  } catch (e) { return; }
+  avisar("Guardado en este navegador. Para tenerlo en todos tus aparatos, crea una cuenta en «Entrar».");
+}
+
+const fechaDe = (iso) => fechaLarga(new Date(Date.parse(iso) - 5 * 3600000).toISOString().slice(0, 10));
+const plural = (n, uno, varios) => n + " " + (n === 1 ? uno : varios);
+
+function htmlCuenta() {
+  if (!cuenta && vistaCuenta === "borrar") vistaCuenta = "inicio";   // la sesión se cerró por el camino
+  const error = errorCuenta ? '<p class="error" role="alert">' + esc(errorCuenta) + '</p>' : "";
+  const des = ocupado ? " disabled" : "";
+  if (vistaCuenta === "codigo") {
+    return '<h2 id="cuenta-titulo">' + (cuentaNueva ? "Cuenta creada: este es tu código" : "Tu código nuevo") + '</h2>'
+      + '<p class="codigo-grande" id="codigo-cuenta">' + esc(codigoVisible).replace(/-/g, "-<wbr>") + '</p>'
+      + '<p><strong>Guárdalo</strong> (una foto, una nota o tu gestor de contraseñas): es lo que te deja entrar a tu cuenta'
+      + ' desde otro aparato o si borras los datos del navegador. No se vuelve a enseñar.'
+      + (cuentaNueva ? "" : " El código de antes ya no vale.") + '</p>'
+      + '<div class="acciones"><button class="accion" type="button" data-cuenta="copiar">Copiar el código</button>'
+      + '<button class="accion principal" type="button" data-cuenta="listo">Ya lo guardé</button></div>';
+  }
+  if (vistaCuenta === "borrar") {
+    return '<h2 id="cuenta-titulo">¿Borrar tu cuenta?</h2>'
+      + '<p>Se borran la cuenta, su código, sus sesiones y ' + plural(favoritos.size, "equipo guardado", "equipos guardados")
+      + '. No se puede deshacer. Los equipos que ves en este navegador se quedan aquí.</p>' + error
+      + '<div class="acciones"><button class="accion borrar principal" type="button" data-cuenta="borrar-si"' + des + '>Sí, borrar mi cuenta</button>'
+      + '<button class="accion" type="button" data-cuenta="inicio"' + des + '>Cancelar</button></div>';
+  }
+  if (cuenta) {
+    const n = favoritos.size;   // con la sesión abierta, los del navegador son los de la cuenta
+    return '<h2 id="cuenta-titulo">Mi cuenta</h2>'
+      + '<p>Creada el ' + esc(fechaDe(cuenta.creada)) + '. ' + (n ? 'Sigues a ' + plural(n, "equipo", "equipos")
+        + ', guardados en tu cuenta: los verás en cualquier aparato donde entres con tu código.'
+        : 'Aún no sigues a ningún equipo: abre un partido y pulsa «Seguir».') + '</p>'
+      + (n ? '<ul class="equipos">' + [...favoritos].map(e => '<li>' + esc(e) + '</li>').join("") + '</ul>' : "")
+      + error
+      + '<div class="bloque"><h3>Entrar desde otro aparato</h3><p class="nota">Con tu código. Si no lo tienes, pide uno nuevo'
+      + ' (el de antes deja de valer).</p><button class="accion" type="button" data-cuenta="codigo"' + des + '>Ver un código nuevo</button></div>'
+      + '<div class="bloque"><h3>Tus datos</h3><div class="acciones">'
+      + '<a class="accion" href="/api/cuenta/datos" download="pronosticos-mi-cuenta.json">Descargar mis datos</a>'
+      + '<button class="accion" type="button" data-cuenta="salir"' + des + '>Cerrar sesión en este aparato</button>'
+      + '<button class="accion" type="button" data-cuenta="salir-todas"' + des + '>Cerrar sesión en todos</button>'
+      + '<button class="accion borrar" type="button" data-cuenta="pedir-borrar"' + des + '>Borrar mi cuenta</button></div></div>'
+      + '<p class="nota">Qué guardamos: un número de cuenta, tu código cifrado y los equipos que sigues. Ni email, ni nombre, ni IP.</p>';
+  }
+  const n = favoritos.size;
+  return '<h2 id="cuenta-titulo">Guarda tus equipos</h2>'
+    + '<p>' + (n === 1 ? 'El equipo que sigues se guarda' : n ? 'Los ' + n + ' equipos que sigues se guardan'
+      : 'Los equipos que sigas se guardan')
+    + ' <strong>solo en este navegador</strong>: si borras sus datos o entras desde otro aparato, no están.</p>'
+    + '<p>Con una cuenta se guardan en la web. Sin email ni contraseña: te damos un código para entrar desde donde quieras.</p>'
+    + error
+    + '<button class="accion principal" type="button" data-cuenta="crear"' + des + '>Crear mi cuenta</button>'
+    + '<div class="bloque"><h3>¿Ya tienes cuenta?</h3><form data-cuenta-form="entrar">'
+    + '<input name="codigo" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="24"'
+    + ' placeholder="XXXX-XXXX-XXXX-XXXX" aria-label="Tu código" value="' + esc(codigoEscrito) + '"' + des + '>'
+    + '<button class="accion" type="submit"' + des + '>Entrar</button></form></div>'
+    + '<p class="nota">Qué guardamos: un número de cuenta, tu código cifrado y los equipos que sigues. Ni email, ni nombre, ni IP.'
+    + ' Puedes borrarlo todo cuando quieras.</p>';
+}
+
+function pintarCuenta() {
+  dentroCuenta.innerHTML = htmlCuenta();
+  dialogoCuenta.querySelector(".cerrar").disabled = ocupado;
+  const foco = dentroCuenta.querySelector("input:not([disabled]), .accion.principal, .accion");
+  if (foco && !ocupado) foco.focus();
+}
+
+function abrirCuenta() {
+  vistaCuenta = "inicio";
+  errorCuenta = "";
+  pintarCuenta();
+  if (!dialogoCuenta.open) dialogoCuenta.showModal();
+}
+
+// Una acción de la ventana: botones apagados mientras va, y el error dentro.
+async function enCuenta(fn) {
+  ocupado = true;
+  errorCuenta = "";
+  pintarCuenta();
+  try { await fn(); }
+  catch (e) { errorCuenta = e.message; }
+  ocupado = false;
+  if (dialogoCuenta.open) pintarCuenta();
+}
+
+const ACCIONES_CUENTA = {
+  cerrar: () => dialogoCuenta.close(),
+  inicio: () => { vistaCuenta = "inicio"; errorCuenta = ""; pintarCuenta(); },
+  listo: () => { codigoVisible = null; vistaCuenta = "inicio"; pintarCuenta(); },
+  "pedir-borrar": () => { vistaCuenta = "borrar"; errorCuenta = ""; pintarCuenta(); },
+  crear: () => enCuenta(async () => {
+    const d = await pedirCuenta("/crear", { equipos: [...favoritos] });
+    cola = []; guardarLocal(CLAVE_COLA, cola);   // la cuenta nace con los de este navegador
+    ponerCuenta(d.cuenta);
+    codigoVisible = d.codigo; cuentaNueva = true; vistaCuenta = "codigo";
+  }),
+  codigo: () => enCuenta(async () => {
+    const d = await pedirCuenta("/codigo", {});
+    codigoVisible = d.codigo; cuentaNueva = false; vistaCuenta = "codigo";
+  }),
+  salir: () => enCuenta(async () => {
+    await pedirCuenta("/salir", { todas: false });
+    ponerCuenta(null);
+    dialogoCuenta.close();
+    avisar("Sesión cerrada. Tus equipos siguen en este navegador.");
+  }),
+  "salir-todas": () => enCuenta(async () => {
+    await pedirCuenta("/salir", { todas: true });
+    ponerCuenta(null);
+    dialogoCuenta.close();
+    avisar("Sesión cerrada en todos tus aparatos.");
+  }),
+  "borrar-si": () => enCuenta(async () => {
+    await pedirCuenta("/borrar", {});
+    ponerCuenta(null);
+    vistaCuenta = "inicio";
+    dialogoCuenta.close();
+    avisar("Cuenta borrada. Tus equipos siguen en este navegador.");
+  }),
+  copiar: async (boton) => {
+    try { await navigator.clipboard.writeText(codigoVisible); boton.textContent = "Copiado"; }
+    catch (e) { window.getSelection().selectAllChildren($("codigo-cuenta")); boton.textContent = "Cópialo a mano"; }
+  },
+};
+
+botonCuenta.addEventListener("click", abrirCuenta);
+// Con el código a la vista, la ventana solo se cierra con "Ya lo guardé" o la X (ni
+// con Esc ni con un clic fuera: se perdería); mientras va una petición, de ninguna forma.
+dialogoCuenta.addEventListener("cancel", (e) => { if (ocupado || vistaCuenta === "codigo") e.preventDefault(); });
+let pulsadoFuera = false;
+dialogoCuenta.addEventListener("pointerdown", (e) => { pulsadoFuera = e.target === dialogoCuenta; });
+window.addEventListener("storage", (e) => {
+  if (e.key === CLAVE_SESION && e.newValue !== (cuenta ? "1" : "0")) cargarCuenta();
+});
+dialogoCuenta.addEventListener("click", (e) => {
+  if (e.target === dialogoCuenta) {   // un clic fuera de la ventana (empezado fuera: no al soltar una selección)
+    if (pulsadoFuera && !ocupado && vistaCuenta !== "codigo") dialogoCuenta.close();
+    return;
+  }
+  const b = e.target.closest("[data-cuenta]");
+  if (b && ACCIONES_CUENTA[b.dataset.cuenta] && !b.disabled) ACCIONES_CUENTA[b.dataset.cuenta](b);
+});
+dialogoCuenta.addEventListener("input", (e) => { if (e.target.name === "codigo") codigoEscrito = e.target.value; });
+dialogoCuenta.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const codigo = e.target.elements.codigo.value;
+  enCuenta(async () => {
+    const d = await pedirCuenta("/entrar", { codigo, equipos: [...favoritos] });
+    codigoEscrito = "";
+    cola = []; guardarLocal(CLAVE_COLA, cola);   // lo de este navegador ya se sumó a la cuenta
+    ponerCuenta(d.cuenta);
+    dialogoCuenta.close();
+    avisar("Dentro: " + (d.cuenta.equipos.length ? plural(d.cuenta.equipos.length, "equipo", "equipos") + " de tu cuenta." : "tu cuenta aún no sigue a ningún equipo."));
+  });
+});
+// El código se enseña una vez: al cerrar la ventana, se olvida.
+dialogoCuenta.addEventListener("close", () => { codigoVisible = null; });
+
+// ==========================================
 // SONDEO
 // Con la pestaña oculta no se pregunta: una pestaña olvidada costaba hasta 2.880
 // peticiones al día, y el plan gratis de Cloudflare da 100.000 para todos.
@@ -1544,13 +1828,16 @@ let periodo = 4000;
 let estadoPrevio = null;
 async function refrescar() {
   try {
-    datos = await (await fetch("/api/estado")).json();
+    const r = await fetch("/api/estado");
+    if (!r.ok) throw new Error("HTTP " + r.status);   // un 500 no pisa los datos que ya hay
+    datos = await r.json();
+    if (datos.plataforma === "cloudflare") botonCuenta.hidden = false;   // las cuentas solo existen allí
     periodo = (datos.estado === "actualizando") ? 4000 : 30000;
     // las medias de liga y el registro en vivo solo cambian cuando termina una pasada
     if (estadoPrevio === "actualizando" && datos.estado !== "actualizando") { cargarLigas(); cargarRegistro(); }
     estadoPrevio = datos.estado;
     render();
-    if (partidoEnlazado) abrirEnlazado();
+    if (partidoEnlazado && datos.dias && datos.dias.length) abrirEnlazado();
   } catch (e) {
     estadoCorto.dataset.modo = "error";
     estadoCorto.querySelector(".txt").textContent = "Sin conexión";
@@ -1605,6 +1892,7 @@ document.addEventListener("visibilitychange", () => {
   else if (!espera && !pidiendo) bucle();
 });
 bucle();
+cargarCuenta();
 cargarLigas();
 cargarValidacion();
 cargarRegistro();

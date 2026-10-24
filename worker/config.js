@@ -89,5 +89,10 @@ export function ajustes(env = {}) {
     // escrituras al día para las visitas (visitas.js): D1 da 100.000 y la
     // actualización necesita las suyas
     maxVisitasDia: num("MAX_VISITAS_DIA", 20000),
+    // cuentas nuevas por día de Lima (cuentas.js): cada una son unas pocas escrituras
+    maxCuentasDia: num("MAX_CUENTAS_DIA", 300),
+    // filas que escriben las cuentas en un día (estrellas, entrar, códigos...): el
+    // 10 % de las 100.000 de D1. Borrar una cuenta no lo mira.
+    maxEscriturasCuentasDia: num("MAX_ESCRITURAS_CUENTAS_DIA", 10000),
   };
 }
