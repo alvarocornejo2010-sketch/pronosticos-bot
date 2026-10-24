@@ -1544,11 +1544,10 @@ window.addEventListener("appinstalled", () => {
 });
 
 // ==========================================
-// CUENTA (básica)
-// Sin email ni contraseña: crear una cuenta da un código de acceso para entrar
-// desde otro aparato o después de borrar los datos del navegador. Con la sesión
-// abierta (una cookie que esta página no puede leer), los equipos de la cuenta son
-// los de este navegador y cada estrella se guarda también en ella
+// CUENTA
+// Usuario y contraseña, sin email. La contraseña no sale del navegador tal cual
+// (claveDe). Con la sesión abierta (una cookie que esta página no puede leer), los
+// equipos de la cuenta son los de este navegador y cada estrella se guarda también en ella
 // (worker/cuentas.js), en orden y con reintento (la cola). Solo en Cloudflare: el
 // botón sale con plataforma "cloudflare" en /api/estado, y /api/cuenta solo se pide
 // si este navegador entró (pronosticos.sesion): sin cuenta no cuesta una petición.
@@ -1557,8 +1556,8 @@ const botonCuenta = $("boton-cuenta");
 const dialogoCuenta = $("dialogo-cuenta");
 const dentroCuenta = $("cuenta-dentro");
 let cuenta = null;             // { creada, equipos } con la sesión abierta
-let vistaCuenta = "inicio";    // inicio | codigo | borrar
-let codigoVisible = null, cuentaNueva = false, errorCuenta = "", ocupado = false, codigoEscrito = "";
+let vistaCuenta = "crear";     // sin cuenta: crear | entrar; con cuenta: inicio | contrasena | borrar
+let ocupado = false, mensajeCuenta = "";
 const CLAVE_SESION = "pronosticos.sesion";   // "1" si este navegador entró: las otras pestañas se enteran
 const CLAVE_COLA = "pronosticos.cola_cuenta";
 
@@ -1667,99 +1666,204 @@ function avisoCuenta() {
 const fechaDe = (iso) => fechaLarga(new Date(Date.parse(iso) - 5 * 3600000).toISOString().slice(0, 10));
 const plural = (n, uno, varios) => n + " " + (n === 1 ? uno : varios);
 
+// La contraseña no sale del navegador: se manda PBKDF2-SHA256 de ella con el usuario
+// como sal, y worker/cuentas.js guarda el SHA-256 de eso con una sal suya. Las
+// 600.000 vueltas hacen lento probar contraseñas aunque alguien leyera la base, y
+// en el navegador cuestan medio segundo. Si algún día cambia ITERACIONES, las
+// contraseñas guardadas dejan de valer.
+const ITERACIONES = 600000;
+async function claveDe(usuario, contrasena) {
+  const t = new TextEncoder();
+  const base = await crypto.subtle.importKey("raw", t.encode(contrasena.normalize("NFC")), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256",
+    salt: t.encode("pronosticos-bot/" + usuario), iterations: ITERACIONES }, base, 256);
+  return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Las mismas reglas que el Worker (normalizarUsuario), para avisar antes de mandar.
+function normalizarUsuario(texto) {
+  const u = String(texto || "").trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9._-]{2,23}$/.test(u) ? u : null;
+}
+const TEXTO_USUARIO = "El usuario lleva de 3 a 24 letras (sin tildes ni ñ), números, punto, guion o guion bajo,"
+  + " y empieza por letra o número.";
+const MUY_COMUNES = new Set(["12345678", "123456789", "1234567890", "87654321", "11111111", "00000000", "12341234",
+  "password", "password1", "contraseña", "contrasena", "qwerty123", "qwertyui", "abc12345", "iloveyou", "futbol123"]);
+function problemaContrasena(contrasena, repetida, usuario) {
+  if (contrasena.length < 8) return "La contraseña tiene que tener al menos 8 caracteres.";
+  if (contrasena.length > 128) return "La contraseña puede tener 128 caracteres como mucho.";
+  if (contrasena.toLowerCase() === usuario || MUY_COMUNES.has(contrasena.toLowerCase())) {
+    return "Esa contraseña es muy fácil de adivinar: elige otra.";
+  }
+  if (contrasena !== repetida) return "Las dos contraseñas no son iguales.";
+  return null;
+}
+
+const campo = (nombre, etiqueta, tipo, auto, extra) => '<label class="campo"><span>' + etiqueta + '</span>'
+  + '<input name="' + nombre + '" type="' + tipo + '" autocomplete="' + auto + '"' + (extra || "") + '></label>';
+const CAMPO_USUARIO = (auto) => campo("usuario", "Usuario", "text", auto || "username",
+  ' autocapitalize="none" spellcheck="false" maxlength="24"');
+const ERROR_CUENTA = '<p class="error" role="alert" hidden></p>';
+const NOTA_DATOS = '<p class="nota">Qué guardamos: tu usuario, tu contraseña cifrada (tu navegador la cifra antes de'
+  + ' enviarla) y los equipos que sigues. Ni email, ni nombre, ni IP. Puedes borrarlo todo cuando quieras.</p>';
+const FORM_USUARIO = (form, boton) => '<form data-cuenta-form="' + form + '" novalidate>'
+  + CAMPO_USUARIO() + campo("contrasena", "Contraseña", "password", "new-password", ' maxlength="128"')
+  + campo("repetida", "Repite la contraseña", "password", "new-password", ' maxlength="128"')
+  + ERROR_CUENTA + '<button class="accion principal" type="submit">' + boton + '</button></form>';
+
 function htmlCuenta() {
-  if (!cuenta && vistaCuenta === "borrar") vistaCuenta = "inicio";   // la sesión se cerró por el camino
-  const error = errorCuenta ? '<p class="error" role="alert">' + esc(errorCuenta) + '</p>' : "";
-  const des = ocupado ? " disabled" : "";
-  if (vistaCuenta === "codigo") {
-    return '<h2 id="cuenta-titulo">' + (cuentaNueva ? "Cuenta creada: este es tu código" : "Tu código nuevo") + '</h2>'
-      + '<p class="codigo-grande" id="codigo-cuenta">' + esc(codigoVisible).replace(/-/g, "-<wbr>") + '</p>'
-      + '<p><strong>Guárdalo</strong> (una foto, una nota o tu gestor de contraseñas): es lo que te deja entrar a tu cuenta'
-      + ' desde otro aparato o si borras los datos del navegador. No se vuelve a enseñar.'
-      + (cuentaNueva ? "" : " El código de antes ya no vale.") + '</p>'
-      + '<div class="acciones"><button class="accion" type="button" data-cuenta="copiar">Copiar el código</button>'
-      + '<button class="accion principal" type="button" data-cuenta="listo">Ya lo guardé</button></div>';
+  if (!cuenta && !["crear", "entrar"].includes(vistaCuenta)) vistaCuenta = "entrar";   // la sesión se cerró por el camino
+  if (cuenta && ["crear", "entrar"].includes(vistaCuenta)) vistaCuenta = "inicio";
+  const n = favoritos.size;
+  if (vistaCuenta === "entrar") {
+    return '<h2 id="cuenta-titulo">Entra en tu cuenta</h2>'
+      + '<form data-cuenta-form="entrar" novalidate>' + CAMPO_USUARIO()
+      + campo("contrasena", "Contraseña", "password", "current-password", ' maxlength="128"')
+      + ERROR_CUENTA + '<button class="accion principal" type="submit">Entrar</button></form>'
+      + '<div class="bloque"><h3>¿No tienes cuenta?</h3>'
+      + '<button class="accion" type="button" data-cuenta="ir-crear">Crear una cuenta</button></div>';
+  }
+  if (vistaCuenta === "crear") {
+    return '<h2 id="cuenta-titulo">Guarda tus equipos</h2>'
+      + '<p>' + (n === 1 ? 'El equipo que sigues se guarda' : n ? 'Los ' + n + ' equipos que sigues se guardan'
+        : 'Los equipos que sigas se guardan')
+      + ' <strong>solo en este navegador</strong>. Con una cuenta se guardan en la web y los ves en cualquier aparato'
+      + ' donde entres con tu usuario y contraseña.</p>'
+      + FORM_USUARIO("crear", "Crear mi cuenta")
+      + '<p class="nota">Sin email: si olvidas la contraseña no se puede recuperar, solo cambiarla desde un aparato donde'
+      + ' ya hayas entrado.</p>'
+      + '<div class="bloque"><h3>¿Ya tienes cuenta?</h3>'
+      + '<button class="accion" type="button" data-cuenta="ir-entrar">Entrar con mi usuario</button></div>' + NOTA_DATOS;
+  }
+  if (vistaCuenta === "contrasena") {
+    return '<h2 id="cuenta-titulo">Cambiar la contraseña</h2>'
+      + '<form data-cuenta-form="contrasena" novalidate>'
+      + '<input name="usuario" type="text" autocomplete="username" value="' + esc(cuenta.usuario) + '" hidden>'
+      + campo("actual", "Contraseña actual", "password", "current-password", ' maxlength="128"')
+      + campo("contrasena", "Contraseña nueva", "password", "new-password", ' maxlength="128"')
+      + campo("repetida", "Repite la nueva", "password", "new-password", ' maxlength="128"')
+      + ERROR_CUENTA + '<button class="accion principal" type="submit">Cambiar la contraseña</button>'
+      + '<button class="accion" type="button" data-cuenta="inicio">Cancelar</button></form>'
+      + '<p class="nota">Las sesiones de tus otros aparatos se cierran; en este sigues dentro.</p>';
   }
   if (vistaCuenta === "borrar") {
     return '<h2 id="cuenta-titulo">¿Borrar tu cuenta?</h2>'
-      + '<p>Se borran la cuenta, su código, sus sesiones y ' + plural(favoritos.size, "equipo guardado", "equipos guardados")
-      + '. No se puede deshacer. Los equipos que ves en este navegador se quedan aquí.</p>' + error
-      + '<div class="acciones"><button class="accion borrar principal" type="button" data-cuenta="borrar-si"' + des + '>Sí, borrar mi cuenta</button>'
-      + '<button class="accion" type="button" data-cuenta="inicio"' + des + '>Cancelar</button></div>';
+      + '<p>Se borran la cuenta' + (cuenta.usuario ? ' <strong>' + esc(cuenta.usuario) + '</strong>' : '')
+      + ', sus sesiones y ' + plural(n, "equipo guardado", "equipos guardados")
+      + '. No se puede deshacer. Los equipos que ves en este navegador se quedan aquí.</p>' + ERROR_CUENTA
+      + '<div class="acciones"><button class="accion borrar principal" type="button" data-cuenta="borrar-si">Sí, borrar mi cuenta</button>'
+      + '<button class="accion" type="button" data-cuenta="inicio">Cancelar</button></div>';
   }
-  if (cuenta) {
-    const n = favoritos.size;   // con la sesión abierta, los del navegador son los de la cuenta
-    return '<h2 id="cuenta-titulo">Mi cuenta</h2>'
-      + '<p>Creada el ' + esc(fechaDe(cuenta.creada)) + '. ' + (n ? 'Sigues a ' + plural(n, "equipo", "equipos")
-        + ', guardados en tu cuenta: los verás en cualquier aparato donde entres con tu código.'
-        : 'Aún no sigues a ningún equipo: abre un partido y pulsa «Seguir».') + '</p>'
-      + (n ? '<ul class="equipos">' + [...favoritos].map(e => '<li>' + esc(e) + '</li>').join("") + '</ul>' : "")
-      + error
-      + '<div class="bloque"><h3>Entrar desde otro aparato</h3><p class="nota">Con tu código. Si no lo tienes, pide uno nuevo'
-      + ' (el de antes deja de valer).</p><button class="accion" type="button" data-cuenta="codigo"' + des + '>Ver un código nuevo</button></div>'
-      + '<div class="bloque"><h3>Tus datos</h3><div class="acciones">'
-      + '<a class="accion" href="/api/cuenta/datos" download="pronosticos-mi-cuenta.json">Descargar mis datos</a>'
-      + '<button class="accion" type="button" data-cuenta="salir"' + des + '>Cerrar sesión en este aparato</button>'
-      + '<button class="accion" type="button" data-cuenta="salir-todas"' + des + '>Cerrar sesión en todos</button>'
-      + '<button class="accion borrar" type="button" data-cuenta="pedir-borrar"' + des + '>Borrar mi cuenta</button></div></div>'
-      + '<p class="nota">Qué guardamos: un número de cuenta, tu código cifrado y los equipos que sigues. Ni email, ni nombre, ni IP.</p>';
-  }
-  const n = favoritos.size;
-  return '<h2 id="cuenta-titulo">Guarda tus equipos</h2>'
-    + '<p>' + (n === 1 ? 'El equipo que sigues se guarda' : n ? 'Los ' + n + ' equipos que sigues se guardan'
-      : 'Los equipos que sigas se guardan')
-    + ' <strong>solo en este navegador</strong>: si borras sus datos o entras desde otro aparato, no están.</p>'
-    + '<p>Con una cuenta se guardan en la web. Sin email ni contraseña: te damos un código para entrar desde donde quieras.</p>'
-    + error
-    + '<button class="accion principal" type="button" data-cuenta="crear"' + des + '>Crear mi cuenta</button>'
-    + '<div class="bloque"><h3>¿Ya tienes cuenta?</h3><form data-cuenta-form="entrar">'
-    + '<input name="codigo" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="24"'
-    + ' placeholder="XXXX-XXXX-XXXX-XXXX" aria-label="Tu código" value="' + esc(codigoEscrito) + '"' + des + '>'
-    + '<button class="accion" type="submit"' + des + '>Entrar</button></form></div>'
-    + '<p class="nota">Qué guardamos: un número de cuenta, tu código cifrado y los equipos que sigues. Ni email, ni nombre, ni IP.'
-    + ' Puedes borrarlo todo cuando quieras.</p>';
+  return '<h2 id="cuenta-titulo">Mi cuenta</h2>'
+    + (mensajeCuenta ? '<p class="mensaje" role="status">' + esc(mensajeCuenta) + '</p>' : "")
+    + '<dl class="ficha-cuenta"><dt>Usuario</dt><dd>' + (cuenta.usuario ? esc(cuenta.usuario) : "sin usuario") + '</dd>'
+    + '<dt>ID de cuenta</dt><dd class="id">' + esc(cuenta.id) + '</dd>'
+    + '<dt>Creada</dt><dd>' + esc(fechaDe(cuenta.creada)) + '</dd></dl>'
+    + (cuenta.usuario ? "" : '<div class="bloque"><h3>Ponle usuario y contraseña</h3><p class="nota">Tu cuenta es de la primera'
+      + ' versión, que se entraba con un código. Con usuario y contraseña entras desde cualquier aparato; el código deja de valer.</p>'
+      + FORM_USUARIO("usuario", "Guardar usuario y contraseña") + '</div>')
+    + '<p>' + (n ? 'Sigues a ' + plural(n, "equipo", "equipos") + ', guardados en tu cuenta.'
+      : 'Aún no sigues a ningún equipo: abre un partido y pulsa «Seguir».') + '</p>'
+    + (n ? '<ul class="equipos">' + [...favoritos].map(e => '<li>' + esc(e) + '</li>').join("") + '</ul>' : "")
+    + '<p class="error error-general" role="alert" hidden></p>'
+    + (cuenta.usuario ? '<div class="bloque"><h3>Tu contraseña</h3>'
+      + '<button class="accion" type="button" data-cuenta="ir-contrasena">Cambiar la contraseña</button></div>' : "")
+    + '<div class="bloque"><h3>Tus datos</h3><div class="acciones">'
+    + '<a class="accion" href="/api/cuenta/datos" download="pronosticos-mi-cuenta.json">Descargar mis datos</a>'
+    + '<button class="accion" type="button" data-cuenta="salir">Cerrar sesión en este aparato</button>'
+    + '<button class="accion" type="button" data-cuenta="salir-todas">Cerrar sesión en todos</button>'
+    + '<button class="accion borrar" type="button" data-cuenta="pedir-borrar">Borrar mi cuenta</button></div></div>'
+    + NOTA_DATOS;
 }
 
-function pintarCuenta() {
+function pintarCuenta(vista) {
+  if (vista) vistaCuenta = vista;
   dentroCuenta.innerHTML = htmlCuenta();
-  dialogoCuenta.querySelector(".cerrar").disabled = ocupado;
-  const foco = dentroCuenta.querySelector("input:not([disabled]), .accion.principal, .accion");
-  if (foco && !ocupado) foco.focus();
+  const foco = dentroCuenta.querySelector("input:not([hidden]), .accion.principal, .accion");
+  if (foco) foco.focus();
 }
 
 function abrirCuenta() {
-  vistaCuenta = "inicio";
-  errorCuenta = "";
-  pintarCuenta();
+  mensajeCuenta = "";
+  pintarCuenta(cuenta ? "inicio" : "crear");
   if (!dialogoCuenta.open) dialogoCuenta.showModal();
 }
 
-// Una acción de la ventana: botones apagados mientras va, y el error dentro.
-async function enCuenta(fn) {
-  ocupado = true;
-  errorCuenta = "";
-  pintarCuenta();
-  try { await fn(); }
-  catch (e) { errorCuenta = e.message; }
-  ocupado = false;
-  if (dialogoCuenta.open) pintarCuenta();
+// Mientras va una petición, todo apagado (también la X) y la ventana no se cierra;
+// si falla, el error sale junto a lo que se pulsó y lo escrito se queda.
+function ocupar(si) {
+  ocupado = si;
+  dialogoCuenta.querySelectorAll("button, input, a.accion").forEach(el => {
+    if (el.tagName === "A") el.toggleAttribute("aria-disabled", si); else el.disabled = si;
+  });
 }
+async function enCuenta(fn, donde) {
+  const aviso = (donde && donde.querySelector(".error")) || dentroCuenta.querySelector(".error-general")
+    || dentroCuenta.querySelector(".error");
+  if (aviso) aviso.hidden = true;
+  ocupar(true);
+  try { await fn(); }
+  catch (e) {
+    if (!aviso || !aviso.isConnected) { avisar(e.message); return; }
+    aviso.textContent = e.message;
+    aviso.hidden = false;
+  }
+  finally { if (ocupado) ocupar(false); }
+}
+
+function dentroDeLaCuenta(d, texto) {
+  cola = []; guardarLocal(CLAVE_COLA, cola);   // lo de este navegador ya está en la cuenta
+  ponerCuenta(d.cuenta);
+  mensajeCuenta = texto;
+}
+
+const ENVIOS_CUENTA = {
+  crear: async (v) => {
+    const usuario = normalizarUsuario(v.usuario);
+    if (!usuario) throw new Error(TEXTO_USUARIO);
+    const mal = problemaContrasena(v.contrasena, v.repetida, usuario);
+    if (mal) throw new Error(mal);
+    const d = await pedirCuenta("/crear", { usuario, clave: await claveDe(usuario, v.contrasena), equipos: [...favoritos] });
+    dentroDeLaCuenta(d, "Cuenta creada. Entra con «" + usuario + "» y tu contraseña desde cualquier aparato.");
+    pintarCuenta("inicio");
+  },
+  entrar: async (v) => {
+    const usuario = normalizarUsuario(v.usuario);
+    if (!usuario || !v.contrasena) throw new Error("Usuario o contraseña incorrectos.");
+    const d = await pedirCuenta("/entrar", { usuario, clave: await claveDe(usuario, v.contrasena), equipos: [...favoritos] });
+    dentroDeLaCuenta(d, "");
+    dialogoCuenta.close();
+    const k = d.cuenta.equipos.length;
+    avisar("Dentro: " + (k ? plural(k, "equipo", "equipos") + " de tu cuenta." : "tu cuenta aún no sigue a ningún equipo."));
+  },
+  usuario: async (v) => {
+    const usuario = normalizarUsuario(v.usuario);
+    if (!usuario) throw new Error(TEXTO_USUARIO);
+    const mal = problemaContrasena(v.contrasena, v.repetida, usuario);
+    if (mal) throw new Error(mal);
+    const d = await pedirCuenta("/usuario", { usuario, clave: await claveDe(usuario, v.contrasena) });
+    dentroDeLaCuenta(d, "Listo: ya entras con «" + usuario + "» y tu contraseña.");
+    pintarCuenta("inicio");
+  },
+  contrasena: async (v) => {
+    if (!v.actual) throw new Error("Escribe tu contraseña actual.");
+    const mal = problemaContrasena(v.contrasena, v.repetida, cuenta.usuario);
+    if (mal) throw new Error(mal);
+    if (v.contrasena === v.actual) throw new Error("La nueva es igual a la actual.");
+    const [actual, nueva] = await Promise.all([claveDe(cuenta.usuario, v.actual), claveDe(cuenta.usuario, v.contrasena)]);
+    await pedirCuenta("/contrasena", { actual, nueva });
+    mensajeCuenta = "Contraseña cambiada. Las sesiones de tus otros aparatos se cerraron.";
+    pintarCuenta("inicio");
+  },
+};
 
 const ACCIONES_CUENTA = {
   cerrar: () => dialogoCuenta.close(),
-  inicio: () => { vistaCuenta = "inicio"; errorCuenta = ""; pintarCuenta(); },
-  listo: () => { codigoVisible = null; vistaCuenta = "inicio"; pintarCuenta(); },
-  "pedir-borrar": () => { vistaCuenta = "borrar"; errorCuenta = ""; pintarCuenta(); },
-  crear: () => enCuenta(async () => {
-    const d = await pedirCuenta("/crear", { equipos: [...favoritos] });
-    cola = []; guardarLocal(CLAVE_COLA, cola);   // la cuenta nace con los de este navegador
-    ponerCuenta(d.cuenta);
-    codigoVisible = d.codigo; cuentaNueva = true; vistaCuenta = "codigo";
-  }),
-  codigo: () => enCuenta(async () => {
-    const d = await pedirCuenta("/codigo", {});
-    codigoVisible = d.codigo; cuentaNueva = false; vistaCuenta = "codigo";
-  }),
+  inicio: () => { mensajeCuenta = ""; pintarCuenta("inicio"); },
+  "ir-crear": () => pintarCuenta("crear"),
+  "ir-entrar": () => pintarCuenta("entrar"),
+  "ir-contrasena": () => { mensajeCuenta = ""; pintarCuenta("contrasena"); },
+  "pedir-borrar": () => { mensajeCuenta = ""; pintarCuenta("borrar"); },
   salir: () => enCuenta(async () => {
     await pedirCuenta("/salir", { todas: false });
     ponerCuenta(null);
@@ -1775,20 +1879,14 @@ const ACCIONES_CUENTA = {
   "borrar-si": () => enCuenta(async () => {
     await pedirCuenta("/borrar", {});
     ponerCuenta(null);
-    vistaCuenta = "inicio";
     dialogoCuenta.close();
     avisar("Cuenta borrada. Tus equipos siguen en este navegador.");
   }),
-  copiar: async (boton) => {
-    try { await navigator.clipboard.writeText(codigoVisible); boton.textContent = "Copiado"; }
-    catch (e) { window.getSelection().selectAllChildren($("codigo-cuenta")); boton.textContent = "Cópialo a mano"; }
-  },
 };
 
 botonCuenta.addEventListener("click", abrirCuenta);
-// Con el código a la vista, la ventana solo se cierra con "Ya lo guardé" o la X (ni
-// con Esc ni con un clic fuera: se perdería); mientras va una petición, de ninguna forma.
-dialogoCuenta.addEventListener("cancel", (e) => { if (ocupado || vistaCuenta === "codigo") e.preventDefault(); });
+// Mientras va una petición, la ventana no se cierra (ni con Esc ni con un clic fuera).
+dialogoCuenta.addEventListener("cancel", (e) => { if (ocupado) e.preventDefault(); });
 let pulsadoFuera = false;
 dialogoCuenta.addEventListener("pointerdown", (e) => { pulsadoFuera = e.target === dialogoCuenta; });
 window.addEventListener("storage", (e) => {
@@ -1796,27 +1894,19 @@ window.addEventListener("storage", (e) => {
 });
 dialogoCuenta.addEventListener("click", (e) => {
   if (e.target === dialogoCuenta) {   // un clic fuera de la ventana (empezado fuera: no al soltar una selección)
-    if (pulsadoFuera && !ocupado && vistaCuenta !== "codigo") dialogoCuenta.close();
+    if (pulsadoFuera && !ocupado) dialogoCuenta.close();
     return;
   }
   const b = e.target.closest("[data-cuenta]");
   if (b && ACCIONES_CUENTA[b.dataset.cuenta] && !b.disabled) ACCIONES_CUENTA[b.dataset.cuenta](b);
 });
-dialogoCuenta.addEventListener("input", (e) => { if (e.target.name === "codigo") codigoEscrito = e.target.value; });
 dialogoCuenta.addEventListener("submit", (e) => {
   e.preventDefault();
-  const codigo = e.target.elements.codigo.value;
-  enCuenta(async () => {
-    const d = await pedirCuenta("/entrar", { codigo, equipos: [...favoritos] });
-    codigoEscrito = "";
-    cola = []; guardarLocal(CLAVE_COLA, cola);   // lo de este navegador ya se sumó a la cuenta
-    ponerCuenta(d.cuenta);
-    dialogoCuenta.close();
-    avisar("Dentro: " + (d.cuenta.equipos.length ? plural(d.cuenta.equipos.length, "equipo", "equipos") + " de tu cuenta." : "tu cuenta aún no sigue a ningún equipo."));
-  });
+  const form = e.target, enviar = ENVIOS_CUENTA[form.dataset.cuentaForm];
+  if (!enviar || ocupado) return;
+  const valores = Object.fromEntries(new FormData(form));
+  enCuenta(() => enviar(valores), form);
 });
-// El código se enseña una vez: al cerrar la ventana, se olvida.
-dialogoCuenta.addEventListener("close", () => { codigoVisible = null; });
 
 // ==========================================
 // SONDEO

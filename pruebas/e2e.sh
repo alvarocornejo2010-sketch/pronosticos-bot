@@ -56,7 +56,7 @@ echo "== Worker"
   --var "API_BASE:http://127.0.0.1:$P_API/v4" --var PAUSA_ENTRE_REQUESTS:0 \
   --var MIN_MINUTOS_ACTUALIZACION:25 --var AUTO_VALIDAR:1 --var PRESUPUESTO_REQUESTS:6 \
   --var MAX_BYTES_PASADA:350000 --var MAX_CALCULOS_PASADA:40 --var MAX_VISITAS_DIA:60 \
-  --var MAX_CUENTAS_DIA:4 --var MAX_ESCRITURAS_CUENTAS_DIA:400 > "$TMP/wrangler.log" 2>&1) &
+  --var MAX_CUENTAS_DIA:4 --var MAX_INTENTOS_DIA:120 --var MAX_ESCRITURAS_CUENTAS_DIA:600 > "$TMP/wrangler.log" 2>&1) &
 esperar "http://127.0.0.1:$P_W/salud"
 python3 "$REPO/pruebas/correr_cron.py" "$P_W" 600 "$MAX_MS" | tail -4
 
@@ -85,5 +85,5 @@ echo "== Visitas"
 python3 "$REPO/pruebas/visitas.py" "$P_W" secreto_de_prueba_123
 
 echo "== Cuentas"
-python3 "$REPO/pruebas/cuentas.py" "$P_W"
+python3 "$REPO/pruebas/cuentas.py" "$P_W" "$TMP/d1"
 echo "e2e: OK"

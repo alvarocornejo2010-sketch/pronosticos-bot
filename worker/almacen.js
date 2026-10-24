@@ -71,9 +71,10 @@ export const ESQUEMA = [
      clave TEXT NOT NULL,
      n     INTEGER NOT NULL,
      PRIMARY KEY (dia, tipo, clave)) WITHOUT ROWID`,
-  // Las cuentas (cuentas.js): la cuenta, cómo se entra en ella (accesos: hoy solo
-  // "codigo", con el SHA-256 del código; mañana passkey o Google), sus sesiones (el
-  // SHA-256 del token de la cookie) y los equipos que sigue. Las horas, en ms.
+  // Las cuentas (cuentas.js): la cuenta, su usuario y contraseña (usuarios: el SHA-256
+  // con sal de lo que manda el navegador, y los fallos seguidos), otras formas de
+  // entrar (accesos: los códigos de la primera versión; mañana passkey o Google), sus
+  // sesiones (el SHA-256 del token de la cookie) y los equipos que sigue. Horas en ms.
   `CREATE TABLE IF NOT EXISTS cuentas (
      id     TEXT PRIMARY KEY,
      creada INTEGER NOT NULL,
@@ -91,6 +92,15 @@ export const ESQUEMA = [
      creada INTEGER NOT NULL,
      vista  INTEGER NOT NULL) WITHOUT ROWID`,
   `CREATE INDEX IF NOT EXISTS sesiones_por_cuenta ON sesiones (cuenta)`,
+  `CREATE TABLE IF NOT EXISTS usuarios (
+     usuario   TEXT PRIMARY KEY,
+     cuenta    TEXT NOT NULL,
+     sal       TEXT NOT NULL,
+     hash      TEXT NOT NULL,
+     creado    INTEGER NOT NULL,
+     fallos    INTEGER NOT NULL,
+     bloqueado INTEGER NOT NULL) WITHOUT ROWID`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS usuarios_por_cuenta ON usuarios (cuenta)`,
   `CREATE TABLE IF NOT EXISTS favoritos (
      cuenta TEXT NOT NULL,
      equipo TEXT NOT NULL,

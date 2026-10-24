@@ -348,6 +348,8 @@ ${par(r.cuentas.total, "cuentas en total")}
 ${par(r.cuentas.creadas, "cuentas creadas esta semana (también las ya borradas)")}
 ${par(r.cuentas.activas, "cuentas que entraron esta semana")}
 ${par(r.cuentas.con_equipos, "cuentas que siguen a algún equipo")}
+${par(r.cuentas.con_usuario, "cuentas con usuario y contraseña")}
+${par(r.cuentas.intentos, "intentos de entrar esta semana (con acierto o sin él)")}
 </div></section>
 </div>
 <footer><h2>Cómo se cuenta</h2><ul>
