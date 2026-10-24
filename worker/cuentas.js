@@ -1,26 +1,33 @@
-// Las cuentas, versión básica (oct 2026): sin email, sin contraseña y sin nada de
-// quién es quién. Crear una cuenta da un código de acceso (16 letras y números al
-// azar, 80 bits: imposible de adivinar a base de probar) que sirve para entrar desde
-// otro aparato o después de borrar los datos del navegador. La cuenta guarda los
-// equipos que sigues; la persona la puede descargar o borrar ella misma.
+// Las cuentas (oct 2026): usuario y contraseña, sin email. La cuenta guarda los
+// equipos que sigues; la persona la puede descargar o borrar ella misma. Cada cuenta
+// tiene un ID (idPublico, "K7P4-QX2M") que solo sirve para identificarla, no para
+// entrar.
 //
-// Pensada para crecer sin rehacerla: la cuenta (cuentas) va aparte de cómo se entra
-// (accesos, con tipo "codigo"). Una passkey o "entrar con Google" serán otro tipo de
-// acceso de la misma cuenta. La sesión es una cookie HttpOnly con un token al azar;
-// en D1 solo va el SHA-256 del token y el del código: quien leyera la base no podría
-// entrar en ninguna cuenta.
+// La contraseña no llega aquí tal cual: el navegador la pasa por PBKDF2-SHA256
+// (600.000 vueltas, con el usuario como sal; app.js, claveDe) y manda el resultado.
+// Aquí se guarda el SHA-256 de eso con una sal al azar. Así el trabajo lento lo hace
+// el navegador (los 10 ms de CPU del Worker no dan para un hash de contraseñas), y
+// quien leyera la base tendría que pasar cada intento por las 600.000 vueltas. Cada
+// intento se apunta antes de mirar la contraseña (intento): diez seguidos sin acertar
+// bloquean ese usuario 15 minutos, aunque lleguen todos a la vez.
+//
+// La cuenta (cuentas) va aparte de cómo se entra (usuarios; accesos queda para una
+// passkey o Google, y guarda el código de las cuentas de la primera versión, que ya no
+// sirve para entrar). La sesión es una cookie HttpOnly con un token al azar; en D1
+// solo va su SHA-256.
 
 import { ajustes } from "./config.js";
 import { Reloj } from "./tiempo.js";
 
 const ALFABETO = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";   // Crockford: sin I, L, O ni U
-const LARGO_CODIGO = 16;                              // 16 × 5 bits = 80 bits
 const DIAS_SESION = 180;
 const MS_DIA = 86400000;
 export const MAX_EQUIPOS = 60;                        // los mismos que guarda la web
 const MAX_NOMBRE = 80;
 const MAX_CUERPO = 8192;
 const MAX_SESIONES = 20;                              // por cuenta: las más viejas se van
+const MAX_FALLOS = 10;                                // contraseñas mal seguidas...
+const BLOQUEO_MS = 15 * 60000;                        // ...y ese usuario espera esto
 const COOKIE = "sesion";
 
 const azar = (n) => crypto.getRandomValues(new Uint8Array(n));
@@ -33,16 +40,29 @@ async function sha256(texto) {
   return hex(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(texto))));
 }
 
-// "K7P4-QX2M-9TRB-H6WD". 256 es múltiplo de 32: cada byte da una letra sin sesgo.
-export function codigoNuevo() {
-  return [...azar(LARGO_CODIGO)].map((b) => ALFABETO[b & 31]).join("").match(/.{4}/g).join("-");
+// El ID de una cuenta: los 40 primeros bits de su id, en letras de Crockford
+// ("K7P4-QX2M"). Sirve para identificarla (en el panel, en un aviso), no para entrar.
+export function idPublico(id) {
+  let n = BigInt("0x" + id.slice(0, 10)), s = "";
+  for (let i = 0; i < 8; i++) { s = ALFABETO[Number(n & 31n)] + s; n >>= 5n; }
+  return s.slice(0, 4) + "-" + s.slice(4);
 }
 
-// Lo que escribe la persona: sin guiones ni espacios, en mayúsculas, y las letras
-// que se confunden con números (O, I, L) como esos números. null si no es un código.
-export function normalizarCodigo(texto) {
-  const c = String(texto ?? "").toUpperCase().replace(/[\s-]/g, "").replace(/O/g, "0").replace(/[IL]/g, "1");
-  return c.length === LARGO_CODIGO && [...c].every((ch) => ALFABETO.includes(ch)) ? c : null;
+// El usuario: de 3 a 24 letras sin tildes, números, punto, guion o guion bajo,
+// empezando por letra o número, sin distinguir mayúsculas. null si no vale.
+export function normalizarUsuario(texto) {
+  const u = String(texto ?? "").trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9._-]{2,23}$/.test(u) ? u : null;
+}
+const TEXTO_USUARIO = "El usuario lleva de 3 a 24 letras (sin tildes ni ñ), números, punto, guion o guion bajo, "
+  + "y empieza por letra o número.";
+
+// Lo que manda el navegador en vez de la contraseña: 32 bytes en hexadecimal.
+const claveValida = (c) => typeof c === "string" && /^[0-9a-f]{64}$/.test(c);
+const hashClave = (sal, clave) => sha256(sal + ":" + clave);
+function iguales(a, b) {
+  const x = new TextEncoder().encode(a), y = new TextEncoder().encode(b);
+  return x.length === y.length && crypto.subtle.timingSafeEqual(x, y);
 }
 
 function tokenDe(request) {
@@ -92,11 +112,27 @@ export function limpiarEquipos(lista) {
 // una sola cuenta podría poner y quitar estrellas en bucle hasta gastar las 100.000
 // escrituras diarias de D1, y el cron dejaría de guardar predicciones.
 class SinPresupuesto extends Error {}
+// Y el de los intentos de entrar (MAX_INTENTOS_DIA), aparte: probar contraseñas en
+// bucle deja sin entrar a quien no tenga la sesión abierta, pero no toca las estrellas
+// ni las sesiones abiertas.
+class SinIntentos extends Error {}
 
 // Un equipo más, si la cuenta existe y no ha llegado al máximo (y si ya estaba, nada).
 const SUMAR_EQUIPO = `INSERT OR IGNORE INTO favoritos (cuenta, equipo, creado)
   SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM cuentas WHERE id = ?1)
     AND (SELECT count(*) FROM favoritos WHERE cuenta = ?1) < ?4`;
+
+// Un intento más con ese usuario, si no está bloqueado, antes de mirar la contraseña:
+// por muchos que lleguen a la vez, D1 los apunta de uno en uno y solo MAX_FALLOS se
+// comparan antes del bloqueo. El que llega a MAX_FALLOS lo pone (y la cuenta vuelve a
+// 0: pasado el bloqueo hay otros MAX_FALLOS). Acertar la deja en 0 (ACERTADO).
+const INTENTO = `UPDATE usuarios SET
+    fallos = CASE WHEN fallos + 1 >= ?2 THEN 0 ELSE fallos + 1 END,
+    bloqueado = CASE WHEN fallos + 1 >= ?2 THEN ?3 ELSE bloqueado END
+  WHERE usuario = ?1 AND bloqueado <= ?4
+  RETURNING cuenta, sal, hash, bloqueado`;
+const ACERTADO = "UPDATE usuarios SET fallos = 0, bloqueado = 0 WHERE usuario = ?1";
+const MAL = "Usuario o contraseña incorrectos.";
 
 export class Cuentas {
   constructor(request, env, almacen, cabeceras, ahora = Date.now()) {
@@ -108,15 +144,15 @@ export class Cuentas {
     this.cabeceras = cabeceras;
     this.ahora = ahora;
     this.dia = new Reloj(this.aj.tz).local(ahora).fecha;
-    this.contadores = null;   // { cuentas, escrituras_cuentas } de hoy, al primer uso
+    this.contadores = null;   // { cuentas, escrituras_cuentas, intentos } de hoy, al primer uso
   }
 
   async leerContadores() {
     if (this.contadores) return this.contadores;
     const r = await this.almacen.consultar(() => this.db.prepare(
-      `SELECT tipo, n FROM visitas WHERE dia = ?1 AND tipo IN ('cuentas', 'escrituras_cuentas') AND clave = ''`)
-      .bind(this.dia).all());
-    this.contadores = { cuentas: 0, escrituras_cuentas: 0 };
+      `SELECT tipo, n FROM visitas WHERE dia = ?1 AND tipo IN ('cuentas', 'escrituras_cuentas', 'intentos')
+       AND clave = ''`).bind(this.dia).all());
+    this.contadores = { cuentas: 0, escrituras_cuentas: 0, intentos: 0 };
     for (const f of r.results) this.contadores[f.tipo] = f.n;
     return this.contadores;
   }
@@ -131,6 +167,33 @@ export class Cuentas {
     await this.almacen.escribir([...sentencias,
       this.db.prepare(`INSERT INTO visitas (dia, tipo, clave, n) VALUES (?1, 'escrituras_cuentas', '', ?2)
         ON CONFLICT (dia, tipo, clave) DO UPDATE SET n = n + excluded.n`).bind(this.dia, gasto)]);
+  }
+
+  // Apunta un intento con ese usuario (INTENTO) y lo cuenta en el tope del día. Da su
+  // fila si se puede comparar la contraseña; si no, null (no existe) o { hasta } (está
+  // bloqueado hasta entonces).
+  async intento(usuario) {
+    const c = await this.leerContadores();
+    if (c.intentos >= this.aj.maxIntentosDia) throw new SinIntentos();
+    c.intentos += 1;
+    const [r] = await this.almacen.consultar(() => this.db.batch([
+      this.db.prepare(INTENTO).bind(usuario, MAX_FALLOS, this.ahora + BLOQUEO_MS, this.ahora),
+      this.db.prepare(`INSERT INTO visitas (dia, tipo, clave, n) VALUES (?1, 'intentos', '', 1)
+        ON CONFLICT (dia, tipo, clave) DO UPDATE SET n = n + 1`).bind(this.dia),
+    ]));
+    if (r.results.length) return r.results[0];
+    const f = await this.db.prepare("SELECT bloqueado FROM usuarios WHERE usuario = ?1").bind(usuario).first();
+    return f && f.bloqueado > this.ahora ? { hasta: f.bloqueado } : null;
+  }
+
+  bloqueo(hasta) {
+    return this.error(`Demasiados intentos con este usuario: prueba dentro de ${
+      Math.max(1, Math.ceil((hasta - this.ahora) / 60000))} min.`, 429);
+  }
+
+  // Lo que dice un intento que no acertó: el que puso el bloqueo ya lo avisa.
+  fallo(f, texto, status) {
+    return f.bloqueado > this.ahora ? this.bloqueo(f.bloqueado) : this.error(texto, status);
   }
 
   json(obj, status = 200, extra = {}) {
@@ -148,14 +211,14 @@ export class Cuentas {
     if (!token) return null;
     const hash = await sha256(token);
     const f = await this.almacen.consultar(() => this.db.prepare(
-      `SELECT s.cuenta, s.vista, c.creada FROM sesiones s JOIN cuentas c ON c.id = s.cuenta
-       WHERE s.hash = ?1`).bind(hash).first());
+      `SELECT s.cuenta, s.vista, c.creada, u.usuario FROM sesiones s JOIN cuentas c ON c.id = s.cuenta
+       LEFT JOIN usuarios u ON u.cuenta = s.cuenta WHERE s.hash = ?1`).bind(hash).first());
     if (!f) return null;
     if (f.vista < this.ahora - DIAS_SESION * MS_DIA) {
       await this.guardar([this.db.prepare("DELETE FROM sesiones WHERE hash = ?1").bind(hash)]).catch(() => {});
       return null;
     }
-    return { token, hash, cuenta: f.cuenta, vista: f.vista, creada: f.creada };
+    return { token, hash, cuenta: f.cuenta, vista: f.vista, creada: f.creada, usuario: f.usuario ?? null };
   }
 
   async equipos(cuenta) {
@@ -169,8 +232,24 @@ export class Cuentas {
       this.db.prepare(SUMAR_EQUIPO).bind(cuenta, n, this.ahora + i, MAX_EQUIPOS));
   }
 
+  // Lo que la web sabe de la cuenta (GET /api/cuenta, al crear y al entrar).
+  async publica(cuenta, creada, usuario) {
+    return { id: idPublico(cuenta), usuario, creada: iso(creada), equipos: await this.equipos(cuenta) };
+  }
+
+  // Una sesión nueva en la cuenta: la cookie, y cada cuenta con sus MAX_SESIONES
+  // sesiones más recientes.
+  async sentenciasSesion(cuenta, token) {
+    return [
+      this.db.prepare("INSERT INTO sesiones (hash, cuenta, creada, vista) VALUES (?1, ?2, ?3, ?3)")
+        .bind(await sha256(token), cuenta, this.ahora),
+      this.db.prepare(`DELETE FROM sesiones WHERE cuenta = ?1 AND hash NOT IN
+        (SELECT hash FROM sesiones WHERE cuenta = ?1 ORDER BY vista DESC LIMIT ?2)`).bind(cuenta, MAX_SESIONES),
+    ];
+  }
+
   sinSesion() {
-    return this.json({ error: "Tu sesión terminó: vuelve a entrar con tu código." }, 401,
+    return this.json({ error: "Tu sesión terminó: vuelve a entrar con tu usuario y contraseña." }, 401,
       { "Set-Cookie": COOKIE_FUERA });
   }
 
@@ -181,8 +260,7 @@ export class Cuentas {
       return this.json({ disponible: true, cuenta: null }, 200,
         tokenDe(this.request) ? { "Set-Cookie": COOKIE_FUERA } : {});
     }
-    const equipos = await this.equipos(s.cuenta);
-    const cuerpo = { disponible: true, cuenta: { creada: iso(s.creada), equipos } };
+    const cuerpo = { disponible: true, cuenta: await this.publica(s.cuenta, s.creada, s.usuario) };
     if (this.ahora - s.vista < MS_DIA) return this.json(cuerpo);
     try {
       await this.guardar([
@@ -196,51 +274,57 @@ export class Cuentas {
     return this.conSesion(cuerpo, s.token);
   }
 
-  // POST /api/cuenta/crear {equipos}: la cuenta, su código (se enseña una vez) y una
-  // sesión. Tope de cuentas nuevas por día de Lima (MAX_CUENTAS_DIA): cada una son
-  // unas cuantas escrituras. Se cuentan las creadas, no las que quedan (crear y
-  // borrar en bucle no lo esquiva), en la tabla de contadores por día (visitas,
-  // tipo "cuentas"). Dos a la vez pueden pasarse en una: es un tope, no una cuenta.
+  // POST /api/cuenta/crear {usuario, clave, equipos}: la cuenta, su usuario y una
+  // sesión. Tope de cuentas nuevas por día de Lima (MAX_CUENTAS_DIA): se cuentan las
+  // creadas, no las que quedan (crear y borrar en bucle no lo esquiva), en la tabla de
+  // contadores por día (visitas, tipo "cuentas"). Dos a la vez pueden pasarse en una:
+  // es un tope, no una cuenta. Un usuario repetido lo para la base (UNIQUE), y como el
+  // lote va en una transacción no queda nada a medias ni se cuenta.
   async crear(body) {
+    const usuario = normalizarUsuario(body.usuario);
+    if (!usuario) return this.error(TEXTO_USUARIO, 400);
+    if (!claveValida(body.clave)) return this.error("Falta la contraseña.", 400);
     if ((await this.leerContadores()).cuentas >= this.aj.maxCuentasDia) {
       return this.error("Hoy ya se crearon muchas cuentas. Prueba mañana; tus equipos siguen en este navegador.", 429);
     }
-    const id = hex(azar(16)), codigo = codigoNuevo(), token = base64url(azar(32));
-    const [clave, sesion] = await Promise.all([sha256(normalizarCodigo(codigo)), sha256(token)]);
-    await this.guardar([
-      this.db.prepare(`INSERT INTO visitas (dia, tipo, clave, n) VALUES (?1, 'cuentas', '', 1)
-        ON CONFLICT (dia, tipo, clave) DO UPDATE SET n = n + 1`).bind(this.dia),
-      this.db.prepare("INSERT INTO cuentas (id, creada, vista) VALUES (?1, ?2, ?2)").bind(id, this.ahora),
-      this.db.prepare("INSERT INTO accesos (tipo, clave, cuenta, creado) VALUES ('codigo', ?1, ?2, ?3)")
-        .bind(clave, id, this.ahora),
-      this.db.prepare("INSERT INTO sesiones (hash, cuenta, creada, vista) VALUES (?1, ?2, ?3, ?3)")
-        .bind(sesion, id, this.ahora),
-      ...this.sumarEquipos(id, body.equipos),
-    ]);
-    return this.conSesion({ codigo, cuenta: { creada: iso(this.ahora), equipos: await this.equipos(id) } }, token);
+    const id = hex(azar(16)), token = base64url(azar(32)), sal = hex(azar(16));
+    try {
+      await this.guardar([
+        this.db.prepare(`INSERT INTO visitas (dia, tipo, clave, n) VALUES (?1, 'cuentas', '', 1)
+          ON CONFLICT (dia, tipo, clave) DO UPDATE SET n = n + 1`).bind(this.dia),
+        this.db.prepare("INSERT INTO cuentas (id, creada, vista) VALUES (?1, ?2, ?2)").bind(id, this.ahora),
+        this.db.prepare(`INSERT INTO usuarios (usuario, cuenta, sal, hash, creado, fallos, bloqueado)
+          VALUES (?1, ?2, ?3, ?4, ?5, 0, 0)`).bind(usuario, id, sal, await hashClave(sal, body.clave), this.ahora),
+        ...(await this.sentenciasSesion(id, token)),
+        ...this.sumarEquipos(id, body.equipos),
+      ]);
+    } catch (e) {
+      if (/UNIQUE/i.test(String(e && e.message))) return this.error("Ese usuario ya existe: elige otro.", 409);
+      throw e;
+    }
+    return this.conSesion({ cuenta: await this.publica(id, this.ahora, usuario) }, token);
   }
 
-  // POST /api/cuenta/entrar {codigo, equipos}: una sesión nueva en la cuenta de ese
-  // código. Los equipos que ya había en este navegador se suman a los de la cuenta.
-  // Cada cuenta guarda sus MAX_SESIONES sesiones más recientes.
+  // POST /api/cuenta/entrar {usuario, clave, equipos}: una sesión nueva. Los equipos
+  // que ya había en este navegador se suman a los de la cuenta. MAX_FALLOS intentos
+  // seguidos sin acertar bloquean ese usuario BLOQUEO_MS (intento).
   async entrar(body) {
-    const c = normalizarCodigo(body.codigo);
-    if (!c) return this.error("El código tiene 16 letras y números, como K7P4-QX2M-9TRB-H6WD.", 400);
-    const clave = await sha256(c);
-    const f = await this.almacen.consultar(() => this.db.prepare(
-      `SELECT a.cuenta, c.creada FROM accesos a JOIN cuentas c ON c.id = a.cuenta
-       WHERE a.tipo = 'codigo' AND a.clave = ?1`).bind(clave).first());
-    if (!f) return this.error("Ese código no es de ninguna cuenta. Revisa que esté bien escrito.", 401);
+    const usuario = normalizarUsuario(body.usuario);
+    if (!usuario || !claveValida(body.clave)) return this.error(MAL, 401);
+    const f = await this.intento(usuario);
+    if (!f) return this.error(MAL, 401);
+    if (f.hasta) return this.bloqueo(f.hasta);
+    if (!iguales(await hashClave(f.sal, body.clave), f.hash)) return this.fallo(f, MAL, 401);
+    const c = await this.db.prepare("SELECT creada FROM cuentas WHERE id = ?1").bind(f.cuenta).first();
+    if (!c) return this.error(MAL, 401);
     const token = base64url(azar(32));
     await this.guardar([
-      this.db.prepare("INSERT INTO sesiones (hash, cuenta, creada, vista) VALUES (?1, ?2, ?3, ?3)")
-        .bind(await sha256(token), f.cuenta, this.ahora),
-      this.db.prepare(`DELETE FROM sesiones WHERE cuenta = ?1 AND hash NOT IN
-        (SELECT hash FROM sesiones WHERE cuenta = ?1 ORDER BY vista DESC LIMIT ?2)`).bind(f.cuenta, MAX_SESIONES),
+      this.db.prepare(ACERTADO).bind(usuario),
+      ...(await this.sentenciasSesion(f.cuenta, token)),
       this.db.prepare("UPDATE cuentas SET vista = ?2 WHERE id = ?1").bind(f.cuenta, this.ahora),
       ...this.sumarEquipos(f.cuenta, body.equipos),
     ]);
-    return this.conSesion({ cuenta: { creada: iso(f.creada), equipos: await this.equipos(f.cuenta) } }, token);
+    return this.conSesion({ cuenta: await this.publica(f.cuenta, c.creada, usuario) }, token);
   }
 
   // POST /api/cuenta/equipo {equipo, seguir}: la estrella de un equipo.
@@ -253,21 +337,57 @@ export class Cuentas {
       return this.json({ ok: true });
     }
     await this.guardar([this.db.prepare(SUMAR_EQUIPO).bind(s.cuenta, nombre, this.ahora, MAX_EQUIPOS)]);
-    const ya = await this.db.prepare("SELECT 1 FROM favoritos WHERE cuenta = ?1 AND equipo = ?2")
-      .bind(s.cuenta, nombre).first();
+    const ya = await this.almacen.consultar(() => this.db.prepare(
+      "SELECT 1 FROM favoritos WHERE cuenta = ?1 AND equipo = ?2").bind(s.cuenta, nombre).first());
     if (!ya) return this.error(`Tu cuenta ya sigue a ${MAX_EQUIPOS} equipos: quita alguno antes.`, 409);
     return this.json({ ok: true });
   }
 
-  // POST /api/cuenta/codigo: un código nuevo (se enseña una vez); el de antes deja de valer.
-  async codigo(s) {
-    const codigo = codigoNuevo();
+  // POST /api/cuenta/contrasena {actual, nueva}: con la actual, que cuenta como un
+  // intento de entrar (una sesión robada no sirve para probar contraseñas). Las demás
+  // sesiones se cierran (si alguien la sabía, deja de estar dentro); la de este aparato
+  // sigue.
+  async contrasena(body, s) {
+    if (!s.usuario) return this.error("Tu cuenta aún no tiene usuario: ponle uno primero.", 409);
+    if (!claveValida(body.nueva)) return this.error("Falta la contraseña nueva.", 400);
+    const actualMal = "La contraseña actual no es esa.";   // 403: 401 es "sin sesión", y la web saldría
+    if (!claveValida(body.actual)) return this.error(actualMal, 403);
+    const f = await this.intento(s.usuario);
+    if (!f) return this.error("Tu cuenta aún no tiene usuario: ponle uno primero.", 409);
+    if (f.hasta) return this.bloqueo(f.hasta);
+    if (!iguales(await hashClave(f.sal, body.actual), f.hash)) return this.fallo(f, actualMal, 403);
+    const sal = hex(azar(16));
     await this.guardar([
-      this.db.prepare("DELETE FROM accesos WHERE cuenta = ?1 AND tipo = 'codigo'").bind(s.cuenta),
-      this.db.prepare("INSERT INTO accesos (tipo, clave, cuenta, creado) VALUES ('codigo', ?1, ?2, ?3)")
-        .bind(await sha256(normalizarCodigo(codigo)), s.cuenta, this.ahora),
+      this.db.prepare("UPDATE usuarios SET sal = ?2, hash = ?3, fallos = 0, bloqueado = 0 WHERE usuario = ?1")
+        .bind(s.usuario, sal, await hashClave(sal, body.nueva)),
+      this.db.prepare("DELETE FROM sesiones WHERE cuenta = ?1 AND hash != ?2").bind(s.cuenta, s.hash),
     ]);
-    return this.json({ codigo });
+    return this.json({ ok: true });
+  }
+
+  // POST /api/cuenta/usuario {usuario, clave}: usuario y contraseña para una cuenta de
+  // la primera versión (que se entraba con un código). El código deja de valer.
+  async ponerUsuario(body, s) {
+    if (s.usuario) return this.error("Tu cuenta ya tiene usuario.", 409);
+    const usuario = normalizarUsuario(body.usuario);
+    if (!usuario) return this.error(TEXTO_USUARIO, 400);
+    if (!claveValida(body.clave)) return this.error("Falta la contraseña.", 400);
+    const sal = hex(azar(16));
+    try {
+      await this.guardar([
+        this.db.prepare(`INSERT INTO usuarios (usuario, cuenta, sal, hash, creado, fallos, bloqueado)
+          VALUES (?1, ?2, ?3, ?4, ?5, 0, 0)`).bind(usuario, s.cuenta, sal, await hashClave(sal, body.clave), this.ahora),
+        this.db.prepare("DELETE FROM accesos WHERE cuenta = ?1 AND tipo = 'codigo'").bind(s.cuenta),
+      ]);
+    } catch (e) {
+      const m = String(e && e.message);
+      // dos a la vez desde la misma cuenta: la segunda choca con usuarios_por_cuenta
+      if (/UNIQUE/i.test(m)) {
+        return this.error(/usuarios\.cuenta/.test(m) ? "Tu cuenta ya tiene usuario." : "Ese usuario ya existe: elige otro.", 409);
+      }
+      throw e;
+    }
+    return this.json({ cuenta: await this.publica(s.cuenta, s.creada, usuario) });
   }
 
   // POST /api/cuenta/salir {todas}: cierra la sesión de este aparato, o las de todos.
@@ -291,8 +411,8 @@ export class Cuentas {
     const c = cuenta.results[0];
     const datos = {
       descargado: iso(this.ahora),
-      nota: "Es todo lo que la web guarda de tu cuenta. El código y las sesiones van cifrados (SHA-256): no se pueden ver.",
-      cuenta: { id: c.id, creada: iso(c.creada), ultima_vez: iso(c.vista) },
+      nota: "Es todo lo que la web guarda de tu cuenta. La contraseña y las sesiones van cifradas: no se pueden ver.",
+      cuenta: { id: idPublico(c.id), id_interno: c.id, usuario: s.usuario, creada: iso(c.creada), ultima_vez: iso(c.vista) },
       accesos: accesos.results.map((a) => ({ tipo: a.tipo, creado: iso(a.creado) })),
       sesiones: sesiones.results.map((x) => ({ creada: iso(x.creada), ultima_vez: iso(x.vista),
         este_aparato: x.hash === s.hash })),
@@ -311,6 +431,7 @@ export class Cuentas {
       this.db.prepare("DELETE FROM favoritos WHERE cuenta = ?1").bind(s.cuenta),
       this.db.prepare("DELETE FROM sesiones WHERE cuenta = ?1").bind(s.cuenta),
       this.db.prepare("DELETE FROM accesos WHERE cuenta = ?1").bind(s.cuenta),
+      this.db.prepare("DELETE FROM usuarios WHERE cuenta = ?1").bind(s.cuenta),
       this.db.prepare("DELETE FROM cuentas WHERE id = ?1").bind(s.cuenta),
     ]);
     return this.json({ ok: true }, 200, { "Set-Cookie": COOKIE_FUERA });
@@ -320,6 +441,10 @@ export class Cuentas {
     try {
       return await this.despachar(this.url.pathname.slice("/api/cuenta".length) || "/");
     } catch (e) {
+      if (e instanceof SinIntentos) {
+        return this.error("Hoy hubo demasiados intentos de entrar en la web: prueba mañana. "
+          + "Si ya tenías la sesión abierta en un aparato, ahí sigues dentro.", 429);
+      }
       if (!(e instanceof SinPresupuesto)) throw e;
       return this.error("Hoy la web ya guardó muchos cambios de cuentas: prueba mañana. "
         + "Tus equipos siguen en este navegador.", 429);
@@ -343,7 +468,8 @@ export class Cuentas {
     if (ruta === "/salir") return this.salir(body, s);
     if (!s) return this.sinSesion();
     if (ruta === "/equipo") return this.equipo(body, s);
-    if (ruta === "/codigo") return this.codigo(s);
+    if (ruta === "/contrasena") return this.contrasena(body, s);
+    if (ruta === "/usuario") return this.ponerUsuario(body, s);
     if (ruta === "/borrar") return this.borrar(s);
     return this.error("No existe.", 404);
   }
@@ -356,18 +482,23 @@ export const RUTAS_CUENTA = {
   "/api/cuenta/crear": ["POST"],
   "/api/cuenta/entrar": ["POST"],
   "/api/cuenta/equipo": ["POST"],
-  "/api/cuenta/codigo": ["POST"],
+  "/api/cuenta/contrasena": ["POST"],
+  "/api/cuenta/usuario": ["POST"],
   "/api/cuenta/salir": ["POST"],
   "/api/cuenta/borrar": ["POST"],
 };
 
 // Para el panel de visitas: cuántas cuentas hay, cuántas se crearon esta semana
-// (también las ya borradas: el contador del tope) y cuántas entraron.
+// (también las ya borradas: el contador del tope), cuántas entraron y cuántos intentos
+// de entrar hubo (muchos más que entradas: alguien probando contraseñas).
 export async function resumenCuentas(almacen, desde7, ahora = Date.now()) {
   const f = await almacen.consultar(() => almacen.db.prepare(
     `SELECT count(*) AS total, coalesce(sum(vista >= ?1), 0) AS activas,
        (SELECT count(DISTINCT cuenta) FROM favoritos) AS con_equipos,
-       (SELECT coalesce(sum(n), 0) FROM visitas WHERE tipo = 'cuentas' AND clave = '' AND dia >= ?2) AS creadas
+       (SELECT count(*) FROM usuarios) AS con_usuario,
+       (SELECT coalesce(sum(n), 0) FROM visitas WHERE tipo = 'cuentas' AND clave = '' AND dia >= ?2) AS creadas,
+       (SELECT coalesce(sum(n), 0) FROM visitas WHERE tipo = 'intentos' AND clave = '' AND dia >= ?2) AS intentos
      FROM cuentas`).bind(ahora - 7 * MS_DIA, desde7).first());
-  return { total: f.total, creadas: f.creadas, activas: f.activas, con_equipos: f.con_equipos };
+  return { total: f.total, creadas: f.creadas, activas: f.activas, con_equipos: f.con_equipos,
+    con_usuario: f.con_usuario, intentos: f.intentos };
 }

@@ -207,8 +207,8 @@ web con la tarjeta de ese partido para compartir (en Render, la web sin tarjeta;
 ver "Compartir y favoritos"), y `/robots.txt` y `/sitemap.xml` para los buscadores
 (ver "Instalable y buscadores"). Y las cuentas: `/api/cuenta` (la de la sesión;
 en Render, `disponible: false`) y, solo en Cloudflare, `/api/cuenta/crear`,
-`/entrar`, `/equipo`, `/codigo`, `/salir`, `/borrar` (POST) y `/datos` (ver
-"Cuentas").
+`/entrar`, `/equipo`, `/contrasena`, `/usuario`, `/salir`, `/borrar` (POST) y
+`/datos` (ver "Cuentas").
 
 **Efecto secundario de cada deploy:** el disco de Render free es efímero, cada
 deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
@@ -285,7 +285,8 @@ vivo), `documentos` (`estado` que sirve `/api/estado`, `resumen`, `validacion`,
 `temporada:liga:{código}:{año}`) y
 `candado` (que dos pasadas no se pisen, hora de la última petición, pasadas
 muertas), `visitas` (los contadores de visitas por día, ver "Visitas") y las de
-las cuentas: `cuentas`, `accesos`, `sesiones` y `favoritos` (ver "Cuentas").
+las cuentas: `cuentas`, `usuarios`, `accesos`, `sesiones` y `favoritos` (ver
+"Cuentas").
 
 **Si una pasada muere** (lo más probable, por CPU) deja el candado puesto; la
 siguiente lo nota y hace la mitad (presupuesto, bytes y cálculos), hasta un
@@ -438,65 +439,109 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
   en dos pestañas, cada una toma al momento las estrellas de la otra (evento
   `storage`), para no borrarlas al guardar las suyas.
 
-## Cuentas (versión básica, oct 2026)
+## Cuentas (oct 2026)
 
-Para que los equipos que sigues no se pierdan al borrar los datos del navegador y
-se vean en todos tus aparatos. Es la primera versión, hecha para crecer (passkey o
-Google más adelante) sin rehacerla: sin email ni contraseña.
+Para que los equipos que sigues se vean en todos tus aparatos y no se pierdan al
+borrar los datos del navegador. **Usuario y contraseña, sin email.** La primera
+versión (23 oct) entraba con un código de acceso; desde el 24 oct el código ya no
+sirve para entrar y cada cuenta tiene un **ID** ("K7P4-QX2M", `idPublico`: los 40
+primeros bits de su id en letras de Crockford) que solo sirve para identificarla.
 
 - **Cómo se entra:** "Entrar" en la cabecera (en el móvil, el icono de la persona;
   con la sesión abierta, "Mi cuenta" y la cabeza rellena) abre una ventana
-  (`<dialog>`, sección CUENTA de `app.js`). "Crear mi cuenta" da un **código de
-  acceso** de 16 letras y números (`K7P4-QX2M-9TRB-H6WD`; alfabeto Crockford, sin
-  I, L, O ni U: 80 bits al azar, imposible de adivinar a base de probar) que se
-  enseña una sola vez. Con él se entra desde otro aparato o tras borrar los datos
-  del navegador; al escribirlo dan igual mayúsculas, espacios, guiones y O, I o L
-  por 0 y 1. Si se pierde, desde un aparato con la sesión abierta se pide uno
-  nuevo y el viejo deja de valer. La primera estrella sin cuenta avisa (una vez)
-  de que se guarda solo en ese navegador.
+  (`<dialog>`, sección CUENTA de `app.js`) con tres formularios: crear (usuario,
+  contraseña y repetirla), entrar y cambiar la contraseña. El usuario: de 3 a 24
+  letras sin tildes, números, punto, guion o guion bajo, empezando por letra o
+  número, sin distinguir mayúsculas (`normalizarUsuario`, igual en los dos lados).
+  La contraseña: 8 caracteres o más, distinta del usuario y fuera de una lista corta
+  de las más comunes (eso lo mira el navegador: el servidor nunca la ve). Los
+  campos llevan su `autocomplete` (`username`, `new-password`, `current-password`)
+  para que el gestor de contraseñas del navegador las guarde. Un error sale junto
+  al formulario y lo escrito se queda. La primera estrella sin cuenta avisa (una
+  vez) de que se guarda solo en ese navegador.
+- **La contraseña no sale del navegador tal cual:** `claveDe` la pasa por
+  PBKDF2-SHA256 con 600.000 vueltas (`ITERACIONES`) y el usuario como sal, y manda
+  el resultado (64 caracteres hexadecimales). El Worker guarda el SHA-256 de eso
+  con una sal al azar (`usuarios`: `sal`, `hash`) y lo compara en tiempo constante.
+  Así el trabajo lento lo hace el navegador (menos de un segundo en Chromium,
+  petición incluida): un hash de contraseñas en el Worker no cabe en sus 10 ms de
+  CPU. Quien leyera la base tendría que pasar cada intento por las 600.000 vueltas.
+  **Si cambia `ITERACIONES` o la sal (`"pronosticos-bot/" + usuario`), todas las
+  contraseñas guardadas dejan de valer.** Usuario que no existe y contraseña mal
+  dan el mismo error. La contraseña actual mal al cambiarla responde 403, no 401
+  (401 es "sin sesión" y la web saldría de la cuenta).
+- **El bloqueo:** diez intentos seguidos sin acertar bloquean ese usuario 15
+  minutos (`MAX_FALLOS`, `BLOQUEO_MS`); acertar pone la cuenta a cero. Cada intento
+  se apunta **antes** de mirar la contraseña (`intento`, un `UPDATE ... RETURNING`
+  que solo pasa si el usuario no está bloqueado): D1 los apunta de uno en uno, así
+  que aunque lleguen 30 a la vez solo se comparan 10 (lo prueba `cuentas.py`). Si
+  se apuntaran después, todos los que llegan a la vez leerían "0 fallos" y se
+  compararían. Cambiar la contraseña con la actual cuenta igual: una sesión robada
+  no sirve para probar contraseñas. Quien ya estaba dentro sigue dentro; lo que
+  queda bloqueado es entrar desde otro aparato. **Límite aceptado:** quien sepa un
+  usuario puede tenerlo bloqueado probando contraseñas cada 15 minutos (sin email
+  no hay otra forma de demostrar quién es); su dueño sigue dentro donde ya tenía la
+  sesión.
+- **Sin recuperación:** sin email, una contraseña olvidada no se recupera; solo se
+  puede cambiar desde un aparato donde ya se haya entrado. Lo dice el formulario.
 - **La sesión** es una cookie `sesion` (HttpOnly, Secure, SameSite=Lax; 180 días
-  que se renuevan al usarla) con un token al azar. En D1 solo van el SHA-256 del
-  token y el del código: quien leyera la base no podría entrar en ninguna cuenta.
-  Las rutas que escriben exigen JSON y venir de la propia web (`mismoSitio`, la
-  misma comprobación que `/api/contar`), y cada una va por su nombre: una que no
-  existe da 404. Cada cuenta guarda sus 20 sesiones más recientes. El botón sale
-  con `plataforma: "cloudflare"` en `/api/estado`, y `/api/cuenta` solo se pide si
-  ese navegador entró (`pronosticos.sesion` en `localStorage`, que además avisa a
-  las otras pestañas): sin cuenta no cuesta ni una petición.
+  que se renuevan al usarla) con un token al azar; en D1 solo va su SHA-256.
+  Cambiar la contraseña cierra las sesiones de los demás aparatos. Cada cuenta
+  guarda sus 20 sesiones más recientes. Las rutas que escriben exigen JSON y venir
+  de la propia web (`mismoSitio`, la misma comprobación que `/api/contar`), y cada
+  una va por su nombre: una que no existe da 404. El botón sale con `plataforma:
+  "cloudflare"` en `/api/estado`, y `/api/cuenta` solo se pide si ese navegador
+  entró (`pronosticos.sesion` en `localStorage`, que además avisa a las otras
+  pestañas): sin cuenta no cuesta ni una petición.
+- **Las cuentas de la primera versión** (con código y sin usuario): "Mi cuenta" les
+  pide usuario y contraseña (`/api/cuenta/usuario`); al ponerlos, el código se
+  borra. Mientras no los tengan, solo se entra desde los aparatos donde ya tenían
+  la sesión abierta.
 - **Los equipos:** con la sesión abierta, los de la cuenta son los del navegador
   (al cargar la página, la cuenta manda) y cada estrella se guarda en los dos
   (`/api/cuenta/equipo`). Las estrellas van a la cuenta de una en una y en orden,
   por una cola guardada en el navegador (`pronosticos.cola_cuenta`): si falla la red
   o el tope, se reintentan con la siguiente estrella o al volver a abrir la web
-  (antes de traer la lista de la cuenta, para no perderlas). Al entrar, los que ya
-  había en el navegador se suman a los de la cuenta; al salir o borrar la cuenta,
+  (antes de traer la lista de la cuenta, para no perderlas). Al crear la cuenta o
+  entrar, los que ya había en el navegador se suman; al salir o borrar la cuenta,
   los del navegador se quedan. Hasta 60, como en el navegador.
-- **Todo lo hace la persona sola**, en "Mi cuenta": ver un código nuevo,
-  descargar sus datos (`/api/cuenta/datos`: un JSON con todo lo guardado, sin el
-  código ni los tokens), cerrar sesión en este aparato o en todos, y **borrar la
-  cuenta** (con confirmación en la misma ventana): se borran en el acto la cuenta,
-  sus accesos, sesiones y equipos. D1 guarda copias de los últimos 7 días (Time
-  Travel del plan gratis): la política de privacidad tendrá que decirlo. Con el
-  código a la vista, la ventana solo se cierra con "Ya lo guardé" o la X (ni Esc
-  ni un clic fuera), y nunca con una petición a medias.
+- **Todo lo hace la persona sola**, en "Mi cuenta": cambiar la contraseña,
+  descargar sus datos (`/api/cuenta/datos`: un JSON con todo lo guardado, sin la
+  contraseña ni los tokens), cerrar sesión en este aparato o en todos, y **borrar
+  la cuenta** (con confirmación en la misma ventana): se borran en el acto la cuenta,
+  su usuario (que queda libre), sesiones y equipos. D1 guarda copias de los
+  últimos 7 días (Time Travel del plan gratis): la política de privacidad tendrá
+  que decirlo. Mientras va una petición, la ventana no se cierra.
 - **Qué se guarda** (`worker/cuentas.js`): `cuentas` (id al azar, creada, última
-  vez), `accesos` (tipo `codigo` y el SHA-256 del código), `sesiones` (SHA-256 del
-  token, creada, última vez) y `favoritos` (cuenta, equipo, desde cuándo). Nada de
-  email, nombre ni IP. Las tablas se crean solas la primera vez que hacen falta
-  (probado sobre una base con las tablas de antes, como la de producción).
+  vez), `usuarios` (usuario, cuenta, sal, hash, fallos seguidos, bloqueo),
+  `sesiones` (SHA-256 del token, creada, última vez), `favoritos` (cuenta, equipo,
+  desde cuándo) y `accesos` (los códigos de la primera versión; queda para una
+  passkey o Google). Nada de email, nombre ni IP. Las tablas se crean solas la
+  primera vez que hacen falta (probado sobre una base sin `usuarios`, como la de
+  producción el 24 oct).
 - **Topes del día** (de Lima), contados en `visitas`: `MAX_CUENTAS_DIA` (300)
   cuentas nuevas (tipo `cuentas`; cuentan las creadas, no las que quedan, así que
-  crear y borrar en bucle no lo esquiva) y `MAX_ESCRITURAS_CUENTAS_DIA` (10.000,
+  crear y borrar en bucle no lo esquiva), `MAX_ESCRITURAS_CUENTAS_DIA` (10.000,
   el 10 % de las escrituras de D1) filas escritas por las cuentas (tipo
-  `escrituras_cuentas`, dos por sentencia, por lo alto): sin él, una sola cuenta
+  `escrituras_cuentas`, dos por sentencia, por lo alto: sin él, una sola cuenta
   poniendo y quitando estrellas en bucle podría gastar las 100.000 del día y dejar
-  al cron sin guardar predicciones. Borrar la cuenta no lo mira: tiene que
-  funcionar siempre. El panel de visitas tiene un tablero "Cuentas" (en total,
-  creadas esta semana contando las borradas, activas, con equipos).
+  al cron sin guardar predicciones) y `MAX_INTENTOS_DIA` (3.000, unas dos
+  escrituras cada uno) intentos de entrar o de cambiar la contraseña (tipo
+  `intentos`). Los intentos van aparte para que probar contraseñas en bucle no
+  gaste lo de las estrellas: al llegar al tope nadie puede entrar hasta el día
+  siguiente, pero quien ya tiene la sesión abierta sigue guardando sus equipos.
+  Borrar la cuenta no mira ningún tope: tiene que funcionar siempre. El panel de
+  visitas tiene un tablero "Cuentas" (en total, creadas esta semana contando las
+  borradas, activas, con equipos, con usuario e intentos de entrar de la semana:
+  muchos más intentos que entradas es alguien probando contraseñas). Lo que
+  falta para que un solo atacante no pueda gastar el tope de intentos: un límite
+  por IP (el binding de Rate Limiting de Workers, que no cuesta escrituras; no
+  está claro que entre en el plan gratis) o la regla de límite de un dominio
+  propio.
 - **Solo en Cloudflare:** en Render, `/api/cuenta` responde `disponible: false` y
   el botón no sale.
-- **Para crecer:** una passkey o "entrar con Google" serán otro `tipo` en
-  `accesos` de la misma cuenta, sin tocar lo demás. Lo que falta antes de
+- **Para crecer:** recuperar la contraseña por email, entrar con passkey o con
+  Google (otro tipo en `accesos` de la misma cuenta). Lo que falta antes de
   anunciarlo a lo grande, en "Pendiente".
 
 ## Instalable y buscadores (oct 2026)
@@ -593,7 +638,8 @@ UTC (la web en sí, que es estática, seguiría cargando). En `workers.dev` no h
 reglas de WAF; con un dominio propio en Cloudflare sí habría una regla de
 límite de peticiones gratis. Las rutas públicas que escriben en D1 son
 `/api/contar` y las de las cuentas, las dos con tope diario (ver "Visitas" y
-"Cuentas").
+"Cuentas"); quien machaque `/api/cuenta/entrar` deja a todos sin poder entrar ese
+día (no sin sus equipos).
 
 ## El modelo (oct 2026)
 
@@ -1031,9 +1077,10 @@ Environment).
 
 - **Cuentas, la versión siguiente** (ver "Cuentas"): una página de política de
   privacidad (Ley 29733: qué se guarda, para qué, los 7 días de copias de D1 y cómo
-  pedir o borrar los datos; conviene que la revise alguien que sepa de leyes) y,
-  si la gente las usa, entrar con passkey (huella o cara, sin código que guardar)
-  como otro tipo de acceso. Las sesiones de 180 días sin uso solo se borran
+  pedir o borrar los datos; conviene que la revise alguien que sepa de leyes); una
+  forma de recuperar la contraseña olvidada (un email, que pide un servicio para
+  mandarlos y guardar un dato personal más); y, si la gente las usa, entrar con
+  passkey (huella o cara) como otro tipo de acceso. Las sesiones de 180 días sin uso solo se borran
   cuando alguien intenta usarlas (y cada cuenta guarda 20 como mucho): si se
   acumulan, limpiarlas en el cron.
 
@@ -1083,8 +1130,10 @@ Environment).
     (`compartir.py`). Que la web es instalable (manifiesto, iconos, service worker,
     CSP) y que `robots.txt` y `sitemap.xml` traen lo que deben (`descubrir.py`). Y
     que las visitas se cuentan bien, que lo inventado no entra y que el tope corta
-    (`visitas.py`, con `MAX_VISITAS_DIA=60`). Y las cuentas, de crear a borrar
-    (`cuentas.py`, con `MAX_CUENTAS_DIA=4` y `MAX_ESCRITURAS_CUENTAS_DIA=400`). En
+    (`visitas.py`, con `MAX_VISITAS_DIA=60`). Y las cuentas, de crear a borrar,
+    con el bloqueo por intentos (también 30 a la vez), la cuenta de la primera
+    versión que se pasa a usuario y los tres topes (`cuentas.py`, con
+    `MAX_CUENTAS_DIA=4`, `MAX_INTENTOS_DIA=120` y `MAX_ESCRITURAS_CUENTAS_DIA=600`). En
     GitHub, 1-2 minutos; en local,
     unos 10.
   - Las variables del Worker van con `--var`, que manda sobre `.dev.vars`: el token

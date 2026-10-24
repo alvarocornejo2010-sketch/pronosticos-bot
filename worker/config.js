@@ -91,8 +91,11 @@ export function ajustes(env = {}) {
     maxVisitasDia: num("MAX_VISITAS_DIA", 20000),
     // cuentas nuevas por día de Lima (cuentas.js): cada una son unas pocas escrituras
     maxCuentasDia: num("MAX_CUENTAS_DIA", 300),
-    // filas que escriben las cuentas en un día (estrellas, entrar, códigos...): el
+    // filas que escriben las cuentas en un día (estrellas, sesiones, cuentas nuevas...): el
     // 10 % de las 100.000 de D1. Borrar una cuenta no lo mira.
     maxEscriturasCuentasDia: num("MAX_ESCRITURAS_CUENTAS_DIA", 10000),
+    // intentos de entrar (o de cambiar la contraseña) en un día, aparte: así los
+    // fallos no gastan lo de las estrellas. Cada uno, unas dos escrituras.
+    maxIntentosDia: num("MAX_INTENTOS_DIA", 3000),
   };
 }
