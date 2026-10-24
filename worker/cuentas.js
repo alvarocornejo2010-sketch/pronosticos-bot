@@ -1,15 +1,20 @@
-// Las cuentas (oct 2026): usuario y contraseña, sin email. La cuenta guarda los
-// equipos que sigues; la persona la puede descargar o borrar ella misma. Cada cuenta
-// tiene un ID (idPublico, "K7P4-QX2M") que solo sirve para identificarla, no para
-// entrar.
+// Las cuentas (oct 2026): usuario y contraseña, y un correo si la persona quiere, para
+// entrar con él y, el día que la web pueda mandar correos, recuperar la contraseña
+// (hoy no se verifica: eso necesita el plan de pago). La cuenta guarda los equipos que
+// sigues; la persona la puede descargar o borrar ella misma. Cada cuenta tiene un ID
+// (idPublico, "K7P4-QX2M") que solo sirve para identificarla, no para entrar. Crear
+// una cuenta pasa por Cloudflare Turnstile cuando están sus dos claves.
 //
 // La contraseña no llega aquí tal cual: el navegador la pasa por PBKDF2-SHA256
 // (600.000 vueltas, con el usuario como sal; app.js, claveDe) y manda el resultado.
 // Aquí se guarda el SHA-256 de eso con una sal al azar. Así el trabajo lento lo hace
 // el navegador (los 10 ms de CPU del Worker no dan para un hash de contraseñas), y
-// quien leyera la base tendría que pasar cada intento por las 600.000 vueltas. Cada
-// intento se apunta antes de mirar la contraseña (intento): diez seguidos sin acertar
-// bloquean ese usuario 15 minutos, aunque lleguen todos a la vez.
+// quien leyera la base tendría que pasar cada intento por las 600.000 vueltas. Con
+// correo, el navegador manda además la misma contraseña con el correo de sal, que va
+// en correos: así se entra con cualquiera de los dos sin preguntar antes cuál es el
+// usuario de un correo. Cada intento se apunta antes de mirar la contraseña (intento),
+// con el usuario o con el correo: diez seguidos sin acertar bloquean la cuenta 15
+// minutos, aunque lleguen todos a la vez.
 //
 // La cuenta (cuentas) va aparte de cómo se entra (usuarios; accesos queda para una
 // passkey o Google, y guarda el código de las cuentas de la primera versión, que ya no
@@ -56,6 +61,27 @@ export function normalizarUsuario(texto) {
 }
 const TEXTO_USUARIO = "El usuario lleva de 3 a 24 letras (sin tildes ni ñ), números, punto, guion o guion bajo, "
   + "y empieza por letra o número.";
+
+// El correo, en minúsculas y sin espacios alrededor; null si no lo parece. Sin tildes
+// ni ñ (casi ningún proveedor los da). Un usuario no lleva "@": su sal y la de un
+// correo nunca coinciden.
+export function normalizarCorreo(texto) {
+  const c = String(texto ?? "").trim().toLowerCase();
+  return c.length <= 254 && /^[a-z0-9._%+-]{1,64}@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(c) ? c : null;
+}
+const TEXTO_CORREO = "Ese correo no parece bien escrito.";
+
+// Qué se repitió, si un lote chocó con un UNIQUE (dos a la vez, o un usuario o un correo
+// que ya están en otra cuenta): el lote va en una transacción, así que no queda nada a
+// medias. null si el error es otro.
+function repetido(e) {
+  const m = String(e && e.message);
+  if (!/UNIQUE/i.test(m)) return null;
+  if (/usuarios\.cuenta/.test(m)) return "Tu cuenta ya tiene usuario.";
+  if (/correos\.correo/.test(m)) return "Ese correo ya está en otra cuenta.";
+  if (/correos\.cuenta/.test(m)) return "Tu cuenta ya tiene correo: recarga la página.";
+  return "Ese usuario ya existe: elige otro.";
+}
 
 // Lo que manda el navegador en vez de la contraseña: 32 bytes en hexadecimal.
 const claveValida = (c) => typeof c === "string" && /^[0-9a-f]{64}$/.test(c);
@@ -186,6 +212,27 @@ export class Cuentas {
     return f && f.bloqueado > this.ahora ? { hasta: f.bloqueado } : null;
   }
 
+  // La clave pública de Turnstile, si está configurado del todo (las dos claves); si
+  // no, null y crear una cuenta no lo pide.
+  sitioTurnstile() {
+    return this.aj.turnstileSitio && this.aj.turnstileSecreto ? this.aj.turnstileSitio : null;
+  }
+
+  // Si el navegador pasó Turnstile en esta web y para crear la cuenta. Cada ficha vale
+  // una vez (siteverify lo comprueba). La IP solo va a Cloudflare, para la comprobación;
+  // aquí no se guarda.
+  async turnstileValido(ficha) {
+    if (!this.sitioTurnstile()) return true;
+    if (typeof ficha !== "string" || !ficha || ficha.length > 2048) return false;
+    try {
+      const r = await fetch(this.aj.turnstileVerificar, { method: "POST", signal: AbortSignal.timeout(10000),
+        body: new URLSearchParams({ secret: this.aj.turnstileSecreto, response: ficha,
+          remoteip: this.request.headers.get("CF-Connecting-IP") || "" }) });
+      const d = await r.json();
+      return d.success === true && d.hostname === this.url.hostname && d.action === "crear";
+    } catch { return false; }
+  }
+
   bloqueo(hasta) {
     return this.error(`Demasiados intentos con este usuario: prueba dentro de ${
       Math.max(1, Math.ceil((hasta - this.ahora) / 60000))} min.`, 429);
@@ -211,14 +258,16 @@ export class Cuentas {
     if (!token) return null;
     const hash = await sha256(token);
     const f = await this.almacen.consultar(() => this.db.prepare(
-      `SELECT s.cuenta, s.vista, c.creada, u.usuario FROM sesiones s JOIN cuentas c ON c.id = s.cuenta
-       LEFT JOIN usuarios u ON u.cuenta = s.cuenta WHERE s.hash = ?1`).bind(hash).first());
+      `SELECT s.cuenta, s.vista, c.creada, u.usuario, e.correo FROM sesiones s JOIN cuentas c ON c.id = s.cuenta
+       LEFT JOIN usuarios u ON u.cuenta = s.cuenta LEFT JOIN correos e ON e.cuenta = s.cuenta
+       WHERE s.hash = ?1`).bind(hash).first());
     if (!f) return null;
     if (f.vista < this.ahora - DIAS_SESION * MS_DIA) {
       await this.guardar([this.db.prepare("DELETE FROM sesiones WHERE hash = ?1").bind(hash)]).catch(() => {});
       return null;
     }
-    return { token, hash, cuenta: f.cuenta, vista: f.vista, creada: f.creada, usuario: f.usuario ?? null };
+    return { token, hash, cuenta: f.cuenta, vista: f.vista, creada: f.creada, usuario: f.usuario ?? null,
+      correo: f.correo ?? null };
   }
 
   async equipos(cuenta) {
@@ -233,8 +282,9 @@ export class Cuentas {
   }
 
   // Lo que la web sabe de la cuenta (GET /api/cuenta, al crear y al entrar).
-  async publica(cuenta, creada, usuario) {
-    return { id: idPublico(cuenta), usuario, creada: iso(creada), equipos: await this.equipos(cuenta) };
+  async publica(cuenta, creada, usuario, correo) {
+    return { id: idPublico(cuenta), usuario, correo: correo ?? null, creada: iso(creada),
+      equipos: await this.equipos(cuenta) };
   }
 
   // Una sesión nueva en la cuenta: la cookie, y cada cuenta con sus MAX_SESIONES
@@ -257,10 +307,10 @@ export class Cuentas {
   async ver() {
     const s = await this.sesion();
     if (!s) {
-      return this.json({ disponible: true, cuenta: null }, 200,
+      return this.json({ disponible: true, cuenta: null, turnstile: this.sitioTurnstile() }, 200,
         tokenDe(this.request) ? { "Set-Cookie": COOKIE_FUERA } : {});
     }
-    const cuerpo = { disponible: true, cuenta: await this.publica(s.cuenta, s.creada, s.usuario) };
+    const cuerpo = { disponible: true, cuenta: await this.publica(s.cuenta, s.creada, s.usuario, s.correo) };
     if (this.ahora - s.vista < MS_DIA) return this.json(cuerpo);
     try {
       await this.guardar([
@@ -274,18 +324,25 @@ export class Cuentas {
     return this.conSesion(cuerpo, s.token);
   }
 
-  // POST /api/cuenta/crear {usuario, clave, equipos}: la cuenta, su usuario y una
-  // sesión. Tope de cuentas nuevas por día de Lima (MAX_CUENTAS_DIA): se cuentan las
+  // POST /api/cuenta/crear {usuario, clave, correo?, clave_correo?, turnstile?, equipos}:
+  // la cuenta, su usuario (y su correo, si lo puso) y una sesión, con los equipos de ese
+  // navegador. Tope de cuentas nuevas por día de Lima (MAX_CUENTAS_DIA): se cuentan las
   // creadas, no las que quedan (crear y borrar en bucle no lo esquiva), en la tabla de
   // contadores por día (visitas, tipo "cuentas"). Dos a la vez pueden pasarse en una:
-  // es un tope, no una cuenta. Un usuario repetido lo para la base (UNIQUE), y como el
-  // lote va en una transacción no queda nada a medias ni se cuenta.
+  // es un tope, no una cuenta. Un usuario o un correo repetidos los para la base
+  // (UNIQUE, repetido).
   async crear(body) {
     const usuario = normalizarUsuario(body.usuario);
     if (!usuario) return this.error(TEXTO_USUARIO, 400);
     if (!claveValida(body.clave)) return this.error("Falta la contraseña.", 400);
+    const correo = body.correo ? normalizarCorreo(body.correo) : null;
+    if (body.correo && !correo) return this.error(TEXTO_CORREO, 400);
+    if (correo && !claveValida(body.clave_correo)) return this.error("Falta la contraseña del correo.", 400);
     if ((await this.leerContadores()).cuentas >= this.aj.maxCuentasDia) {
       return this.error("Hoy ya se crearon muchas cuentas. Prueba mañana; tus equipos siguen en este navegador.", 429);
+    }
+    if (!(await this.turnstileValido(body.turnstile))) {
+      return this.error("Falta la comprobación de que no eres un robot: espera a que salga la marca y vuelve a probar.", 400);
     }
     const id = hex(azar(16)), token = base64url(azar(32)), sal = hex(azar(16));
     try {
@@ -295,27 +352,48 @@ export class Cuentas {
         this.db.prepare("INSERT INTO cuentas (id, creada, vista) VALUES (?1, ?2, ?2)").bind(id, this.ahora),
         this.db.prepare(`INSERT INTO usuarios (usuario, cuenta, sal, hash, creado, fallos, bloqueado)
           VALUES (?1, ?2, ?3, ?4, ?5, 0, 0)`).bind(usuario, id, sal, await hashClave(sal, body.clave), this.ahora),
+        ...(correo ? [await this.sentenciaCorreo(id, correo, body.clave_correo)] : []),
         ...(await this.sentenciasSesion(id, token)),
         ...this.sumarEquipos(id, body.equipos),
       ]);
     } catch (e) {
-      if (/UNIQUE/i.test(String(e && e.message))) return this.error("Ese usuario ya existe: elige otro.", 409);
+      const r = repetido(e);
+      if (r) return this.error(r, 409);
       throw e;
     }
-    return this.conSesion({ cuenta: await this.publica(id, this.ahora, usuario) }, token);
+    return this.conSesion({ cuenta: await this.publica(id, this.ahora, usuario, correo) }, token);
   }
 
-  // POST /api/cuenta/entrar {usuario, clave, equipos}: una sesión nueva. Los equipos
-  // que ya había en este navegador se suman a los de la cuenta. MAX_FALLOS intentos
-  // seguidos sin acertar bloquean ese usuario BLOQUEO_MS (intento).
+  // El correo de una cuenta, con la contraseña pasada por PBKDF2 con el correo de sal
+  // (clave_correo) y su propia sal de aquí. Sin verificar: hoy no se le manda nada.
+  async sentenciaCorreo(cuenta, correo, clave) {
+    const sal = hex(azar(16));
+    return this.db.prepare(`INSERT INTO correos (correo, cuenta, sal, hash, verificado, creado)
+      VALUES (?1, ?2, ?3, ?4, 0, ?5)`).bind(correo, cuenta, sal, await hashClave(sal, clave), this.ahora);
+  }
+
+  // POST /api/cuenta/entrar {usuario | correo, clave, equipos}: una sesión nueva. Con
+  // el correo, la clave es la de su sal (clave_correo al crear). Los equipos que ya
+  // había en este navegador se suman a los de la cuenta. MAX_FALLOS intentos seguidos
+  // sin acertar (con el usuario o con el correo: van a la misma cuenta) bloquean la
+  // cuenta BLOQUEO_MS (intento).
   async entrar(body) {
-    const usuario = normalizarUsuario(body.usuario);
-    if (!usuario || !claveValida(body.clave)) return this.error(MAL, 401);
+    if (!claveValida(body.clave)) return this.error(MAL, 401);
+    const conCorreo = body.correo !== undefined;
+    const nombre = conCorreo ? normalizarCorreo(body.correo) : normalizarUsuario(body.usuario);
+    if (!nombre) return this.error(MAL, 401);
+    const e = conCorreo ? await this.almacen.consultar(() => this.db.prepare(
+      `SELECT e.sal, e.hash, e.correo, u.usuario FROM correos e JOIN usuarios u ON u.cuenta = e.cuenta
+       WHERE e.correo = ?1`).bind(nombre).first()) : null;
+    const usuario = conCorreo ? (e ? e.usuario : "") : nombre;   // "": cuenta igual el intento
     const f = await this.intento(usuario);
     if (!f) return this.error(MAL, 401);
     if (f.hasta) return this.bloqueo(f.hasta);
-    if (!iguales(await hashClave(f.sal, body.clave), f.hash)) return this.fallo(f, MAL, 401);
-    const c = await this.db.prepare("SELECT creada FROM cuentas WHERE id = ?1").bind(f.cuenta).first();
+    const { sal, hash } = conCorreo ? e : f;
+    if (!iguales(await hashClave(sal, body.clave), hash)) return this.fallo(f, MAL, 401);
+    const c = await this.db.prepare(
+      `SELECT c.creada, e.correo FROM cuentas c LEFT JOIN correos e ON e.cuenta = c.id WHERE c.id = ?1`)
+      .bind(f.cuenta).first();
     if (!c) return this.error(MAL, 401);
     const token = base64url(azar(32));
     await this.guardar([
@@ -324,7 +402,7 @@ export class Cuentas {
       this.db.prepare("UPDATE cuentas SET vista = ?2 WHERE id = ?1").bind(f.cuenta, this.ahora),
       ...this.sumarEquipos(f.cuenta, body.equipos),
     ]);
-    return this.conSesion({ cuenta: await this.publica(f.cuenta, c.creada, usuario) }, token);
+    return this.conSesion({ cuenta: await this.publica(f.cuenta, c.creada, usuario, c.correo) }, token);
   }
 
   // POST /api/cuenta/equipo {equipo, seguir}: la estrella de un equipo.
@@ -343,26 +421,63 @@ export class Cuentas {
     return this.json({ ok: true });
   }
 
-  // POST /api/cuenta/contrasena {actual, nueva}: con la actual, que cuenta como un
-  // intento de entrar (una sesión robada no sirve para probar contraseñas). Las demás
-  // sesiones se cierran (si alguien la sabía, deja de estar dentro); la de este aparato
-  // sigue.
-  async contrasena(body, s) {
-    if (!s.usuario) return this.error("Tu cuenta aún no tiene usuario: ponle uno primero.", 409);
-    if (!claveValida(body.nueva)) return this.error("Falta la contraseña nueva.", 400);
-    const actualMal = "La contraseña actual no es esa.";   // 403: 401 es "sin sesión", y la web saldría
-    if (!claveValida(body.actual)) return this.error(actualMal, 403);
+  // La contraseña actual (con el usuario de sal), como un intento de entrar: una
+  // sesión robada no sirve para probar contraseñas. Da la respuesta de error, o null si
+  // es la buena (y entonces la cuenta de fallos vuelve a 0, aunque lo que venga después
+  // falle). 403 y no 401: 401 es "sin sesión", y la web saldría de la cuenta.
+  async comprobarActual(s, actual) {
+    const actualMal = "La contraseña actual no es esa.";
+    if (!claveValida(actual)) return this.error(actualMal, 403);
     const f = await this.intento(s.usuario);
     if (!f) return this.error("Tu cuenta aún no tiene usuario: ponle uno primero.", 409);
     if (f.hasta) return this.bloqueo(f.hasta);
-    if (!iguales(await hashClave(f.sal, body.actual), f.hash)) return this.fallo(f, actualMal, 403);
-    const sal = hex(azar(16));
+    if (!iguales(await hashClave(f.sal, actual), f.hash)) return this.fallo(f, actualMal, 403);
+    await this.guardar([this.db.prepare(ACERTADO).bind(s.usuario)]);
+    return null;
+  }
+
+  // POST /api/cuenta/contrasena {actual, nueva, nueva_correo?}: con la actual. Con
+  // correo, la nueva también con su sal (nueva_correo), o entrar con el correo seguiría
+  // pidiendo la vieja. Las demás sesiones se cierran (si alguien la sabía, deja de estar
+  // dentro); la de este aparato sigue.
+  async contrasena(body, s) {
+    if (!s.usuario) return this.error("Tu cuenta aún no tiene usuario: ponle uno primero.", 409);
+    if (!claveValida(body.nueva)) return this.error("Falta la contraseña nueva.", 400);
+    if (s.correo && !claveValida(body.nueva_correo)) return this.error("Falta la contraseña nueva del correo.", 400);
+    const mal = await this.comprobarActual(s, body.actual);
+    if (mal) return mal;
+    const sal = hex(azar(16)), salCorreo = hex(azar(16));
     await this.guardar([
-      this.db.prepare("UPDATE usuarios SET sal = ?2, hash = ?3, fallos = 0, bloqueado = 0 WHERE usuario = ?1")
+      this.db.prepare("UPDATE usuarios SET sal = ?2, hash = ?3 WHERE usuario = ?1")
         .bind(s.usuario, sal, await hashClave(sal, body.nueva)),
+      ...(s.correo ? [this.db.prepare("UPDATE correos SET sal = ?2, hash = ?3 WHERE cuenta = ?1")
+        .bind(s.cuenta, salCorreo, await hashClave(salCorreo, body.nueva_correo))] : []),
       this.db.prepare("DELETE FROM sesiones WHERE cuenta = ?1 AND hash != ?2").bind(s.cuenta, s.hash),
     ]);
     return this.json({ ok: true });
+  }
+
+  // POST /api/cuenta/correo {correo, clave_correo, actual}: pone o cambia el correo de
+  // la cuenta (correo vacío: lo quita), con la contraseña actual. El correo nuevo
+  // queda sin verificar.
+  async correo(body, s) {
+    if (!s.usuario) return this.error("Tu cuenta aún no tiene usuario: ponle uno primero.", 409);
+    const correo = body.correo ? normalizarCorreo(body.correo) : null;
+    if (body.correo && !correo) return this.error(TEXTO_CORREO, 400);
+    if (correo && !claveValida(body.clave_correo)) return this.error("Falta la contraseña del correo.", 400);
+    const mal = await this.comprobarActual(s, body.actual);
+    if (mal) return mal;
+    try {
+      await this.guardar([
+        this.db.prepare("DELETE FROM correos WHERE cuenta = ?1").bind(s.cuenta),
+        ...(correo ? [await this.sentenciaCorreo(s.cuenta, correo, body.clave_correo)] : []),
+      ]);
+    } catch (e) {
+      const r = repetido(e);
+      if (r) return this.error(r, 409);
+      throw e;
+    }
+    return this.json({ cuenta: await this.publica(s.cuenta, s.creada, s.usuario, correo) });
   }
 
   // POST /api/cuenta/usuario {usuario, clave}: usuario y contraseña para una cuenta de
@@ -380,14 +495,11 @@ export class Cuentas {
         this.db.prepare("DELETE FROM accesos WHERE cuenta = ?1 AND tipo = 'codigo'").bind(s.cuenta),
       ]);
     } catch (e) {
-      const m = String(e && e.message);
-      // dos a la vez desde la misma cuenta: la segunda choca con usuarios_por_cuenta
-      if (/UNIQUE/i.test(m)) {
-        return this.error(/usuarios\.cuenta/.test(m) ? "Tu cuenta ya tiene usuario." : "Ese usuario ya existe: elige otro.", 409);
-      }
+      const r = repetido(e);   // dos a la vez desde la misma cuenta: la segunda choca con usuarios_por_cuenta
+      if (r) return this.error(r, 409);
       throw e;
     }
-    return this.json({ cuenta: await this.publica(s.cuenta, s.creada, usuario) });
+    return this.json({ cuenta: await this.publica(s.cuenta, s.creada, usuario, s.correo) });
   }
 
   // POST /api/cuenta/salir {todas}: cierra la sesión de este aparato, o las de todos.
@@ -402,8 +514,9 @@ export class Cuentas {
 
   // GET /api/cuenta/datos: todo lo que hay guardado de la cuenta, para descargarlo.
   async datos(s) {
-    const [cuenta, accesos, sesiones, equipos] = await this.almacen.consultar(() => this.db.batch([
+    const [cuenta, correos, accesos, sesiones, equipos] = await this.almacen.consultar(() => this.db.batch([
       this.db.prepare("SELECT id, creada, vista FROM cuentas WHERE id = ?1").bind(s.cuenta),
+      this.db.prepare("SELECT correo, verificado, creado FROM correos WHERE cuenta = ?1").bind(s.cuenta),
       this.db.prepare("SELECT tipo, creado FROM accesos WHERE cuenta = ?1 ORDER BY creado").bind(s.cuenta),
       this.db.prepare("SELECT hash, creada, vista FROM sesiones WHERE cuenta = ?1 ORDER BY creada").bind(s.cuenta),
       this.db.prepare("SELECT equipo, creado FROM favoritos WHERE cuenta = ?1 ORDER BY creado").bind(s.cuenta),
@@ -413,6 +526,7 @@ export class Cuentas {
       descargado: iso(this.ahora),
       nota: "Es todo lo que la web guarda de tu cuenta. La contraseña y las sesiones van cifradas: no se pueden ver.",
       cuenta: { id: idPublico(c.id), id_interno: c.id, usuario: s.usuario, creada: iso(c.creada), ultima_vez: iso(c.vista) },
+      correo: correos.results.map((e) => ({ correo: e.correo, verificado: !!e.verificado, desde: iso(e.creado) }))[0] ?? null,
       accesos: accesos.results.map((a) => ({ tipo: a.tipo, creado: iso(a.creado) })),
       sesiones: sesiones.results.map((x) => ({ creada: iso(x.creada), ultima_vez: iso(x.vista),
         este_aparato: x.hash === s.hash })),
@@ -431,6 +545,7 @@ export class Cuentas {
       this.db.prepare("DELETE FROM favoritos WHERE cuenta = ?1").bind(s.cuenta),
       this.db.prepare("DELETE FROM sesiones WHERE cuenta = ?1").bind(s.cuenta),
       this.db.prepare("DELETE FROM accesos WHERE cuenta = ?1").bind(s.cuenta),
+      this.db.prepare("DELETE FROM correos WHERE cuenta = ?1").bind(s.cuenta),
       this.db.prepare("DELETE FROM usuarios WHERE cuenta = ?1").bind(s.cuenta),
       this.db.prepare("DELETE FROM cuentas WHERE id = ?1").bind(s.cuenta),
     ]);
@@ -469,6 +584,7 @@ export class Cuentas {
     if (!s) return this.sinSesion();
     if (ruta === "/equipo") return this.equipo(body, s);
     if (ruta === "/contrasena") return this.contrasena(body, s);
+    if (ruta === "/correo") return this.correo(body, s);
     if (ruta === "/usuario") return this.ponerUsuario(body, s);
     if (ruta === "/borrar") return this.borrar(s);
     return this.error("No existe.", 404);
@@ -483,6 +599,7 @@ export const RUTAS_CUENTA = {
   "/api/cuenta/entrar": ["POST"],
   "/api/cuenta/equipo": ["POST"],
   "/api/cuenta/contrasena": ["POST"],
+  "/api/cuenta/correo": ["POST"],
   "/api/cuenta/usuario": ["POST"],
   "/api/cuenta/salir": ["POST"],
   "/api/cuenta/borrar": ["POST"],
@@ -496,9 +613,10 @@ export async function resumenCuentas(almacen, desde7, ahora = Date.now()) {
     `SELECT count(*) AS total, coalesce(sum(vista >= ?1), 0) AS activas,
        (SELECT count(DISTINCT cuenta) FROM favoritos) AS con_equipos,
        (SELECT count(*) FROM usuarios) AS con_usuario,
+       (SELECT count(*) FROM correos) AS con_correo,
        (SELECT coalesce(sum(n), 0) FROM visitas WHERE tipo = 'cuentas' AND clave = '' AND dia >= ?2) AS creadas,
        (SELECT coalesce(sum(n), 0) FROM visitas WHERE tipo = 'intentos' AND clave = '' AND dia >= ?2) AS intentos
      FROM cuentas`).bind(ahora - 7 * MS_DIA, desde7).first());
   return { total: f.total, creadas: f.creadas, activas: f.activas, con_equipos: f.con_equipos,
-    con_usuario: f.con_usuario, intentos: f.intentos };
+    con_usuario: f.con_usuario, con_correo: f.con_correo, intentos: f.intentos };
 }

@@ -72,9 +72,11 @@ export const ESQUEMA = [
      n     INTEGER NOT NULL,
      PRIMARY KEY (dia, tipo, clave)) WITHOUT ROWID`,
   // Las cuentas (cuentas.js): la cuenta, su usuario y contraseña (usuarios: el SHA-256
-  // con sal de lo que manda el navegador, y los fallos seguidos), otras formas de
-  // entrar (accesos: los códigos de la primera versión; mañana passkey o Google), sus
-  // sesiones (el SHA-256 del token de la cookie) y los equipos que sigue. Horas en ms.
+  // con sal de lo que manda el navegador, y los fallos seguidos), su correo si lo puso
+  // (correos: con la misma contraseña pasada por PBKDF2 con el correo de sal, para
+  // entrar con él; aún sin verificar), otras formas de entrar (accesos: los códigos de
+  // la primera versión; mañana passkey o Google), sus sesiones (el SHA-256 del token
+  // de la cookie) y los equipos que sigue. Horas en ms.
   `CREATE TABLE IF NOT EXISTS cuentas (
      id     TEXT PRIMARY KEY,
      creada INTEGER NOT NULL,
@@ -101,6 +103,14 @@ export const ESQUEMA = [
      fallos    INTEGER NOT NULL,
      bloqueado INTEGER NOT NULL) WITHOUT ROWID`,
   `CREATE UNIQUE INDEX IF NOT EXISTS usuarios_por_cuenta ON usuarios (cuenta)`,
+  `CREATE TABLE IF NOT EXISTS correos (
+     correo     TEXT PRIMARY KEY,
+     cuenta     TEXT NOT NULL,
+     sal        TEXT NOT NULL,
+     hash       TEXT NOT NULL,
+     verificado INTEGER NOT NULL,
+     creado     INTEGER NOT NULL) WITHOUT ROWID`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS correos_por_cuenta ON correos (cuenta)`,
   `CREATE TABLE IF NOT EXISTS favoritos (
      cuenta TEXT NOT NULL,
      equipo TEXT NOT NULL,

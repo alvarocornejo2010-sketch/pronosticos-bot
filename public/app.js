@@ -1545,8 +1545,10 @@ window.addEventListener("appinstalled", () => {
 
 // ==========================================
 // CUENTA
-// Usuario y contraseña, sin email. La contraseña no sale del navegador tal cual
-// (claveDe). Con la sesión abierta (una cookie que esta página no puede leer), los
+// Usuario y contraseña, y un correo si la persona quiere (para entrar con él; aún sin
+// verificar). La contraseña no sale del navegador tal cual (claveDe). Crear una cuenta
+// pasa por Cloudflare Turnstile si el Worker lo tiene puesto (prepararTurnstile). Con
+// la sesión abierta (una cookie que esta página no puede leer), los
 // equipos de la cuenta son los de este navegador y cada estrella se guarda también en ella
 // (worker/cuentas.js), en orden y con reintento (la cola). Solo en Cloudflare: el
 // botón sale con plataforma "cloudflare" en /api/estado, y /api/cuenta solo se pide
@@ -1555,8 +1557,8 @@ window.addEventListener("appinstalled", () => {
 const botonCuenta = $("boton-cuenta");
 const dialogoCuenta = $("dialogo-cuenta");
 const dentroCuenta = $("cuenta-dentro");
-let cuenta = null;             // { creada, equipos } con la sesión abierta
-let vistaCuenta = "crear";     // sin cuenta: crear | entrar; con cuenta: inicio | contrasena | borrar
+let cuenta = null;             // { id, usuario, correo, creada, equipos } con la sesión abierta
+let vistaCuenta = "crear";     // sin cuenta: crear | entrar; con cuenta: inicio | correo | contrasena | borrar
 let ocupado = false, mensajeCuenta = "";
 const CLAVE_SESION = "pronosticos.sesion";   // "1" si este navegador entró: las otras pestañas se enteran
 const CLAVE_COLA = "pronosticos.cola_cuenta";
@@ -1667,16 +1669,17 @@ const fechaDe = (iso) => fechaLarga(new Date(Date.parse(iso) - 5 * 3600000).toIS
 const plural = (n, uno, varios) => n + " " + (n === 1 ? uno : varios);
 
 // La contraseña no sale del navegador: se manda PBKDF2-SHA256 de ella con el usuario
-// como sal, y worker/cuentas.js guarda el SHA-256 de eso con una sal suya. Las
-// 600.000 vueltas hacen lento probar contraseñas aunque alguien leyera la base, y
-// en el navegador cuestan medio segundo. Si algún día cambia ITERACIONES, las
-// contraseñas guardadas dejan de valer.
+// como sal (y, si la cuenta tiene correo, otra vez con el correo de sal, para entrar
+// con él), y worker/cuentas.js guarda el SHA-256 de eso con una sal suya. Las 600.000
+// vueltas hacen lento probar contraseñas aunque alguien leyera la base, y en el
+// navegador cuestan medio segundo. Si algún día cambia ITERACIONES, las contraseñas
+// guardadas dejan de valer.
 const ITERACIONES = 600000;
-async function claveDe(usuario, contrasena) {
+async function claveDe(nombre, contrasena) {   // nombre: el usuario o el correo
   const t = new TextEncoder();
   const base = await crypto.subtle.importKey("raw", t.encode(contrasena.normalize("NFC")), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256",
-    salt: t.encode("pronosticos-bot/" + usuario), iterations: ITERACIONES }, base, 256);
+    salt: t.encode("pronosticos-bot/" + nombre), iterations: ITERACIONES }, base, 256);
   return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
@@ -1687,6 +1690,11 @@ function normalizarUsuario(texto) {
 }
 const TEXTO_USUARIO = "El usuario lleva de 3 a 24 letras (sin tildes ni ñ), números, punto, guion o guion bajo,"
   + " y empieza por letra o número.";
+function normalizarCorreo(texto) {   // igual que en el Worker
+  const c = String(texto || "").trim().toLowerCase();
+  return c.length <= 254 && /^[a-z0-9._%+-]{1,64}@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(c) ? c : null;
+}
+const TEXTO_CORREO = "Ese correo no parece bien escrito.";
 const MUY_COMUNES = new Set(["12345678", "123456789", "1234567890", "87654321", "11111111", "00000000", "12341234",
   "password", "password1", "contraseña", "contrasena", "qwerty123", "qwertyui", "abc12345", "iloveyou", "futbol123"]);
 function problemaContrasena(contrasena, repetida, usuario) {
@@ -1699,16 +1707,23 @@ function problemaContrasena(contrasena, repetida, usuario) {
   return null;
 }
 
-const campo = (nombre, etiqueta, tipo, auto, extra) => '<label class="campo"><span>' + etiqueta + '</span>'
-  + '<input name="' + nombre + '" type="' + tipo + '" autocomplete="' + auto + '"' + (extra || "") + '></label>';
+const campo = (nombre, etiqueta, tipo, auto, extra, ayuda) => '<label class="campo"><span>' + etiqueta + '</span>'
+  + '<input name="' + nombre + '" type="' + tipo + '" autocomplete="' + auto + '"' + (extra || "") + '>'
+  + (ayuda ? '<small>' + ayuda + '</small>' : "") + '</label>';
 const CAMPO_USUARIO = (auto) => campo("usuario", "Usuario", "text", auto || "username",
   ' autocapitalize="none" spellcheck="false" maxlength="24"');
+const CAMPO_CORREO = (etiqueta, valor, ayuda) => campo("correo", etiqueta, "email", "email",
+  ' autocapitalize="none" spellcheck="false" maxlength="254"' + (valor ? ' value="' + esc(valor) + '"' : ""), ayuda);
+const AYUDA_CORREO = "Para entrar también con él y, más adelante, recuperar la contraseña. Por ahora no te mandamos nada.";
 const ERROR_CUENTA = '<p class="error" role="alert" hidden></p>';
 const NOTA_DATOS = '<p class="nota">Qué guardamos: tu usuario, tu contraseña cifrada (tu navegador la cifra antes de'
-  + ' enviarla) y los equipos que sigues. Ni email, ni nombre, ni IP. Puedes borrarlo todo cuando quieras.</p>';
+  + ' enviarla), tu correo si lo pones y los equipos que sigues. Ni nombre ni IP. Puedes borrarlo todo cuando quieras.</p>';
+// crear: con correo (opcional) y el recuadro de Turnstile; usuario: la cuenta de la primera versión
 const FORM_USUARIO = (form, boton) => '<form data-cuenta-form="' + form + '" novalidate>'
-  + CAMPO_USUARIO() + campo("contrasena", "Contraseña", "password", "new-password", ' maxlength="128"')
+  + CAMPO_USUARIO() + (form === "crear" ? CAMPO_CORREO("Correo (opcional)", "", AYUDA_CORREO) : "")
+  + campo("contrasena", "Contraseña", "password", "new-password", ' maxlength="128"')
   + campo("repetida", "Repite la contraseña", "password", "new-password", ' maxlength="128"')
+  + (form === "crear" ? '<div class="turnstile" hidden></div>' : "")
   + ERROR_CUENTA + '<button class="accion principal" type="submit">' + boton + '</button></form>';
 
 function htmlCuenta() {
@@ -1717,7 +1732,8 @@ function htmlCuenta() {
   const n = favoritos.size;
   if (vistaCuenta === "entrar") {
     return '<h2 id="cuenta-titulo">Entra en tu cuenta</h2>'
-      + '<form data-cuenta-form="entrar" novalidate>' + CAMPO_USUARIO()
+      + '<form data-cuenta-form="entrar" novalidate>'
+      + campo("usuario", "Usuario o correo", "text", "username", ' autocapitalize="none" spellcheck="false" maxlength="254"')
       + campo("contrasena", "Contraseña", "password", "current-password", ' maxlength="128"')
       + ERROR_CUENTA + '<button class="accion principal" type="submit">Entrar</button></form>'
       + '<div class="bloque"><h3>¿No tienes cuenta?</h3>'
@@ -1730,10 +1746,20 @@ function htmlCuenta() {
       + ' <strong>solo en este navegador</strong>. Con una cuenta se guardan en la web y los ves en cualquier aparato'
       + ' donde entres con tu usuario y contraseña.</p>'
       + FORM_USUARIO("crear", "Crear mi cuenta")
-      + '<p class="nota">Sin email: si olvidas la contraseña no se puede recuperar, solo cambiarla desde un aparato donde'
-      + ' ya hayas entrado.</p>'
+      + '<p class="nota">Si olvidas la contraseña, por ahora no se puede recuperar (tampoco con el correo): solo cambiarla'
+      + ' desde un aparato donde ya hayas entrado.</p>'
       + '<div class="bloque"><h3>¿Ya tienes cuenta?</h3>'
-      + '<button class="accion" type="button" data-cuenta="ir-entrar">Entrar con mi usuario</button></div>' + NOTA_DATOS;
+      + '<button class="accion" type="button" data-cuenta="ir-entrar">Entrar con mi usuario o correo</button></div>' + NOTA_DATOS;
+  }
+  if (vistaCuenta === "correo") {
+    return '<h2 id="cuenta-titulo">' + (cuenta.correo ? 'Cambiar el correo' : 'Añadir un correo') + '</h2>'
+      + '<form data-cuenta-form="correo" novalidate>'
+      + '<input name="usuario" type="text" autocomplete="username" value="' + esc(cuenta.usuario) + '" hidden>'
+      + CAMPO_CORREO("Correo", cuenta.correo, cuenta.correo ? "Déjalo vacío para quitarlo." : "")
+      + campo("actual", "Tu contraseña", "password", "current-password", ' maxlength="128"')
+      + ERROR_CUENTA + '<button class="accion principal" type="submit">Guardar</button>'
+      + '<button class="accion" type="button" data-cuenta="inicio">Cancelar</button></form>'
+      + '<p class="nota">' + AYUDA_CORREO + '</p>';
   }
   if (vistaCuenta === "contrasena") {
     return '<h2 id="cuenta-titulo">Cambiar la contraseña</h2>'
@@ -1757,6 +1783,8 @@ function htmlCuenta() {
   return '<h2 id="cuenta-titulo">Mi cuenta</h2>'
     + (mensajeCuenta ? '<p class="mensaje" role="status">' + esc(mensajeCuenta) + '</p>' : "")
     + '<dl class="ficha-cuenta"><dt>Usuario</dt><dd>' + (cuenta.usuario ? esc(cuenta.usuario) : "sin usuario") + '</dd>'
+    + (cuenta.usuario ? '<dt>Correo</dt><dd>' + (cuenta.correo ? esc(cuenta.correo) + ' <span class="apagado">(sin verificar)</span>'
+      : '<span class="apagado">sin correo</span>') + '</dd>' : "")
     + '<dt>ID de cuenta</dt><dd class="id">' + esc(cuenta.id) + '</dd>'
     + '<dt>Creada</dt><dd>' + esc(fechaDe(cuenta.creada)) + '</dd></dl>'
     + (cuenta.usuario ? "" : '<div class="bloque"><h3>Ponle usuario y contraseña</h3><p class="nota">Tu cuenta es de la primera'
@@ -1766,8 +1794,10 @@ function htmlCuenta() {
       : 'Aún no sigues a ningún equipo: abre un partido y pulsa «Seguir».') + '</p>'
     + (n ? '<ul class="equipos">' + [...favoritos].map(e => '<li>' + esc(e) + '</li>').join("") + '</ul>' : "")
     + '<p class="error error-general" role="alert" hidden></p>'
-    + (cuenta.usuario ? '<div class="bloque"><h3>Tu contraseña</h3>'
-      + '<button class="accion" type="button" data-cuenta="ir-contrasena">Cambiar la contraseña</button></div>' : "")
+    + (cuenta.usuario ? '<div class="bloque"><h3>Tu correo y tu contraseña</h3><div class="acciones">'
+      + '<button class="accion" type="button" data-cuenta="ir-correo">' + (cuenta.correo ? 'Cambiar o quitar el correo'
+        : 'Añadir un correo') + '</button>'
+      + '<button class="accion" type="button" data-cuenta="ir-contrasena">Cambiar la contraseña</button></div></div>' : "")
     + '<div class="bloque"><h3>Tus datos</h3><div class="acciones">'
     + '<a class="accion" href="/api/cuenta/datos" download="pronosticos-mi-cuenta.json">Descargar mis datos</a>'
     + '<button class="accion" type="button" data-cuenta="salir">Cerrar sesión en este aparato</button>'
@@ -1778,15 +1808,65 @@ function htmlCuenta() {
 
 function pintarCuenta(vista) {
   if (vista) vistaCuenta = vista;
+  quitarTurnstile();
   dentroCuenta.innerHTML = htmlCuenta();
   const foco = dentroCuenta.querySelector("input:not([hidden]), .accion.principal, .accion");
   if (foco) foco.focus();
+  if (vistaCuenta === "crear") prepararTurnstile();
 }
 
 function abrirCuenta() {
   mensajeCuenta = "";
   pintarCuenta(cuenta ? "inicio" : "crear");
   if (!dialogoCuenta.open) dialogoCuenta.showModal();
+}
+
+// Cloudflare Turnstile en "Crear cuenta": la clave pública la da GET /api/cuenta (null si
+// el Worker no lo tiene puesto) y su script se carga solo al llegar aquí. La ficha vale
+// una vez: tras cada intento de crear, el recuadro se rehace. Esa misma petición sirve
+// para recuperar una sesión que este navegador olvidó (pronosticos.sesion borrado).
+let sitioTurnstile;            // undefined: sin preguntar; null: sin Turnstile
+let widgetTurnstile = null, fichaTurnstile = "", cargaTurnstile = null;
+function scriptTurnstile() {
+  cargaTurnstile = cargaTurnstile || new Promise((listo, fallo) => {
+    const js = document.createElement("script");
+    js.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    js.async = true;
+    js.onload = listo;
+    js.onerror = () => { cargaTurnstile = null; fallo(new Error("no cargó")); };
+    document.head.appendChild(js);
+  });
+  return cargaTurnstile;
+}
+async function prepararTurnstile() {
+  if (sitioTurnstile === undefined) {
+    try {
+      const d = await (await fetch("/api/cuenta")).json();
+      if (d.cuenta) { ponerCuenta(d.cuenta); if (vistaCuenta === "crear") pintarCuenta("inicio"); return; }
+      sitioTurnstile = d.turnstile || null;
+    } catch (e) { return; }   // sin red: crear dirá lo que pase
+  }
+  const caja = dentroCuenta.querySelector(".turnstile");
+  if (!sitioTurnstile || !caja || widgetTurnstile !== null) return;
+  caja.hidden = false;
+  try { await scriptTurnstile(); } catch (e) { caja.textContent = "No cargó la comprobación de Cloudflare: recarga la página."; return; }
+  if (!caja.isConnected || widgetTurnstile !== null) return;
+  fichaTurnstile = "";
+  widgetTurnstile = window.turnstile.render(caja, { sitekey: sitioTurnstile, action: "crear", theme: "dark",
+    language: "es", size: "flexible",
+    callback: (t) => { fichaTurnstile = t; },
+    "expired-callback": () => { fichaTurnstile = ""; },
+    "error-callback": () => { fichaTurnstile = ""; } });
+}
+function quitarTurnstile() {
+  if (widgetTurnstile === null) return;
+  try { window.turnstile.remove(widgetTurnstile); } catch (e) { /* ya no estaba */ }
+  widgetTurnstile = null;
+  fichaTurnstile = "";
+}
+function rehacerTurnstile() {
+  fichaTurnstile = "";
+  if (widgetTurnstile !== null) try { window.turnstile.reset(widgetTurnstile); } catch (e) { /* se rehará al volver */ }
 }
 
 // Mientras va una petición, todo apagado (también la X) y la ventana no se cierra;
@@ -1821,16 +1901,27 @@ const ENVIOS_CUENTA = {
   crear: async (v) => {
     const usuario = normalizarUsuario(v.usuario);
     if (!usuario) throw new Error(TEXTO_USUARIO);
+    const correo = v.correo.trim() ? normalizarCorreo(v.correo) : null;
+    if (v.correo.trim() && !correo) throw new Error(TEXTO_CORREO);
     const mal = problemaContrasena(v.contrasena, v.repetida, usuario);
     if (mal) throw new Error(mal);
-    const d = await pedirCuenta("/crear", { usuario, clave: await claveDe(usuario, v.contrasena), equipos: [...favoritos] });
-    dentroDeLaCuenta(d, "Cuenta creada. Entra con «" + usuario + "» y tu contraseña desde cualquier aparato.");
+    if (sitioTurnstile && !fichaTurnstile) throw new Error("Espera a que Cloudflare compruebe que no eres un robot (el recuadro de arriba).");
+    const [clave, claveCorreo] = await Promise.all([claveDe(usuario, v.contrasena), correo && claveDe(correo, v.contrasena)]);
+    const cuerpo = { usuario, clave, equipos: [...favoritos], ...(correo ? { correo, clave_correo: claveCorreo } : {}),
+      ...(fichaTurnstile ? { turnstile: fichaTurnstile } : {}) };
+    let d;
+    try { d = await pedirCuenta("/crear", cuerpo); } finally { rehacerTurnstile(); }
+    dentroDeLaCuenta(d, "Cuenta creada. Entra con «" + usuario + "»" + (correo ? " o con tu correo" : "")
+      + " y tu contraseña desde cualquier aparato.");
     pintarCuenta("inicio");
   },
   entrar: async (v) => {
-    const usuario = normalizarUsuario(v.usuario);
-    if (!usuario || !v.contrasena) throw new Error("Usuario o contraseña incorrectos.");
-    const d = await pedirCuenta("/entrar", { usuario, clave: await claveDe(usuario, v.contrasena), equipos: [...favoritos] });
+    const texto = String(v.usuario || "");
+    const correo = texto.includes("@") ? normalizarCorreo(texto) : null;
+    const usuario = correo ? null : normalizarUsuario(texto);
+    if (!(correo || usuario) || !v.contrasena) throw new Error("Usuario o contraseña incorrectos.");
+    const clave = await claveDe(correo || usuario, v.contrasena);
+    const d = await pedirCuenta("/entrar", { ...(correo ? { correo } : { usuario }), clave, equipos: [...favoritos] });
     dentroDeLaCuenta(d, "");
     dialogoCuenta.close();
     const k = d.cuenta.equipos.length;
@@ -1850,9 +1941,23 @@ const ENVIOS_CUENTA = {
     const mal = problemaContrasena(v.contrasena, v.repetida, cuenta.usuario);
     if (mal) throw new Error(mal);
     if (v.contrasena === v.actual) throw new Error("La nueva es igual a la actual.");
-    const [actual, nueva] = await Promise.all([claveDe(cuenta.usuario, v.actual), claveDe(cuenta.usuario, v.contrasena)]);
-    await pedirCuenta("/contrasena", { actual, nueva });
+    // con correo, la nueva también con su sal: si no, entrar con el correo pediría la vieja
+    const [actual, nueva, nuevaCorreo] = await Promise.all([claveDe(cuenta.usuario, v.actual),
+      claveDe(cuenta.usuario, v.contrasena), cuenta.correo && claveDe(cuenta.correo, v.contrasena)]);
+    await pedirCuenta("/contrasena", { actual, nueva, ...(cuenta.correo ? { nueva_correo: nuevaCorreo } : {}) });
     mensajeCuenta = "Contraseña cambiada. Las sesiones de tus otros aparatos se cerraron.";
+    pintarCuenta("inicio");
+  },
+  correo: async (v) => {
+    const correo = v.correo.trim() ? normalizarCorreo(v.correo) : null;
+    if (v.correo.trim() && !correo) throw new Error(TEXTO_CORREO);
+    if (!correo && !cuenta.correo) throw new Error("Escribe tu correo.");
+    if (correo && correo === cuenta.correo) throw new Error("Ese ya es tu correo.");
+    if (!v.actual) throw new Error("Escribe tu contraseña.");
+    const [actual, claveCorreo] = await Promise.all([claveDe(cuenta.usuario, v.actual), correo && claveDe(correo, v.actual)]);
+    const d = await pedirCuenta("/correo", { correo: correo || "", actual, ...(correo ? { clave_correo: claveCorreo } : {}) });
+    cuenta = { ...cuenta, correo: d.cuenta.correo };
+    mensajeCuenta = correo ? "Correo guardado: ya puedes entrar también con él." : "Correo quitado de tu cuenta.";
     pintarCuenta("inicio");
   },
 };
@@ -1863,6 +1968,7 @@ const ACCIONES_CUENTA = {
   "ir-crear": () => pintarCuenta("crear"),
   "ir-entrar": () => pintarCuenta("entrar"),
   "ir-contrasena": () => { mensajeCuenta = ""; pintarCuenta("contrasena"); },
+  "ir-correo": () => { mensajeCuenta = ""; pintarCuenta("correo"); },
   "pedir-borrar": () => { mensajeCuenta = ""; pintarCuenta("borrar"); },
   salir: () => enCuenta(async () => {
     await pedirCuenta("/salir", { todas: false });
