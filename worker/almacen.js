@@ -71,6 +71,31 @@ export const ESQUEMA = [
      clave TEXT NOT NULL,
      n     INTEGER NOT NULL,
      PRIMARY KEY (dia, tipo, clave)) WITHOUT ROWID`,
+  // Las cuentas (cuentas.js): la cuenta, cómo se entra en ella (accesos: hoy solo
+  // "codigo", con el SHA-256 del código; mañana passkey o Google), sus sesiones (el
+  // SHA-256 del token de la cookie) y los equipos que sigue. Las horas, en ms.
+  `CREATE TABLE IF NOT EXISTS cuentas (
+     id     TEXT PRIMARY KEY,
+     creada INTEGER NOT NULL,
+     vista  INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS accesos (
+     tipo   TEXT NOT NULL,
+     clave  TEXT NOT NULL,
+     cuenta TEXT NOT NULL,
+     creado INTEGER NOT NULL,
+     PRIMARY KEY (tipo, clave)) WITHOUT ROWID`,
+  `CREATE INDEX IF NOT EXISTS accesos_por_cuenta ON accesos (cuenta)`,
+  `CREATE TABLE IF NOT EXISTS sesiones (
+     hash   TEXT PRIMARY KEY,
+     cuenta TEXT NOT NULL,
+     creada INTEGER NOT NULL,
+     vista  INTEGER NOT NULL) WITHOUT ROWID`,
+  `CREATE INDEX IF NOT EXISTS sesiones_por_cuenta ON sesiones (cuenta)`,
+  `CREATE TABLE IF NOT EXISTS favoritos (
+     cuenta TEXT NOT NULL,
+     equipo TEXT NOT NULL,
+     creado INTEGER NOT NULL,
+     PRIMARY KEY (cuenta, equipo)) WITHOUT ROWID`,
 ];
 
 const SIN_TABLA = /no such table/i;

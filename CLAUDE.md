@@ -205,7 +205,10 @@ no hace nada). Solo en Cloudflare: `/visitas?token=...`, el panel de visitas, y
 `/api/visitas?token=...`, lo mismo en JSON (ver "Visitas"). Y `/partido/123`, la
 web con la tarjeta de ese partido para compartir (en Render, la web sin tarjeta;
 ver "Compartir y favoritos"), y `/robots.txt` y `/sitemap.xml` para los buscadores
-(ver "Instalable y buscadores").
+(ver "Instalable y buscadores"). Y las cuentas: `/api/cuenta` (la de la sesión;
+en Render, `disponible: false`) y, solo en Cloudflare, `/api/cuenta/crear`,
+`/entrar`, `/equipo`, `/codigo`, `/salir`, `/borrar` (POST) y `/datos` (ver
+"Cuentas").
 
 **Efecto secundario de cada deploy:** el disco de Render free es efímero, cada
 deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
@@ -244,7 +247,8 @@ incluidos), `actualizacion.js` (la pasada), `validacion.js`, `metricas.js`
 (el registro en vivo), `planificador.js` (el cron), `almacen.js` (D1), `api.js`
 (football-data con su presupuesto), `tiempo.js` (hora de Lima), `visitas.js`
 (el contador de visitas), `compartir.js` (la tarjeta de `/partido/123`),
-`buscadores.js` (`robots.txt` y `sitemap.xml`) e `index.js` (rutas).
+`buscadores.js` (`robots.txt` y `sitemap.xml`), `cuentas.js` (las cuentas) e
+`index.js` (rutas).
 
 **El ritmo lo marca la CPU.** El plan gratis da 10 ms por ejecución y leer el
 JSON de la API cuesta ~7 ms por MB, así que en vez de una pasada de 40
@@ -280,7 +284,8 @@ vivo), `documentos` (`estado` que sirve `/api/estado`, `resumen`, `validacion`,
 `registro` y `registro_publico`, pedidos, temporadas terminadas compactas,
 `temporada:liga:{código}:{año}`) y
 `candado` (que dos pasadas no se pisen, hora de la última petición, pasadas
-muertas) y `visitas` (los contadores de visitas por día, ver "Visitas").
+muertas), `visitas` (los contadores de visitas por día, ver "Visitas") y las de
+las cuentas: `cuentas`, `accesos`, `sesiones` y `favoritos` (ver "Cuentas").
 
 **Si una pasada muere** (lo más probable, por CPU) deja el candado puesto; la
 siguiente lo nota y hace la mitad (presupuesto, bytes y cálculos), hasta un
@@ -428,9 +433,71 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
   tablero de Ligas y en la tira de ligas del móvil), en la vista de un día en un
   grupo "Mis equipos" al principio (sin repetirse en su liga), en "Toda la
   semana" los primeros de su día, primero en Próximos y con una estrella junto al
-  nombre. La estrella va en blanco: el oro es la probabilidad. Con la web abierta
+  nombre. La estrella va en blanco: el oro es la probabilidad. Sin cuenta viven solo
+  en ese navegador; con cuenta, también en la web (ver "Cuentas"). Con la web abierta
   en dos pestañas, cada una toma al momento las estrellas de la otra (evento
   `storage`), para no borrarlas al guardar las suyas.
+
+## Cuentas (versión básica, oct 2026)
+
+Para que los equipos que sigues no se pierdan al borrar los datos del navegador y
+se vean en todos tus aparatos. Es la primera versión, hecha para crecer (passkey o
+Google más adelante) sin rehacerla: sin email ni contraseña.
+
+- **Cómo se entra:** "Entrar" en la cabecera (en el móvil, el icono de la persona;
+  con la sesión abierta, "Mi cuenta" y la cabeza rellena) abre una ventana
+  (`<dialog>`, sección CUENTA de `app.js`). "Crear mi cuenta" da un **código de
+  acceso** de 16 letras y números (`K7P4-QX2M-9TRB-H6WD`; alfabeto Crockford, sin
+  I, L, O ni U: 80 bits al azar, imposible de adivinar a base de probar) que se
+  enseña una sola vez. Con él se entra desde otro aparato o tras borrar los datos
+  del navegador; al escribirlo dan igual mayúsculas, espacios, guiones y O, I o L
+  por 0 y 1. Si se pierde, desde un aparato con la sesión abierta se pide uno
+  nuevo y el viejo deja de valer. La primera estrella sin cuenta avisa (una vez)
+  de que se guarda solo en ese navegador.
+- **La sesión** es una cookie `sesion` (HttpOnly, Secure, SameSite=Lax; 180 días
+  que se renuevan al usarla) con un token al azar. En D1 solo van el SHA-256 del
+  token y el del código: quien leyera la base no podría entrar en ninguna cuenta.
+  Las rutas que escriben exigen JSON y venir de la propia web (`mismoSitio`, la
+  misma comprobación que `/api/contar`), y cada una va por su nombre: una que no
+  existe da 404. Cada cuenta guarda sus 20 sesiones más recientes. El botón sale
+  con `plataforma: "cloudflare"` en `/api/estado`, y `/api/cuenta` solo se pide si
+  ese navegador entró (`pronosticos.sesion` en `localStorage`, que además avisa a
+  las otras pestañas): sin cuenta no cuesta ni una petición.
+- **Los equipos:** con la sesión abierta, los de la cuenta son los del navegador
+  (al cargar la página, la cuenta manda) y cada estrella se guarda en los dos
+  (`/api/cuenta/equipo`). Las estrellas van a la cuenta de una en una y en orden,
+  por una cola guardada en el navegador (`pronosticos.cola_cuenta`): si falla la red
+  o el tope, se reintentan con la siguiente estrella o al volver a abrir la web
+  (antes de traer la lista de la cuenta, para no perderlas). Al entrar, los que ya
+  había en el navegador se suman a los de la cuenta; al salir o borrar la cuenta,
+  los del navegador se quedan. Hasta 60, como en el navegador.
+- **Todo lo hace la persona sola**, en "Mi cuenta": ver un código nuevo,
+  descargar sus datos (`/api/cuenta/datos`: un JSON con todo lo guardado, sin el
+  código ni los tokens), cerrar sesión en este aparato o en todos, y **borrar la
+  cuenta** (con confirmación en la misma ventana): se borran en el acto la cuenta,
+  sus accesos, sesiones y equipos. D1 guarda copias de los últimos 7 días (Time
+  Travel del plan gratis): la política de privacidad tendrá que decirlo. Con el
+  código a la vista, la ventana solo se cierra con "Ya lo guardé" o la X (ni Esc
+  ni un clic fuera), y nunca con una petición a medias.
+- **Qué se guarda** (`worker/cuentas.js`): `cuentas` (id al azar, creada, última
+  vez), `accesos` (tipo `codigo` y el SHA-256 del código), `sesiones` (SHA-256 del
+  token, creada, última vez) y `favoritos` (cuenta, equipo, desde cuándo). Nada de
+  email, nombre ni IP. Las tablas se crean solas la primera vez que hacen falta
+  (probado sobre una base con las tablas de antes, como la de producción).
+- **Topes del día** (de Lima), contados en `visitas`: `MAX_CUENTAS_DIA` (300)
+  cuentas nuevas (tipo `cuentas`; cuentan las creadas, no las que quedan, así que
+  crear y borrar en bucle no lo esquiva) y `MAX_ESCRITURAS_CUENTAS_DIA` (10.000,
+  el 10 % de las escrituras de D1) filas escritas por las cuentas (tipo
+  `escrituras_cuentas`, dos por sentencia, por lo alto): sin él, una sola cuenta
+  poniendo y quitando estrellas en bucle podría gastar las 100.000 del día y dejar
+  al cron sin guardar predicciones. Borrar la cuenta no lo mira: tiene que
+  funcionar siempre. El panel de visitas tiene un tablero "Cuentas" (en total,
+  creadas esta semana contando las borradas, activas, con equipos).
+- **Solo en Cloudflare:** en Render, `/api/cuenta` responde `disponible: false` y
+  el botón no sale.
+- **Para crecer:** una passkey o "entrar con Google" serán otro `tipo` en
+  `accesos` de la misma cuenta, sin tocar lo demás. Lo que falta antes de
+  anunciarlo a lo grande, en "Pendiente".
 
 ## Instalable y buscadores (oct 2026)
 
@@ -524,8 +591,9 @@ Worker cuenta para las 100.000 diarias del plan gratis. Alguien que las
 machacara a propósito dejaría `/api/estado` sin servicio hasta la medianoche
 UTC (la web en sí, que es estática, seguiría cargando). En `workers.dev` no hay
 reglas de WAF; con un dominio propio en Cloudflare sí habría una regla de
-límite de peticiones gratis. `/api/contar` es la única ruta pública que escribe
-en D1, con tope diario (ver "Visitas").
+límite de peticiones gratis. Las rutas públicas que escriben en D1 son
+`/api/contar` y las de las cuentas, las dos con tope diario (ver "Visitas" y
+"Cuentas").
 
 ## El modelo (oct 2026)
 
@@ -961,6 +1029,14 @@ Environment).
   2026: el enlace con vista previa, los favoritos, el resumen de la semana,
   instalarla como app, el sitemap y la marca de las ligas de fiabilidad baja.
 
+- **Cuentas, la versión siguiente** (ver "Cuentas"): una página de política de
+  privacidad (Ley 29733: qué se guarda, para qué, los 7 días de copias de D1 y cómo
+  pedir o borrar los datos; conviene que la revise alguien que sepa de leyes) y,
+  si la gente las usa, entrar con passkey (huella o cara, sin código que guardar)
+  como otro tipo de acceso. Las sesiones de 180 días sin uso solo se borran
+  cuando alguien intenta usarlas (y cada cuenta guarda 20 como mucho): si se
+  acumulan, limpiarlas en el cron.
+
 - **Leer el registro en vivo cuando crezca** (en marcha desde oct 2026, ver
   "El registro en vivo"). Con unos pocos partidos por liga es ruido; con una
   temporada (unos 300 por liga) ya se puede comparar con el backtest de
@@ -1007,7 +1083,9 @@ Environment).
     (`compartir.py`). Que la web es instalable (manifiesto, iconos, service worker,
     CSP) y que `robots.txt` y `sitemap.xml` traen lo que deben (`descubrir.py`). Y
     que las visitas se cuentan bien, que lo inventado no entra y que el tope corta
-    (`visitas.py`, con `MAX_VISITAS_DIA=60`). En GitHub, 1-2 minutos; en local,
+    (`visitas.py`, con `MAX_VISITAS_DIA=60`). Y las cuentas, de crear a borrar
+    (`cuentas.py`, con `MAX_CUENTAS_DIA=4` y `MAX_ESCRITURAS_CUENTAS_DIA=400`). En
+    GitHub, 1-2 minutos; en local,
     unos 10.
   - Las variables del Worker van con `--var`, que manda sobre `.dev.vars`: el token
     de verdad, si está ahí, no se usa ni sale a ningún sitio.

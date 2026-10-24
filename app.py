@@ -1362,6 +1362,13 @@ def api_contar():
     return "", 204
 
 
+@app.route("/api/cuenta")
+def api_cuenta():
+    """Las cuentas guardan los equipos de cada uno en una base que no se borre: solo
+    existen en Cloudflare (worker/cuentas.js). La web, al ver esto, no las enseña."""
+    return jsonify({"disponible": False, "cuenta": None})
+
+
 @app.route("/validar")
 def validar():
     """Lanza el backtest. Mismo token que /actualizar.

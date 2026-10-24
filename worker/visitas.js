@@ -27,6 +27,7 @@
 
 import { COMPETICIONES, ajustes } from "./config.js";
 import { Reloj, sumarDias } from "./tiempo.js";
+import { mismoSitio, resumenCuentas } from "./cuentas.js";
 
 const MAX_CUERPO = 4096;
 const MAX_EVENTOS = 30;
@@ -117,13 +118,8 @@ const nada = (cabeceras) => new Response(null, { status: 204, headers: cabeceras
 
 export async function contar(request, env, almacen, cabeceras, ahora = Date.now()) {
   const url = new URL(request.url);
-  // Desde otra web no se cuenta; de un bot, tampoco. Los avisos de la propia web
-  // llegan con Sec-Fetch-Site "same-origin" y, como la web va con Referrer-Policy:
-  // no-referrer, el estándar les pone Origin "null" (Chromium manda el de verdad).
-  const sitio = request.headers.get("Sec-Fetch-Site");
-  if (sitio && sitio !== "same-origin") return nada(cabeceras);
-  const desde = request.headers.get("Origin");
-  if (desde && desde !== "null" && desde !== url.origin) return nada(cabeceras);
+  // Desde otra web no se cuenta (mismoSitio, en cuentas.js); de un bot, tampoco.
+  if (!mismoSitio(request, url)) return nada(cabeceras);
   if (BOTS.test(request.headers.get("User-Agent") || "")) return nada(cabeceras);
   if (Number(request.headers.get("Content-Length") || 0) > MAX_CUERPO) return nada(cabeceras);
   const texto = await request.text();
@@ -204,6 +200,7 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
   return {
     hoy,
     hora: reloj.local(ahora).hora,
+    cuentas: await resumenCuentas(almacen, desde7, ahora),
     tope: aj.maxVisitasDia,
     tope_alcanzado: dias.filter((d) => d.escrituras >= aj.maxVisitasDia).map((d) => d.dia),
     semana: sumarDias7(dias.slice(-7)),
@@ -345,6 +342,12 @@ ${par(s.estrellas, "equipos marcados con la estrella")}
 ${par(s.con_favoritos, `visitantes que siguen a algún equipo (${pct(s.con_favoritos, s.visitantes)})`)}
 ${par(s.instaladas, "veces que se instaló como app")}
 ${par(s.en_app, `visitantes que entraron desde la app (${pct(s.en_app, s.visitantes)})`)}
+</div></section>
+<section class="tablero"><h2>Cuentas</h2><div class="pares">
+${par(r.cuentas.total, "cuentas en total")}
+${par(r.cuentas.creadas, "cuentas creadas esta semana (también las ya borradas)")}
+${par(r.cuentas.activas, "cuentas que entraron esta semana")}
+${par(r.cuentas.con_equipos, "cuentas que siguen a algún equipo")}
 </div></section>
 </div>
 <footer><h2>Cómo se cuenta</h2><ul>
