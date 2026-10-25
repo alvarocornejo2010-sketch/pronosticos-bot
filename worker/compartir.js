@@ -63,9 +63,6 @@ export function etiquetasOg(origen, ruta, titulo, descripcion) {
 
 export async function paginaPartido(request, env, almacen, id) {
   const url = new URL(request.url);
-  const pagina = await env.ASSETS.fetch(new Request(new URL("/", url), { method: "GET" }));
-  if (!pagina.ok) return pagina;
-  const html = await pagina.text();
   const db = almacen.db;
   let og = null;
   try {
@@ -80,7 +77,15 @@ export async function paginaPartido(request, env, almacen, id) {
     // sin base, la página sale igual (con la tarjeta de siempre): es la web
     console.error(`/partido/${id}: ${(e && e.stack) || e}`);
   }
-  // sin el partido, la tarjeta de siempre (la de index.html), fuera de Google.
+  return paginaConTarjeta(request, env, og);
+}
+
+// index.html con las etiquetas og (las de un partido o un equipo) en vez de las de
+// siempre. Sin ellas (no existe), la tarjeta de siempre, fuera de Google.
+export async function paginaConTarjeta(request, env, og) {
+  const pagina = await env.ASSETS.fetch(new Request(new URL("/", request.url), { method: "GET" }));
+  if (!pagina.ok) return pagina;
+  const html = await pagina.text();
   // Con función: un "$'" en un nombre sería un patrón de reemplazo.
   const cuerpo = og ? html.replace(BLOQUE, () => og) : html;
   const cabeceras = new Headers(pagina.headers);   // las de public/_headers (CSP incluida)

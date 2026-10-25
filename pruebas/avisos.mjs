@@ -188,7 +188,7 @@ const veredicto = fav === "1" ? "Acertó el favorito." : fav === "X" ? "Sorpresa
 assert.equal(f.msg.cuerpo, `La web daba ${reparto(p1)}. ${veredicto}`);
 assert.equal(f.msg.tag, `p${p1.id}`);   // sustituye al de antes del partido
 assert.equal(f.c.Urgency, "normal");
-console.log(`resultado: «${f.msg.titulo}», ${veredicto.toLowerCase()}`);
+console.log(`resultado: «${f.msg.titulo}», ${veredicto[0].toLowerCase() + veredicto.slice(1)}`);
 for (let i = 0; i < 3; i++) await tick();
 assert.equal((await recibidos()).length, antesFinal + 1);   // ni el resultado ni nada se repite
 db.prepare("DELETE FROM resultados WHERE id = ?").run(p1.id);

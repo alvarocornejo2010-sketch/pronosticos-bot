@@ -39,6 +39,11 @@ export const ESQUEMA = [
      base      TEXT NOT NULL,
      ficha     TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS predicciones_por_fecha ON predicciones (utc)`,
+  // Las de un equipo, por su nombre (como los favoritos), para su página (equipos.js):
+  // sin ellos, cada visita recorrería todas las predicciones. Las consultas los piden
+  // con INDEXED BY: si faltan (una base de antes), SQLite lo dice y se crean.
+  `CREATE INDEX IF NOT EXISTS predicciones_por_local ON predicciones (json_extract(ficha, '$.local'))`,
+  `CREATE INDEX IF NOT EXISTS predicciones_por_visita ON predicciones (json_extract(ficha, '$.visita'))`,
   // El marcador a los 90 minutos de cada partido con predicción, ya sumado al
   // registro en vivo (contado = 0 si la predicción no era de antes de empezar).
   `CREATE TABLE IF NOT EXISTS resultados (
@@ -141,7 +146,7 @@ export const ESQUEMA = [
      PRIMARY KEY (suscripcion, partido, tipo)) WITHOUT ROWID`,
 ];
 
-const SIN_TABLA = /no such table/i;
+const SIN_TABLA = /no such (table|index)/i;
 
 export class Almacen {
   constructor(db) {

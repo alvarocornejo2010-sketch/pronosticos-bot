@@ -49,6 +49,8 @@ print("entradas: 3 visitas de 2 visitantes (1 nuevo de Google, 1 que vuelve), po
 
 estado = get(W + "/api/estado")
 fecha, uno = next((dia["fecha"], p) for dia in estado["dias"] for p in dia["partidos"])
+# un equipo de LaLiga: está en su tabla (la bajó tablas.py), así que existe
+de_liga = next(p for dia in estado["dias"] for p in dia["partidos"] if p["liga_codigo"] == "PD")
 mandar([{"t": "partido", "id": uno["id"]}, {"t": "partido", "id": uno["id"]}, {"t": "partido", "id": 999999999},
         {"t": "partido", "id": "1; DROP TABLE visitas"}, {"t": "liga", "c": "PD"}, {"t": "liga", "c": "<b>XX</b>"},
         {"t": "busqueda"}, {"t": "pestana", "p": "panorama"}, {"t": "pestana", "p": "otra"}, {"t": "inventado"},
@@ -58,6 +60,10 @@ mandar([{"t": "partido", "id": uno["id"]}, {"t": "partido", "id": uno["id"]}, {"
         {"t": "error", "k": "<script>", "l": 1}, {"t": "error", "k": "TypeError", "l": "812"},
         {"t": "error", "k": "TypeError", "l": 812}, {"t": "error", "k": "RangeError", "l": 5}, {"t": "tabla", "c": "PD"}, {"t": "tabla", "c": "XX"},
         {"t": "imagen", "id": uno["id"]}, {"t": "imagen", "id": 999999999}])
+# en otra petición: cada una lleva como mucho 30 avisos
+mandar([{"t": "equipo", "id": de_liga["local_id"]}, {"t": "equipo", "id": de_liga["local_id"]}, {"t": "equipo", "id": 999999999},
+        {"t": "compartir_equipo", "id": de_liga["local_id"]}, {"t": "compartir_equipo", "id": 999999999},
+        {"t": "equipo", "id": "86"}])
 r = resumen()
 s, d = r["semana"], r["desglose"]
 assert d["error"] == {"TypeError:812": 2, "Promesa:0": 1}, d["error"]   # lista cerrada, y 3 por petición
@@ -67,12 +73,14 @@ assert d["liga"] == {"PD": 1} and d["pestana"] == {"panorama": 1}, d
 assert d["origen"] == {"google": 1, "directo": 1, "otro": 1}, d["origen"]   # una sola entrada por petición
 assert s["visitas"] == 4, s
 assert (s["compartidos"], s["imagenes"], s["estrellas"], s["instaladas"]) == (1, 1, 1, 1), s
+assert (s["equipos"], s["equipos_compartidos"]) == (2, 1), s
+assert r["equipos"] == [{"id": de_liga["local_id"], "n": 2, "nombre": de_liga["local"]}], r["equipos"]
 assert len(r["partidos"]) == 1, r["partidos"]
 top = r["partidos"][0]
 assert (top["id"], top["n"], top["liga"], top["utc"], top["fecha"], top["local"], top["visita"]) == (
     uno["id"], 2, uno["liga_codigo"], uno["utcDate"], fecha, uno.get("local_corto") or uno["local"],
     uno.get("visita_corto") or uno["visita"]), top
-print("eventos: cuentan el partido que existe (abierto o compartido), la liga, la pestaña y la estrella;"
+print("eventos: cuentan el partido y el equipo que existen (abiertos o compartidos), la liga, la pestaña y la estrella;"
       " los errores del navegador por tipo y línea; lo inventado no")
 
 antes = resumen()["semana"]
@@ -100,6 +108,7 @@ assert pan.headers["Content-Type"].startswith("text/html") and pan.headers["X-Ro
 assert "script-src" not in csp and "default-src 'none'" in csp, csp
 assert "<script" not in html and "Partidos más abiertos" in html and ">2<" in html and "Compartir, favoritos y app" in html
 assert "TypeError:812" in html and "Errores del navegador" in html
+assert "Equipos que más se abren" in html and de_liga["local"].replace("&", "&amp;") in html
 print("panel: con token, en HTML, sin JavaScript y fuera de Google")
 
 # el tope del día: con MAX_VISITAS_DIA=60, unas pocas búsquedas lo alcanzan

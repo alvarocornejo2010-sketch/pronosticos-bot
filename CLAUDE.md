@@ -182,9 +182,10 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
   redondeado. La casilla de los próximos y la de los más claros usan el mismo
   entero que la tabla (`pctFavorito`).
 - Rutas por hash: `#/`, `#/semana`, `#/dia/2026-10-10`, `#/liga/PD`,
-  `#/liga/PD/2026-10-10`, `#/liga/PD/tabla` (ver "Tabla y proyección"), `#/favoritos`. `#/` es toda la semana en escritorio y
-  el primer día en móvil. Y una sin hash, `/partido/123`, para compartir (ver
-  "Compartir y favoritos").
+  `#/liga/PD/2026-10-10`, `#/liga/PD/tabla` (ver "Tabla y proyección"), `#/favoritos`,
+  `#/equipo/86` (ver "Página de cada equipo"). `#/` es toda la semana en escritorio y
+  el primer día en móvil. Y dos sin hash, para compartir: `/partido/123` (ver
+  "Compartir y favoritos") y `/equipo/86`, que pasa en el acto a `/#/equipo/86`.
 - Tipografía: Saira (marca, títulos y todos los números) y Figtree (nombres y
   textos), de Google Fonts. Las dos tienen cifras tabulares, comprobadas en el
   navegador: las columnas de números no bailan.
@@ -235,7 +236,9 @@ en Render, `disponible: false`) y, solo en Cloudflare, `/api/cuenta/crear`,
 de temporada (en Render, `no_disponible`; ver "Tabla y proyección"). Y los avisos de
 Mis equipos: `/api/avisos` (la clave pública VAPID; en Render, `disponible: false`) y,
 solo en Cloudflare, `/api/avisos/alta` y `/api/avisos/baja` (POST; ver "Avisos de Mis
-equipos").
+equipos"). Y `/api/equipo/86`, la página de un equipo (en Render, `no_disponible`), y
+`/equipo/86`, la web con su tarjeta (en Render, la web sin tarjeta; ver "Página de cada
+equipo").
 
 **Efecto secundario de cada deploy:** el disco de Render free es efímero, cada
 deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
@@ -276,7 +279,8 @@ incluidos), `actualizacion.js` (la pasada), `validacion.js`, `metricas.js`
 (el contador de visitas), `compartir.js` (la tarjeta de `/partido/123`),
 `buscadores.js` (`robots.txt` y `sitemap.xml`), `cuentas.js` (las cuentas),
 `tablas.js` (la tabla de cada liga y lo que le falta), `avisos.js` (los avisos de Mis
-equipos), `push.js` (su cifrado y su firma, Web Push) e `index.js` (rutas).
+equipos), `push.js` (su cifrado y su firma, Web Push), `equipos.js` (la página de cada
+equipo) e `index.js` (rutas).
 
 **El ritmo lo marca la CPU.** El plan gratis da 10 ms por ejecución y leer el
 JSON de la API cuesta ~7 ms por MB, así que en vez de una pasada de 40
@@ -311,7 +315,10 @@ secciones como `cache.json`) se lee fila a fila solo cuando se usa.
 `cache` (secciones `ligas`, `priors`, `partidos_liga` con los partidos de cada
 liga de las dos temporadas, compactos, `fuerzas`, `calendario`,
 `liga_equipo` y `tablas`, la clasificación y lo que falta de cada liga), `partidos`, `predicciones` (la última publicada de cada partido; no se
-borra al empezar el partido: es lo que dijo la web), `resultados` (el marcador
+borra al empezar el partido: es lo que dijo la web. Con un índice por el nombre de cada
+equipo, `predicciones_por_local` y `predicciones_por_visita`, para su página: las
+consultas los piden con `INDEXED BY`, y si faltan, el "no such index" vuelve a pasar el
+`ESQUEMA`, como una tabla que falta), `resultados` (el marcador
 a los 90 minutos de cada partido con predicción, ya sumado al registro en
 vivo), `documentos` (`estado` que sirve `/api/estado`, `resumen`, `validacion`,
 `registro` y `registro_publico`, pedidos, temporadas terminadas compactas,
@@ -396,8 +403,8 @@ para no leer las fichas enteras). Lo prueba `pruebas/semana.mjs`.
 - `/actualizar?forzar=1` y `/validar` dejan un pedido en D1 que el cron recoge
   en menos de un minuto: una petición web no puede durar lo que una pasada;
 - el registro en vivo (`/api/registro`), las visitas (`/visitas`), la tabla con
-  su proyección (`/api/tabla/PD`) y los avisos de Mis equipos (`/api/avisos`) solo
-  existen aquí.
+  su proyección (`/api/tabla/PD`), los avisos de Mis equipos (`/api/avisos`) y la
+  página de cada equipo (`/api/equipo/86`) solo existen aquí.
 
 **En local:** `npm install`, copiar `.dev.vars.example` a `.dev.vars`, `npm run
 dev` y lanzar el cron a mano con
@@ -453,6 +460,10 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
   que entraron desde la app instalada (`en_app`, `display-mode: standalone`). En
   el panel, el tablero "Compartir, favoritos y app". Los avisos los cuenta el Worker,
   no la web (ver "Avisos de Mis equipos").
+- **La página de cada equipo:** las veces que se abre (`equipo`, por equipo: solo cuenta
+  si está en la tabla de una liga o juega en la semana) y que se pulsa su Compartir
+  (`compartir_equipo`); las llegadas por un enlace `/equipo/86` van con las de
+  `/partido/123` (`enlace`). En el panel, "Equipos que más se abren".
 
 ## Tabla y proyección (oct 2026)
 
@@ -540,6 +551,42 @@ hay (es un torneo).
   en dos pestañas, cada una toma al momento las estrellas de la otra (evento
   `storage`), para no borrarlas al guardar las suyas. Y pueden avisar antes de cada
   partido (ver "Avisos de Mis equipos").
+
+## Página de cada equipo (oct 2026)
+
+Cada equipo tiene su página, `#/equipo/86` (el id de football-data). Se llega desde su
+nombre en el detalle de un partido y en la tabla de su liga, y se comparte con
+`/equipo/86`, que lleva su tarjeta (título "Real Madrid: próximos partidos y
+pronóstico", su liga, su puesto y su próximo partido con el 1X2) y entra en el sitemap
+(todos los equipos de las tablas): es lo que Google puede encontrar por el nombre de un
+equipo. Para enlazarla, cada ficha lleva `local_id` y `visita_id` (`fichaBase` y
+`_ficha_base`, en los dos lados: `/api/estado` sigue igual en Flask y en el Worker). Las
+predicciones de antes se ponen al día solas: la base cambia y la ficha se rehace sin
+recalcular, con la siguiente descarga de su calendario.
+
+- **Arriba, su ficha:** escudo, liga, puesto, puntos y su balance, su forma ("Últimos de
+  liga": los 5 últimos, G/E/P con el marcador; en tinta, no en colores de estado), Seguir
+  y Compartir. La pestaña del navegador lleva el mismo título que su tarjeta. Debajo, "En la tabla": cuántas temporadas simuladas acaba en cada zona de
+  su liga y sus puntos medios, con la simulación de la tabla (`simularPorTandas`, la
+  misma semilla: los mismos números que en `#/liga/PD/tabla`), y "Cómo juega": cuánto
+  marca y cuánto encaja frente a un equipo medio de su liga contra los mismos rivales
+  (sus fuerzas del modelo, `fuerzaEquipo`, en %) y su puesto en las dos cosas.
+- **Luego, sus próximos partidos** de la ventana, por su nombre (como Mis equipos), con
+  las filas de siempre: se abren ahí mismo.
+- **Al final, lo que dijo la web** de sus últimos 6 partidos con resultado (de todas las
+  competiciones; solo lo publicado antes de empezar, `contado`), con la fila del tablero
+  Resultados (`htmlFilaResultado`): la casilla es lo que le dio a lo que pasó.
+- **`/api/equipo/86`** (`worker/equipos.js`) se monta en cada petición, sin pedir nada a
+  la API: la tabla de su liga (la que la contiene, buscada con `json_each` en los
+  documentos `tabla:*`), sus fuerzas (`fuerzas`), lo jugado de esta temporada
+  (`partidos_liga` `PD:actual`) y sus predicciones con resultado, por su nombre, con los
+  dos índices. Menos de 1 ms de CPU y unas pocas filas leídas, con ETag y 304. Uno que no
+  existe da 404. Un equipo que no está en ninguna tabla (de la Champions, de una liga
+  fuera del plan) sale con su nombre del calendario y sin tabla ni fuerza.
+- **Lo que no sabe:** la forma es solo de liga y de esta temporada (en las primeras
+  jornadas, menos de 5); el puesto de su ataque y su defensa es entre los equipos de la
+  tabla de hoy. En Render no hay tabla, fuerza ni registro: la página enseña solo sus
+  partidos.
 
 ## Avisos de Mis equipos (oct 2026)
 
@@ -778,12 +825,13 @@ es lo que pidió el dueño del proyecto; lo que cueste dinero (mandar correos) e
   (`ARCHIVOS_WEB`), y `sw.js` lleva la CSP de la web (su `connect-src 'self'` es
   lo que le deja pedir la página).
 - **Buscadores:** toda la web va detrás del `#`, que Google no ve como páginas
-  distintas; lo que sí ve son los `/partido/123`, cada uno con su título, su
-  `meta description` (la misma que la tarjeta) y su `canonical`. El Worker sirve
+  distintas; lo que sí ve son los `/partido/123` y los `/equipo/86` (ver "Página de cada
+  equipo"), cada uno con su título, su `meta description` (la misma que la tarjeta) y su
+  `canonical`. El Worker sirve
   `/robots.txt` (sí a la web, los partidos y los datos que pinta: Google pinta la
   página pidiendo `/api/estado`, y sin él indexaría "Cargando"; no a
-  `/api/contar`, `/api/visitas`, `/visitas`, `/actualizar` ni `/validar`) y `/sitemap.xml` con la portada y los partidos por
-  jugar (`buscadores.js`, una consulta a D1). Las direcciones salen del origen de
+  `/api/contar`, `/api/visitas`, `/visitas`, `/actualizar` ni `/validar`) y `/sitemap.xml` con la portada, los partidos por
+  jugar y los equipos de las tablas (`buscadores.js`, dos consultas a D1). Las direcciones salen del origen de
   la petición. Solo en Cloudflare. Para que Google lo lea antes, falta darlo de
   alta en Search Console (verificar la propiedad con una etiqueta `meta`, la
   pondría el dueño de la cuenta).
@@ -1301,8 +1349,9 @@ Environment).
   contra el modelo con las cuentas que ya hay (sin dinero ni premios). Hecho en
   oct 2026: el enlace con vista previa, los favoritos, el resumen de la semana,
   instalarla como app, el sitemap, la marca de las ligas de fiabilidad baja, las
-  cuentas (ver "Cuentas"; lo que les falta, en el punto siguiente) y los avisos de
-  Mis equipos (ver "Avisos de Mis equipos").
+  cuentas (ver "Cuentas"; lo que les falta, en el punto siguiente), los avisos de
+  Mis equipos (ver "Avisos de Mis equipos") y la página de cada equipo (ver "Página
+  de cada equipo").
 
 - **Cuentas, la versión siguiente** (ver "Cuentas"): una página de política de
   privacidad (Ley 29733: qué se guarda, ahora también el correo y las suscripciones
@@ -1387,14 +1436,19 @@ Environment).
     enteros de la web; ninguno se repite ni falta; una estrella nueva trae solo sus
     partidos; el resultado llega una vez; un 410 borra la suscripción; las altas raras
     no entran; la baja pide `auth`; el panel lo cuenta; y la CPU de cada pasada de
-    avisos. Y al final, la interfaz en un navegador de verdad (`interfaz.mjs`,
-    Playwright): 12 vistas (semana, día, liga, por claros y por reñidos, búsqueda,
-    Mis equipos, el detalle abierto, el de un partido de Mis equipos y la tabla con su
-    proyección) en 7 anchos de 360 a 1920 px, sin texto que se salga de su caja, sin
+    avisos. Que la página de cada equipo trae su fila de la tabla, su ataque y su defensa
+    (los del modelo, con su puesto), su forma (la de la caché) y lo que dijo la web de un
+    partido suyo con resultado, con ETag, 404 para uno que no existe, su tarjeta en
+    `/equipo/86` y todos los equipos en el sitemap (`equipos.py`). Y al final, la
+    interfaz en un navegador de verdad (`interfaz.mjs`,
+    Playwright): 13 vistas (semana, día, liga, por claros y por reñidos, búsqueda,
+    Mis equipos, el detalle abierto, el de un partido de Mis equipos, la tabla con su
+    proyección y la página de un equipo) en 7 anchos de 360 a 1920 px, sin texto que se salga de su caja, sin
     piezas de una fila que se pisen, sin errores de JavaScript, con la tarjeta y la
     invitación de los avisos (y activarlos y quitarlos contra el Worker, con el
-    servicio de avisos del navegador de mentira), y axe-core sin nada en la semana,
-    Mis equipos, los dos detalles y la tabla, en el móvil y en escritorio. Es lo que en oct
+    servicio de avisos del navegador de mentira), los nombres del detalle enlazando con
+    la página de su equipo, y axe-core sin nada en la semana,
+    Mis equipos, los dos detalles, la tabla y la página de un equipo, en el móvil y en escritorio. Es lo que en oct
     2026 encontró la fecha bajo el escudo y "Seguir" cortado en el móvil. El job
     instala Chromium (`npx playwright install --with-deps chromium`); sin red para
     las fuentes de Google, `FUENTES=carpeta` (con `fuentes.css`, `mapa.txt` y los

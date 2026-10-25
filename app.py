@@ -1016,6 +1016,9 @@ def _ficha_base(match):
         "id": match["id"],
         "local": local["name"],
         "visita": visita["name"],
+        # el id de cada equipo: la web de Cloudflare enlaza con su página (#/equipo/86)
+        "local_id": local["id"],
+        "visita_id": visita["id"],
         # nombre corto, abreviatura de tres letras y escudo: vienen ya en la misma
         # respuesta del calendario, así que no cuestan peticiones. Con .get() porque
         # la web funciona igual si algún equipo no los trae.
@@ -1362,6 +1365,22 @@ def api_tabla(codigo):
     (worker/tablas.js): el cron las baja en sus minutos libres y las guarda en D1."""
     return jsonify({"estado": "no_disponible", "liga": codigo,
                     "nota": "La tabla y la proyección funcionan en la versión de Cloudflare."})
+
+
+@app.route("/equipo/<int:id_equipo>")
+def equipo(id_equipo):
+    """La página de un equipo para compartir: la misma web, que la abre. Su tarjeta
+    (Open Graph) solo la pone Cloudflare (worker/equipos.js)."""
+    return render_template("index.html")
+
+
+@app.route("/api/equipo/<int:id_equipo>")
+def api_equipo(id_equipo):
+    """La página de cada equipo (su tabla, su fuerza y lo que dijo la web de sus
+    últimos partidos) solo existe en Cloudflare (worker/equipos.js): necesita las
+    tablas y el registro en vivo, que guarda D1."""
+    return jsonify({"estado": "no_disponible", "id": id_equipo,
+                    "nota": "La página de cada equipo funciona en la versión de Cloudflare."})
 
 
 @app.route("/api/avisos")

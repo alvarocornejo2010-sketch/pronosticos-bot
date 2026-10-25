@@ -45,6 +45,7 @@ let registro = null;     // /api/registro: lo publicado contra lo que pasó (sol
 let infoLigas = null;    // /api/ligas: medias de goles que usa el modelo
 let rutaPintada = null;
 let ligaContada = null;   // la liga en la que ya se contó la entrada (visitas)
+let equipoContado = null;   // y el equipo
 
 // Los equipos que sigue quien mira, por su nombre completo, en su navegador (sin
 // cuenta). Sus partidos salen en "Mis equipos", primero en cada día y primero en
@@ -71,6 +72,10 @@ function esFavorito(p) { return favoritos.has(p.local) || favoritos.has(p.visita
 // a la de siempre.
 const enlacePartido = (location.pathname.match(/^\/partido\/(\d+)\/?$/) || [])[1] || null;
 let partidoEnlazado = enlacePartido;
+// /equipo/86: la página de un equipo compartida (worker/equipos.js le pone la tarjeta).
+// Es una vista más de la web: la dirección pasa en el acto a /#/equipo/86.
+const enlaceEquipo = (location.pathname.match(/^\/equipo\/(\d{1,9})\/?$/) || [])[1] || null;
+if (enlaceEquipo) history.replaceState(null, "", "/#/equipo/" + enlaceEquipo);
 let orden = "hora";
 let mercadoFiab = "1x2";   // qué mercado enseña el panel de fiabilidad
 let fuenteFiab = "validacion";   // y de dónde: la temporada pasada o el registro en vivo
@@ -435,7 +440,7 @@ function htmlCabeceraDetalle(p) {
   const eq = (lado) => {
     const si = favoritos.has(p[lado]);
     return '<div class="det-eq ' + lado + '">' + htmlEscudo(p[lado + "_escudo"], cortoDe(p, lado))
-      + '<span class="n">' + esc(p[lado]) + '</span><span class="rol">' + (lado === "local" ? "Local" : "Visitante") + '</span>'
+      + htmlEnlaceEquipo(p[lado + "_id"], esc(p[lado]), "n") + '<span class="rol">' + (lado === "local" ? "Local" : "Visitante") + '</span>'
       + '<button class="accion" data-seguir="' + esc(p[lado]) + '" aria-pressed="' + si + '"'
       + ' aria-label="' + esc((si ? "Dejar de seguir a " : "Seguir a ") + cortoDe(p, lado)) + '">'
       + (si ? ICONO_ESTRELLA_LLENA : ICONO_ESTRELLA) + '<span>' + (si ? "Siguiendo" : "Seguir") + '</span></button></div>';
@@ -697,6 +702,7 @@ function bloqueGrupo(clave, texto, cuenta, codLiga, clase) {
 //   #/liga/PD             una liga entera
 //   #/liga/PD/2026-09-12  una liga, un día
 //   #/favoritos           los partidos de los equipos que sigues
+//   #/equipo/86           la página de un equipo (sección EQUIPO)
 // ==========================================
 // Un enlace mal escrito (#/liga/%E0) no tiene que tumbar la página.
 function decodificar(s) { try { return decodeURIComponent(s); } catch (e) { return s; } }
@@ -707,6 +713,7 @@ function leerRuta() {
   if (t[0] === "dia" && t[1]) return { vista: "dia", fecha: t[1] };
   if (t[0] === "semana") return { vista: "semana" };
   if (t[0] === "favoritos") return { vista: "favoritos" };
+  if (t[0] === "equipo" && /^\d{1,9}$/.test(t[1] || "")) return { vista: "equipo", id: Number(t[1]) };
   return { vista: "inicio" };
 }
 // Se pinta en el acto: así quien navega (los más claros, los próximos) encuentra la
@@ -868,7 +875,7 @@ function htmlTabla(cod, t) {
   const filas = eq.map((e, i) => {
     const nombre = e.corto || e.nombre;
     return '<tr' + (rayas.has(e.pos) ? ' class="raya"' : "") + '><td class="pos num">' + e.pos + '</td>'
-      + '<th scope="row" class="eq"><span class="eq-in">' + htmlEscudo(e.escudo, nombre) + '<span class="nom">' + esc(nombre) + '</span>'
+      + '<th scope="row" class="eq"><span class="eq-in">' + htmlEscudo(e.escudo, nombre) + htmlEnlaceEquipo(e.id, esc(nombre), "nom")
       + (favoritos.has(e.nombre) ? '<span class="sigo" role="img" aria-label="Lo sigues">' + ICONO_ESTRELLA_LLENA + '</span>' : "") + '</span></th>'
       + '<td class="n c-pj num">' + e.pj + '</td><td class="n c-dg num">' + (e.gf - e.gc > 0 ? "+" : "") + (e.gf - e.gc) + '</td>'
       + '<td class="n num"><b>' + e.pts + '</b></td>'
@@ -892,6 +899,207 @@ function htmlTabla(cod, t) {
 }
 
 // ==========================================
+// EQUIPO (#/equipo/86)
+// La página de cada equipo: arriba, su ficha (su puesto, la proyección de la
+// temporada con la misma simulación que la tabla de su liga, su forma y su ataque y
+// su defensa frente a los de su liga); luego sus próximos partidos, de /api/estado y
+// por su nombre, como Mis equipos; y al final lo que dijo la web de sus últimos
+// partidos, contra lo que pasó. Lo de la ficha y el final sale de /api/equipo/86
+// (worker/equipos.js, solo en Cloudflare): en Render quedan solo sus partidos.
+// ==========================================
+const equipos = new Map();   // id → { doc, etag, pedida, cargando, error }
+const ICONO_FLECHA = '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor"'
+  + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3l5 5-5 5"/></svg>';
+
+async function cargarEquipo(id) {
+  const e = equipos.get(id) || {};
+  equipos.set(id, e);
+  e.cargando = true;
+  e.pedida = Date.now();
+  try {
+    const r = await pedirSiCambio("/api/equipo/" + id, e.etag);
+    if (r.status !== 304) {
+      // 404: un equipo que no está en ninguna liga ni juega esta semana (lo dice el cuerpo)
+      if (!r.ok && r.status !== 404) throw new Error("HTTP " + r.status);
+      e.etag = r.headers.get("ETag");
+      e.doc = await r.json();
+      e.error = null;
+    }
+  } catch (err) {
+    e.error = "No se pudo cargar el equipo. Se reintenta en un rato.";
+  }
+  e.cargando = false;
+  render();
+}
+
+// El nombre de un equipo con un enlace a su página (si se sabe su id).
+function htmlEnlaceEquipo(id, html, clase) {
+  return id ? '<a class="' + clase + '" href="#/equipo/' + Number(id) + '">' + html + '</a>'
+    : '<span class="' + clase + '">' + html + '</span>';
+}
+
+function signoPct(v) {
+  const n = Math.round(v);
+  return (n > 0 ? "+" : n < 0 ? "−" : "±") + Math.abs(n) + " %";
+}
+
+// Su puesto en la proyección: cuántas veces acaba en cada zona de su liga y sus
+// puntos medios. La simulación es la de la tabla (tablas, simularPorTandas).
+function htmlProyeccion(d) {
+  const t = tablas.get(d.liga);
+  if (!t || (!t.cargando && Date.now() - t.pedida > 10 * 60000)) cargarTabla(d.liga);
+  const doc = t && t.doc && t.doc.estado === "listo" ? t.doc : null;
+  const i = doc ? doc.equipos.findIndex(x => x.id === d.id) : -1;
+  if (i < 0) return '<p class="nota">La proyección sale en cuanto esté la tabla de su liga.</p>';
+  const n = doc.equipos.length, sim = t.sim, listo = sim && sim.hechas >= SIMULACIONES;
+  const faltan = doc.restantes.filter(([a, b]) => a === i || b === i).length;
+  const casillas = (doc.zonas || []).map(z => {
+    const v = listo ? pctZona(sim, i, z, n) : null;
+    const txt = v === null ? "…" : textoPct(v);
+    const [a, b] = puestosDe(z, n);
+    const donde = a === b ? "puesto " + a : "puestos " + a + " a " + b;
+    // sin número (aún simulando, o no pasa nunca): gris, con la tinta que aguanta la opacidad de la etiqueta
+    const estilo = v === null || txt === "—" ? "--bg:var(--panel-alto);--fg:var(--tinta-2)" : estiloTramo(Math.round(v));
+    const etiqueta = z[0] + " (" + donde + "): " + (v === null ? "simulando" : txt === "—" ? "no pasa en ninguna temporada simulada"
+      : txt + " % de las temporadas simuladas");
+    return '<span class="cas" role="group" style="' + estilo + '" aria-label="' + esc(etiqueta) + '">'
+      + '<small aria-hidden="true"><span class="largo">' + esc(z[0]) + '</span><span class="corto">' + esc(ZONA_CORTA[z[0]] || z[0])
+      + '</span></small><b aria-hidden="true">' + esc(txt) + '</b>'
+      + '<span class="que" aria-hidden="true">' + esc(donde) + '</span></span>';
+  }).join("");
+  const puntos = listo ? Math.round(sim.puntos[i] / sim.hechas) : null;
+  return '<div class="casillas" style="grid-template-columns:repeat(' + (doc.zonas || []).length + ',minmax(0,1fr))">' + casillas + '</div>'
+    + '<p class="eq-proy">' + (listo
+      ? "Acaba con <b>" + puntos + " puntos</b> de media, con " + faltan + " partido" + (faltan === 1 ? "" : "s") + " por jugar."
+      : "Simulando la temporada… " + Math.round(100 * (sim ? sim.hechas : 0) / SIMULACIONES) + " %") + '</p>';
+}
+
+// Sus últimos partidos de liga, del más viejo al más nuevo: G, E o P y el marcador.
+function htmlFormaEquipo(forma) {
+  if (!forma.length) return "";
+  const que = { g: ["G", "Ganó"], e: ["E", "Empató"], p: ["P", "Perdió"] };
+  return '<ol class="eq-forma" aria-label="Sus últimos partidos de liga, del más antiguo al más reciente">' + forma.map(f => {
+    const k = f.gf > f.gc ? "g" : f.gf === f.gc ? "e" : "p";
+    const rival = f.rival_corto || f.rival || "su rival";
+    const etiqueta = que[k][1] + " " + f.gf + "-" + f.gc + (f.local ? " en casa contra " : " fuera contra ") + rival;
+    return '<li class="' + k + '" aria-label="' + esc(etiqueta) + '" title="' + esc(etiqueta) + '"><b aria-hidden="true">'
+      + que[k][0] + '</b><span aria-hidden="true">' + f.gf + "-" + f.gc + '</span></li>';
+  }).join("") + '</ol>';
+}
+
+// Ataque y defensa: 1 es un equipo medio de su liga contra los mismos rivales.
+function htmlFuerza(d) {
+  const f = d.fuerza;
+  const liga = d.liga_nombre || "su liga";
+  const fila = (k, v, puesto, texto) => '<div class="eq-fz"><span class="k">' + esc(k) + '</span><b>' + signoPct(v) + '</b>'
+    + '<span class="puesto">' + puesto + '.º de ' + f.equipos + '</span><p>' + esc(texto) + '</p></div>';
+  const a = (f.ataque - 1) * 100, df = (f.defensa - 1) * 100;
+  const cuanto = (v) => Math.abs(Math.round(v)) + " % " + (Math.round(v) >= 0 ? "más" : "menos");
+  return '<div class="eq-fuerza">'
+    + fila("Marca", a, f.puesto_ataque, Math.round(a) === 0 ? "Lo mismo que un equipo medio de " + liga + " contra las mismas defensas."
+      : cuanto(a) + " que un equipo medio de " + liga + " contra las mismas defensas.")
+    + fila("Encaja", df, f.puesto_defensa, Math.round(df) === 0 ? "Lo mismo que un equipo medio contra los mismos ataques."
+      : cuanto(df) + " que un equipo medio contra los mismos ataques.")
+    + '</div><p class="nota">' + (f.partidos
+      ? "Con sus " + f.partidos + " partidos de liga de esta temporada y la anterior; los más recientes pesan más. Es lo que usa el modelo."
+      : "Recién llegado a la liga: parte de lo que suelen rendir los que llegan, hasta que juegue.") + '</p>';
+}
+
+const cuantos = (n, uno, varios) => n + " " + (n === 1 ? uno : varios);
+
+function htmlFichaEquipo(d, nombre, suyo, id) {
+  const escudo = d ? d.escudo : suyo && suyo[(suyo.local_id === id ? "local" : "visita") + "_escudo"];
+  const sigo = favoritos.has(nombre);
+  const corto = (d && d.corto) || nombre;
+  const t = d && d.tabla;
+  const forma = d ? htmlFormaEquipo(d.forma) : "";
+  const cab = '<div class="eq-cab">' + htmlEscudo(escudo, corto)
+    + '<div class="eq-que">'
+    + (d && d.liga ? '<p class="eq-liga">' + htmlInsignia(d.liga) + '<span>' + esc(d.liga_nombre || d.liga) + '</span></p>' : "")
+    + (t ? '<p class="eq-puesto"><b>' + t.pos + '.º</b> de ' + t.equipos + ' · <b>' + cuantos(t.pts, "punto", "puntos") + '</b></p>'
+      + '<p class="eq-balance">' + cuantos(t.pj, "jugado", "jugados") + ': ' + cuantos(t.g, "ganado", "ganados") + ', '
+      + cuantos(t.e, "empatado", "empatados") + ' y ' + cuantos(t.p, "perdido", "perdidos") + ' · goles ' + t.gf + ':' + t.gc + '</p>' : "")
+    + '</div>'
+    + (forma ? '<div class="eq-forma-fila"><span class="k">Últimos de liga</span>' + forma + '</div>' : "")
+    + '<div class="eq-acciones"><button class="accion" data-seguir="' + esc(nombre) + '" aria-pressed="' + sigo + '"'
+    + ' aria-label="' + esc((sigo ? "Dejar de seguir a " : "Seguir a ") + corto) + '">'
+    + (sigo ? ICONO_ESTRELLA_LLENA : ICONO_ESTRELLA) + '<span>' + (sigo ? "Siguiendo" : "Seguir") + '</span></button>'
+    + '<button class="accion" data-compartir-equipo="' + Number(id) + '">' + ICONO_COMPARTIR + '<span>Compartir</span></button></div></div>';
+  if (!d) {
+    const e = equipos.get(id);
+    const nota = e && e.doc && e.doc.estado === "no_disponible" ? "Su tabla, su fuerza y su historial salen en la versión de Cloudflare."
+      : e && e.error ? e.error : "Cargando su tabla y su fuerza…";
+    return cab + '<p class="nota">' + esc(nota) + '</p>';
+  }
+  const tabla = d.tabla ? htmlBloque("En la tabla", htmlProyeccion(d)
+      + '<a class="eq-ir" href="#/liga/' + encodeURIComponent(d.liga) + '/tabla">Ver la tabla de ' + esc(d.liga_nombre || d.liga)
+      + ICONO_FLECHA + '</a>', "proyección de la temporada")
+    : htmlBloque("En la tabla", '<p class="nota">Su liga no está en el plan gratis de football-data: sin tabla ni proyección.</p>');
+  const fuerza = d.fuerza ? htmlBloque("Cómo juega", htmlFuerza(d), "frente a su liga") : "";
+  return cab + '<div class="det-rejilla' + (fuerza ? "" : " una") + '"><div class="det-col">' + tabla + '</div>'
+    + (fuerza ? '<div class="det-col">' + fuerza + '</div>' : "") + '</div>';
+}
+
+function htmlWebEquipo(d) {
+  const lista = (d && d.ultimos) || [];
+  if (!lista.length) {
+    return htmlBloque("Lo que dijo la web", '<p class="nota">Todavía no ha terminado ningún partido suyo con el pronóstico'
+      + ' publicado antes de empezar. Desde el 18 oct 2026, la web guarda lo que dijo de cada partido.</p>');
+  }
+  let aciertos = 0;
+  const filas = lista.map(p => { const f = htmlFilaResultado(p); if (f.acerto) aciertos++; return f.html; }).join("");
+  return htmlBloque("Lo que dijo la web", '<div class="claros" role="list">' + filas + '</div>'
+    + '<p class="nota">La casilla es lo que la web le dio, antes del partido, a lo que pasó.</p>',
+  "acertó el favorito en " + aciertos + " de " + lista.length);
+}
+
+function bloquesEquipo(todos, id) {
+  let e = equipos.get(id);
+  if (!e || (!e.cargando && Date.now() - e.pedida > 10 * 60000)) { cargarEquipo(id); e = equipos.get(id); }
+  const d = e.doc && e.doc.estado === "listo" ? e.doc : null;
+  // el nombre: el de su página o, mientras llega (o en Render), el de un partido suyo de la semana
+  const suyo = todos.find(p => p.local_id === id || p.visita_id === id);
+  const nombre = d ? d.nombre : suyo ? (suyo.local_id === id ? suyo.local : suyo.visita) : null;
+  const out = { titulo: nombre || "Equipo", sub: d && d.tabla ? (d.liga_nombre + " · " + d.tabla.pos + ".º") : "",
+    mezcla: true, bloques: [] };
+  // el título de la pestaña, el mismo que pone el Worker en /equipo/86 (textosEquipo)
+  if (nombre) out.pestana = ((d && d.corto) || nombre) + ": próximos partidos y pronóstico · Pronósticos";
+  if (!nombre) {
+    out.vacio = e.doc && e.doc.estado === "no_encontrado" ? ["No encontramos ese equipo", e.doc.nota]
+      : e.error ? ["No se pudo cargar el equipo", e.error] : ["Cargando el equipo…", "Un momento."];
+    return out;
+  }
+  const ficha = htmlFichaEquipo(d, nombre, suyo, id);
+  out.bloques.push({ id: "eq-ficha", clase: "detalle eq-ficha", html: ficha,
+    huella: ficha + "|" + escudosRotos.size });
+  const suyos = todos.filter(p => p.local === nombre || p.visita === nombre);
+  out.bloques.push(bloqueGrupo("eq-prox", "Próximos partidos", suyos.length, null, "dia"));
+  if (suyos.length) out.bloques.push(...bloquesDePartidos(ordenar(suyos), { conDia: true }));
+  else out.bloques.push({ id: "eq-sin", clase: "eq-sin", huella: "sin", html: '<p class="nota">No juega en los próximos días.</p>' });
+  if (d || !e.doc || e.doc.estado !== "no_disponible") {
+    const web = htmlWebEquipo(d);
+    out.bloques.push({ id: "eq-web", clase: "detalle eq-web", html: web, huella: web });
+  }
+  return out;
+}
+
+// Compartir la página del equipo: el menú del sistema, o el enlace al portapapeles.
+async function compartirEquipo(id) {
+  const e = equipos.get(Number(id));
+  const d = e && e.doc && e.doc.estado === "listo" ? e.doc : null;
+  const nombre = d ? d.corto || d.nombre : tituloEl.firstChild && tituloEl.firstChild.textContent;
+  const url = location.origin + "/equipo/" + Number(id);
+  const texto = (nombre ? nombre + ": " : "") + "sus próximos partidos con el pronóstico, su forma y lo que dijo la web.";
+  contar({ t: "compartir_equipo", id: Number(id) });
+  if (navigator.share) {
+    try { await navigator.share({ title: nombre || "Pronósticos", text: texto, url: url }); return; }
+    catch (err) { if (err && err.name === "AbortError") return; }
+  }
+  try { await navigator.clipboard.writeText(url); avisar("Enlace copiado: pégalo en WhatsApp o donde quieras."); }
+  catch (err) { avisar("Copia este enlace: " + url); }
+}
+
+// ==========================================
 // CONTENIDO DEL CENTRO
 // ==========================================
 function nombreDia(d) {
@@ -910,6 +1118,8 @@ function bloquesCentro(todos, ruta) {
              vacio: hallados.length ? null : ["Ningún partido de «" + busqueda + "»",
                "Solo se buscan los partidos de la ventana actual. Prueba con otra grafía o con el nombre corto del club."] };
   }
+
+  if (ruta.vista === "equipo") return bloquesEquipo(todos, ruta.id);
 
   if (ruta.vista === "favoritos") {
     const suyos = todos.filter(esFavorito);
@@ -1050,7 +1260,7 @@ function pintarFechas(todos, ruta) {
 }
 
 function pintarTiraLigas(todos, ruta) {
-  const activa = ruta.vista === "liga" ? ruta.liga : ruta.vista === "favoritos" ? null : "";
+  const activa = ruta.vista === "liga" ? ruta.liga : ruta.vista === "favoritos" || ruta.vista === "equipo" ? null : "";
   const html = '<button class="sin-insignia" data-liga="" aria-current="' + (activa === "") + '">Todas <span class="n num">' + todos.length + '</span></button>'
     + (favoritos.size ? '<button data-hash="#/favoritos" aria-current="' + (ruta.vista === "favoritos") + '">'
       + htmlInsigniaFav("redonda") + 'Mis equipos <span class="n num">' + todos.filter(esFavorito).length + '</span></button>' : "")
@@ -1153,30 +1363,33 @@ function htmlFiabilidad() {
 
 /** Los últimos partidos terminados del registro en vivo: qué le dio la web,
  *  antes de empezar, a lo que pasó, y si acertó el favorito. */
+// Un partido terminado: lo que la web le dio a lo que pasó, el marcador y si acertó
+// el favorito (el tablero Resultados y la página de cada equipo).
+function htmlFilaResultado(p) {
+  const r = reparto(p);
+  const paso = p.gl > p.gv ? "1" : p.gl === p.gv ? "X" : "2";
+  const n = paso === "1" ? r.l : paso === "2" ? r.v : r.x;
+  const fav = veredictoDe(p).signo;
+  const acerto = fav === paso;
+  const quien = fav === "1" ? cortoDe(p, "local") : fav === "2" ? cortoDe(p, "visita") : "el empate";
+  const marcador = cortoDe(p, "local") + " " + p.gl + "–" + p.gv + " " + cortoDe(p, "visita");
+  // el veredicto delante: si algo se corta, que sea el nombre
+  const detalle = (acerto ? "Acertó" : "Falló") + " el favorito: " + quien;
+  const etiqueta = marcador + ". Le dio un " + n + " % a lo que pasó. " + detalle + ". " + p.liga + ", " + fechaCorta(p.fecha);
+  // el marcador no se corta nunca: cada nombre se encoge por su cuenta
+  return { acerto, html: '<div class="res" role="listitem" aria-label="' + esc(etiqueta) + '">'
+    + '<span class="casilla" style="' + estiloTramo(n) + '" aria-hidden="true">' + n + '</span>'
+    + '<span class="txt" aria-hidden="true"><span class="quien marcador"><span class="eq">' + esc(cortoDe(p, "local")) + '</span>'
+    + '<b>' + p.gl + '–' + p.gv + '</b><span class="eq">' + esc(cortoDe(p, "visita")) + '</span></span>'
+    + '<span class="contra">' + esc(detalle) + '</span></span>'
+    + '<span class="cuando" aria-hidden="true">' + htmlInsignia(p.liga_codigo) + '<span>' + esc(fechaCorta(p.fecha)) + '</span></span></div>' };
+}
+
 function htmlResultados() {
   if (!registroListo() || !(registro.ultimos || []).length) return "";
   const lista = registro.ultimos.slice(0, 8);
   let aciertos = 0;
-  const filas = lista.map(p => {
-    const r = reparto(p);
-    const paso = p.gl > p.gv ? "1" : p.gl === p.gv ? "X" : "2";
-    const n = paso === "1" ? r.l : paso === "2" ? r.v : r.x;
-    const fav = veredictoDe(p).signo;
-    const acerto = fav === paso;
-    if (acerto) aciertos++;
-    const quien = fav === "1" ? cortoDe(p, "local") : fav === "2" ? cortoDe(p, "visita") : "el empate";
-    const marcador = cortoDe(p, "local") + " " + p.gl + "–" + p.gv + " " + cortoDe(p, "visita");
-    // el veredicto delante: si algo se corta, que sea el nombre
-    const detalle = (acerto ? "Acertó" : "Falló") + " el favorito: " + quien;
-    const etiqueta = marcador + ". Le dio un " + n + " % a lo que pasó. " + detalle + ". " + p.liga + ", " + fechaCorta(p.fecha);
-    // el marcador no se corta nunca: cada nombre se encoge por su cuenta
-    return '<div class="res" role="listitem" aria-label="' + esc(etiqueta) + '">'
-      + '<span class="casilla" style="' + estiloTramo(n) + '" aria-hidden="true">' + n + '</span>'
-      + '<span class="txt" aria-hidden="true"><span class="quien marcador"><span class="eq">' + esc(cortoDe(p, "local")) + '</span>'
-      + '<b>' + p.gl + '–' + p.gv + '</b><span class="eq">' + esc(cortoDe(p, "visita")) + '</span></span>'
-      + '<span class="contra">' + esc(detalle) + '</span></span>'
-      + '<span class="cuando" aria-hidden="true">' + htmlInsignia(p.liga_codigo) + '<span>' + esc(fechaCorta(p.fecha)) + '</span></span></div>';
-  }).join("");
+  const filas = lista.map(p => { const f = htmlFilaResultado(p); if (f.acerto) aciertos++; return f.html; }).join("");
   return '<section class="modulo m-resultados"><h2>Resultados <span class="meta">acertó el favorito en ' + aciertos + ' de ' + lista.length + '</span></h2>'
     + '<div class="claros" role="list">' + filas + '</div>'
     + '<p class="nota">La casilla es lo que la web le dio, antes del partido, a lo que pasó. Liga a liga, en Fiabilidad medida, En vivo.</p></section>';
@@ -1241,7 +1454,7 @@ const ICONO_TODAS = '<svg width="18" height="18" viewBox="0 0 16 16" aria-hidden
   + '<rect x="2" y="9" width="5" height="5" rx="1.3" fill="currentColor"></rect><rect x="9" y="9" width="5" height="5" rx="1.3" fill="currentColor"></rect></svg>';
 
 function pintarLigasPane(todos, ruta) {
-  const activa = ruta.vista === "liga" ? ruta.liga : ruta.vista === "favoritos" ? null : "";
+  const activa = ruta.vista === "liga" ? ruta.liga : ruta.vista === "favoritos" || ruta.vista === "equipo" ? null : "";
   const mios = todos.filter(esFavorito).length;
   const filaFav = favoritos.size
     ? '<button class="liga-fila" data-hash="#/favoritos" aria-current="' + (ruta.vista === "favoritos") + '">'
@@ -1487,10 +1700,18 @@ function render() {
   const ligaVista = ruta.vista === "liga" ? ruta.liga : null;
   if (ligaVista && ligaVista !== ligaContada) contar({ t: "liga", c: ligaVista });
   ligaContada = ligaVista;
+  const equipoVista = ruta.vista === "equipo" ? ruta.id : null;
+  if (equipoVista && equipoVista !== equipoContado) contar({ t: "equipo", id: equipoVista });
+  if (!equipoVista && equipoContado) document.title = "Pronósticos";   // sale de la página de un equipo
+  equipoContado = equipoVista;
   const clave = JSON.stringify(ruta) + "|" + orden + "|" + (busqueda ? "b" : "") + "|" + mqEscritorio.matches;
   const reconstruir = clave !== rutaPintada;
   rutaPintada = clave;
-  if (reconstruir) { vista.innerHTML = ""; vista.dataset.huella = ""; vista.scrollTop = 0; }
+  if (reconstruir) {
+    vista.innerHTML = ""; vista.dataset.huella = ""; vista.scrollTop = 0;
+    // a la página de un equipo se llega desde el medio de otra (el detalle de un partido, la tabla)
+    if (equipoVista) window.scrollTo(0, 0);
+  }
 
   pintarFechas(todos, ruta);
   pintarTiraLigas(todos, ruta);
@@ -1513,6 +1734,7 @@ function render() {
   }
   const c = bloquesCentro(todos, ruta);
   tituloEl.innerHTML = esc(c.titulo) + (c.sub ? '<small>' + esc(c.sub) + '</small>' : "");
+  if (c.pestana && document.title !== c.pestana) document.title = c.pestana;
   centroEl.classList.toggle("mezcla", !!c.mezcla);
   centroEl.classList.toggle("con-dia", c.bloques.some(b => b.conDia));
   limpiarHueco.innerHTML = busqueda ? '<button class="limpiar" id="limpiar">Limpiar búsqueda</button>' : "";
@@ -1701,6 +1923,8 @@ document.addEventListener("click", (e) => {
   if (seguir) { alternarFavorito(seguir.dataset.seguir, seguir); return; }
   const comp = t.closest("[data-compartir]");
   if (comp) { compartir(comp.dataset.compartir); return; }
+  const compEq = t.closest("[data-compartir-equipo]");
+  if (compEq) { compartirEquipo(compEq.dataset.compartirEquipo); return; }
   const img = t.closest("[data-imagen]");
   if (img) { imagenPartido(img.dataset.imagen, img); return; }
   const av = t.closest("[data-avisos]");
@@ -1831,6 +2055,7 @@ function contar(evento) {
   const ancho = window.innerWidth;
   const ev = { t: "entrada", v, d: ancho >= 1180 ? "escritorio" : ancho >= 880 ? "intermedio" : "movil", o };
   if (enlacePartido) ev.via = "partido";
+  else if (enlaceEquipo) ev.via = "equipo";
   if (favoritos.size) ev.f = 1;
   if (window.matchMedia("(display-mode: standalone)").matches || navigator.standalone) ev.app = 1;
   if (v === "vuelve") ev.hace = Math.round((Date.parse(hoy) - Date.parse(ultima)) / 86400000);
