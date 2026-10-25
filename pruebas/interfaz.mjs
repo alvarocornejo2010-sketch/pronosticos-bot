@@ -1,5 +1,5 @@
 // Revisión de la interfaz con un navegador de verdad (Playwright), contra el Worker
-// local ya lleno con la API falsa (lo deja así e2e.sh). En 12 vistas y 7 anchos,
+// local ya lleno con la API falsa (lo deja así e2e.sh). En 13 vistas y 7 anchos,
 // de 360 a 1920 px, busca:
 //   - texto que se sale de su caja sin recortarse (scrollWidth > clientWidth);
 //   - piezas de una misma fila que se pisan (la hora, el escudo, los números...);
@@ -7,9 +7,10 @@
 // que la imagen para historias sale (un PNG de 1080x1920 al menú de compartir), que
 // Mis equipos ofrece los avisos (y que activarlos y quitarlos funciona contra el Worker,
 // con el servicio de avisos del navegador de mentira: sin red, Chromium no puede
-// suscribirse) y que el detalle de un partido de un equipo seguido los propone, y pasa
-// axe-core (accesibilidad) por la semana, Mis equipos, el detalle y la tabla, en el
-// móvil y en escritorio. Así se vio en oct 2026 que la fecha se metía bajo el escudo y
+// suscribirse), que el detalle de un partido de un equipo seguido los propone y que sus
+// nombres enlazan con la página de cada equipo, y pasa axe-core (accesibilidad) por la
+// semana, Mis equipos, el detalle, la tabla y la página de un equipo, en el móvil y en
+// escritorio. Así se vio en oct 2026 que la fecha se metía bajo el escudo y
 // que "Seguir" no cabía en el móvil.
 // Uso: node pruebas/interfaz.mjs PUERTO_WORKER PUERTO_API
 // Las fuentes vienen de Google; sin red, FUENTES=carpeta con fuentes.css, mapa.txt
@@ -33,6 +34,8 @@ if (conPartidos.length < 3) throw new Error("hacen falta partidos en al menos 3 
 const veces = new Map();
 for (const d of estado.dias) for (const p of d.partidos) for (const e of [p.local, p.visita]) veces.set(e, (veces.get(e) || 0) + 1);
 const FAVORITOS = [...veces.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([e]) => e);
+// un equipo de LaLiga para su página (tiene tabla, fuerza y forma)
+const EQUIPO = estado.dias.flatMap((d) => d.partidos).find((p) => p.liga_codigo === "PD").local_id;
 
 const VISTAS = [
   ["semana", "#/semana"], ["día", "#/dia/" + conPartidos[1].fecha], ["liga", "#/liga/PD"],
@@ -40,11 +43,11 @@ const VISTAS = [
   ["día por reñidos", "#/dia/" + conPartidos[2].fecha, "renidos"], ["búsqueda", "#/semana", "buscar"],
   ["mis equipos", "#/favoritos"], ["mis equipos por claros", "#/favoritos", "claros"],
   ["detalle", "#/dia/" + conPartidos[1].fecha, "abrir"], ["tabla", "#/liga/PD/tabla", "tabla"],
-  ["detalle de mis equipos", "#/favoritos", "abrir-fav"],
+  ["detalle de mis equipos", "#/favoritos", "abrir-fav"], ["equipo", "#/equipo/" + EQUIPO, "equipo"],
 ];
 const ANCHOS = [[360, 780], [390, 844], [768, 1024], [1024, 768], [1180, 820], [1440, 900], [1920, 1080]];
 const AXE_EN = new Set(["390/semana", "390/detalle", "390/tabla", "390/mis equipos", "390/detalle de mis equipos",
-  "1440/semana", "1440/detalle", "1440/tabla", "1440/mis equipos", "1440/detalle de mis equipos"]);
+  "1440/semana", "1440/detalle", "1440/tabla", "1440/mis equipos", "1440/detalle de mis equipos", "390/equipo", "1440/equipo"]);
 
 // El servicio de avisos del navegador, de mentira: una suscripción con claves de verdad
 // (el Worker comprueba que son un punto de la curva) y una dirección del servicio de
@@ -88,7 +91,7 @@ function revisar() {
       t: Math.min(...rs.map((r) => r.top)), b: Math.max(...rs.map((r) => r.bottom)) } : null;
   };
   const pisadas = [];
-  for (const fila of document.querySelectorAll(".fila, .prox, .claro, .dia-celda, .liga-fila, .det-cab, .tabla-liga tr")) {
+  for (const fila of document.querySelectorAll(".fila, .prox, .claro, .res, .dia-celda, .liga-fila, .det-cab, .tabla-liga tr, .eq-cab, .eq-fz")) {
     const hijos = [...fila.children].filter((h) => getComputedStyle(h).display !== "none" && getComputedStyle(h).visibility !== "hidden");
     const cajas = hijos.map(caja);
     for (let i = 0; i < hijos.length; i++) for (let j = i + 1; j < hijos.length; j++) {
@@ -131,6 +134,11 @@ for (const [ancho, alto] of ANCHOS) {
     await p.waitForSelector(extra === "tabla" ? ".tabla-liga" : ".fila", { timeout: 15000 });
     if (hash === "#/favoritos") await p.waitForSelector(".avisos-tarjeta", { timeout: 15000 });
     if (extra === "tabla") await p.waitForFunction(() => !document.querySelector(".tabla-sim"), null, { timeout: 30000 });
+    if (extra === "equipo") {
+      // su ficha entera: la fuerza (de /api/equipo) y la proyección ya simulada
+      await p.waitForFunction(() => document.querySelector(".eq-fuerza") && document.querySelector(".eq-proy b"), null, { timeout: 30000 });
+      if (await p.locator(".eq-forma li").count() !== 5) fallo(`${ancho}px: la página del equipo no trae su forma`);
+    }
     await p.evaluate(() => document.fonts.ready);
     if (extra === "claros" || extra === "renidos") {
       const b = p.locator(`[data-orden="${extra}"]:visible`).first();
@@ -138,6 +146,9 @@ for (const [ancho, alto] of ANCHOS) {
     }
     if (extra === "buscar") await p.evaluate(() => { busqueda = "a"; render(); });
     if (extra === "abrir" || extra === "abrir-fav") await p.locator(".partido:not(.pendiente) .fila").first().click();
+    if (extra === "abrir" && !(await p.locator('.det-eq a.n[href^="#/equipo/"]').count())) {
+      fallo(`${ancho}px: los nombres del detalle no enlazan con la página de su equipo`);
+    }
     if (extra === "abrir-fav" && !(await p.locator(".det-avisos [data-avisos=activar]").count())) {
       fallo(`${ancho}px: el detalle de un partido de Mis equipos no propone los avisos`);
     }

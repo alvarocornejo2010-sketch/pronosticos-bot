@@ -343,6 +343,9 @@ function fichaBase(m, codigo, nombreLiga, hora) {
     id: m.id,
     local: local.name,
     visita: visita.name,
+    // el id de cada equipo: la web enlaza con su página (#/equipo/86, equipos.js)
+    local_id: local.id,
+    visita_id: visita.id,
     local_corto: local.shortName ?? null,
     visita_corto: visita.shortName ?? null,
     local_sigla: local.tla ?? null,

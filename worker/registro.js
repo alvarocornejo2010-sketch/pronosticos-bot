@@ -38,10 +38,10 @@ export const TRAMOS = [["claros", 60], ["medios", 45], ["renidos", 0]];
 const tramoDe = (prob) => TRAMOS.find(([, min]) => prob >= min)[0];
 const cuatro = (x) => Math.round(x * 1e4) / 1e4;
 // Lo que se guarda de cada partido: lo justo para pintarlo como uno más de la web.
-const CAMPOS_PARTIDO = ["id", "liga_codigo", "liga", "local", "visita", "local_corto", "visita_corto",
+export const CAMPOS_PARTIDO = ["id", "liga_codigo", "liga", "local", "visita", "local_corto", "visita_corto",
   "local_sigla", "visita_sigla", "prob_local", "prob_empate", "prob_visita"];
 
-function entradaDe(ficha, gl, gv, local) {
+export function entradaDe(ficha, gl, gv, local) {
   const e = { id: ficha.id, utcDate: ficha.utcDate, fecha: local.fecha, hora: local.hora };
   for (const c of CAMPOS_PARTIDO) e[c] ??= ficha[c] ?? null;
   e.gl = gl;

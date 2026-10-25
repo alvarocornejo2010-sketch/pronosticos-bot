@@ -9,6 +9,8 @@
 //   {t: "partido", id: 123}          abrió el detalle de un partido
 //   {t: "liga", c: "PD"}             entró en una liga
 //   {t: "tabla", c: "PD"}            abrió la tabla de una liga (y terminó su proyección)
+//   {t: "equipo", id: 86}            abrió la página de un equipo
+//   {t: "compartir_equipo", id: 86}  pulsó Compartir en la página de un equipo
 //   {t: "busqueda"}                  buscó un equipo
 //   {t: "pestana", p: "panorama"}    cambió de pestaña en el móvil
 //   {t: "compartir", id: 123}        pulsó Compartir en un partido
@@ -22,7 +24,8 @@
 // "nuevo", "vuelve" y "repite" los decide el navegador, que guarda solo el día de
 // su última visita: un visitante es un navegador en un día. hace: días desde esa
 // visita. o: el dominio de la página de la que llegó (vacío si no se sabe).
-// via: "partido" si entró por un enlace compartido (/partido/123). f: 1 si sigue
+// via: "partido" o "equipo" si entró por un enlace compartido (/partido/123,
+// /equipo/86). f: 1 si sigue
 // a algún equipo. app: 1 si la abrió desde la app instalada.
 //
 // Todo lo que llega se coteja con listas fijas: nadie puede meter una clave
@@ -76,8 +79,8 @@ export function tramoVuelta(dias) {
   return dias <= 1 ? "1" : dias <= 7 ? "2-7" : dias <= 30 ? "8-30" : "31+";
 }
 
-// Los avisos, sumados por (tipo, clave). Los partidos (abiertos o compartidos)
-// solo cuentan si el partido existe (lo comprueba la propia sentencia).
+// Los avisos, sumados por (tipo, clave). Los partidos (abiertos o compartidos) y los
+// equipos solo cuentan si existen (lo comprueba la propia sentencia).
 export function contadores(eventos, propio, hora) {
   const sumas = new Map();
   const sumar = (tipo, clave) => {
@@ -92,7 +95,7 @@ export function contadores(eventos, propio, hora) {
       entrada = true;   // una por petición: la web manda una sola al cargar
       sumar("visitas", "");
       sumar("hora", hora);
-      if (e.via === "partido") sumar("enlace", "partido");
+      if (e.via === "partido" || e.via === "equipo") sumar("enlace", e.via);
       if (e.v !== "nuevo" && e.v !== "vuelve") continue;
       sumar("visitantes", e.v);
       if (e.f === 1) sumar("con_favoritos", "");
@@ -100,7 +103,8 @@ export function contadores(eventos, propio, hora) {
       if (DISPOSITIVOS.has(e.d)) sumar("dispositivo", e.d);
       sumar("origen", origen(e.o, propio));
       if (e.v === "vuelve" && Number.isSafeInteger(e.hace) && e.hace >= 1) sumar("vuelta", tramoVuelta(e.hace));
-    } else if ((e.t === "partido" || e.t === "compartir" || e.t === "imagen") && Number.isSafeInteger(e.id) && e.id > 0) {
+    } else if ((e.t === "partido" || e.t === "compartir" || e.t === "imagen" || e.t === "equipo"
+      || e.t === "compartir_equipo") && Number.isSafeInteger(e.id) && e.id > 0) {
       sumar(e.t, String(e.id));
     } else if (e.t === "favorito" || e.t === "instalada") {
       sumar(e.t, "");
@@ -128,6 +132,12 @@ const SUMAR = `INSERT INTO visitas (dia, tipo, clave, n) SELECT ?1, ?2, ?3, ?4 W
 const SUMAR_PARTIDO = `INSERT INTO visitas (dia, tipo, clave, n) SELECT ?1, ?2, ?3, ?4 WHERE ${BAJO_TOPE}
   AND EXISTS (SELECT 1 FROM predicciones WHERE id = ?6)
   ON CONFLICT (dia, tipo, clave) DO UPDATE SET n = n + excluded.n`;
+// un equipo existe si está en la tabla de una liga o juega en la semana (equipos.js)
+const SUMAR_EQUIPO = `INSERT INTO visitas (dia, tipo, clave, n) SELECT ?1, ?2, ?3, ?4 WHERE ${BAJO_TOPE}
+  AND (EXISTS (SELECT 1 FROM documentos d, json_each(d.valor, '$.equipos') e
+         WHERE d.clave >= 'tabla:' AND d.clave < 'tabla;' AND json_extract(e.value, '$.id') = ?6)
+       OR EXISTS (SELECT 1 FROM partidos WHERE local_id = ?6 OR visita_id = ?6))
+  ON CONFLICT (dia, tipo, clave) DO UPDATE SET n = n + excluded.n`;
 
 const nada = (cabeceras) => new Response(null, { status: 204, headers: cabeceras });
 
@@ -150,7 +160,8 @@ export async function contar(request, env, almacen, cabeceras, ahora = Date.now(
   const db = almacen.db;
   const sentencias = sumas.map((s) => s.tipo === "partido" || s.tipo === "compartir" || s.tipo === "imagen"
     ? db.prepare(SUMAR_PARTIDO).bind(fecha, s.tipo, s.clave, s.n, aj.maxVisitasDia, Number(s.clave))
-    : db.prepare(SUMAR).bind(fecha, s.tipo, s.clave, s.n, aj.maxVisitasDia));
+    : s.tipo === "equipo" || s.tipo === "compartir_equipo" ? db.prepare(SUMAR_EQUIPO).bind(fecha, s.tipo, s.clave, s.n, aj.maxVisitasDia, Number(s.clave))
+      : db.prepare(SUMAR).bind(fecha, s.tipo, s.clave, s.n, aj.maxVisitasDia));
   // la última, para que todas miren el tope de antes de esta petición
   sentencias.push(db.prepare(SUMAR).bind(fecha, "escrituras", "", sumas.length + 1, aj.maxVisitasDia));
   await almacen.escribir(sentencias);
@@ -160,7 +171,8 @@ export async function contar(request, env, almacen, cabeceras, ahora = Date.now(
 // ---------- lo que enseña /visitas ----------
 
 const vacio = () => ({ visitas: 0, visitantes: 0, nuevos: 0, vuelven: 0, partidos: 0, busquedas: 0,
-  compartidos: 0, imagenes: 0, llegadas: 0, estrellas: 0, con_favoritos: 0, instaladas: 0, en_app: 0 });
+  compartidos: 0, imagenes: 0, llegadas: 0, estrellas: 0, con_favoritos: 0, instaladas: 0, en_app: 0,
+  equipos: 0, equipos_compartidos: 0 });
 
 function sumarDias7(dias) {
   const s = vacio();
@@ -174,10 +186,11 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
   const hoy = reloj.local(ahora).fecha;
   const desde30 = sumarDias(hoy, -29), desde7 = sumarDias(hoy, -6);
   const db = almacen.db;
-  const [serie, desglose, top] = await almacen.consultar(() => db.batch([
-    db.prepare(`SELECT dia, tipo, CASE WHEN tipo IN ('partido', 'compartir', 'imagen') THEN '' ELSE clave END AS c, SUM(n) AS n
+  const [serie, desglose, top, equipos] = await almacen.consultar(() => db.batch([
+    db.prepare(`SELECT dia, tipo,
+        CASE WHEN tipo IN ('partido', 'compartir', 'imagen', 'equipo', 'compartir_equipo') THEN '' ELSE clave END AS c, SUM(n) AS n
       FROM visitas WHERE dia >= ?1 AND tipo IN ('visitas', 'visitantes', 'partido', 'busqueda', 'escrituras',
-        'compartir', 'imagen', 'enlace', 'favorito', 'con_favoritos', 'instalada', 'en_app')
+        'compartir', 'imagen', 'enlace', 'favorito', 'con_favoritos', 'instalada', 'en_app', 'equipo', 'compartir_equipo')
       GROUP BY dia, tipo, c`).bind(desde30),
     db.prepare(`SELECT tipo, clave, SUM(n) AS n FROM visitas
       WHERE dia >= ?1 AND tipo IN ('origen', 'dispositivo', 'vuelta', 'hora', 'liga', 'tabla', 'pestana', 'error')
@@ -188,6 +201,12 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
       FROM visitas v LEFT JOIN predicciones p ON p.id = CAST(v.clave AS INTEGER)
       WHERE v.dia >= ?1 AND v.tipo = 'partido'
       GROUP BY v.clave ORDER BY n DESC, v.clave LIMIT 15`).bind(desde7),
+    // el nombre, de la tabla de su liga
+    db.prepare(`SELECT v.clave AS id, SUM(v.n) AS n, (SELECT json_extract(e.value, '$.nombre')
+        FROM documentos d, json_each(d.valor, '$.equipos') e WHERE d.clave >= 'tabla:' AND d.clave < 'tabla;'
+          AND json_extract(e.value, '$.id') = CAST(v.clave AS INTEGER)) AS nombre
+      FROM visitas v WHERE v.dia >= ?1 AND v.tipo = 'equipo'
+      GROUP BY v.clave ORDER BY n DESC, v.clave LIMIT 10`).bind(desde7),
   ]));
 
   const dias = [];
@@ -199,7 +218,7 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
   }
   const CAMPO = { visitas: "visitas", partido: "partidos", busqueda: "busquedas", escrituras: "escrituras",
     compartir: "compartidos", imagen: "imagenes", enlace: "llegadas", favorito: "estrellas", con_favoritos: "con_favoritos",
-    instalada: "instaladas", en_app: "en_app" };
+    instalada: "instaladas", en_app: "en_app", equipo: "equipos", compartir_equipo: "equipos_compartidos" };
   for (const f of serie.results) {
     const d = porDia.get(f.dia);
     if (!d) continue;
@@ -228,6 +247,7 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
       fecha: f.utc ? reloj.local(Date.parse(f.utc)).fecha : null,
       local: f.local_corto || f.local || null, visita: f.visita_corto || f.visita || null,
     })),
+    equipos: equipos.results.map((f) => ({ id: Number(f.id), n: f.n, nombre: f.nombre ?? null })),
   };
 }
 
@@ -319,6 +339,10 @@ export function htmlVisitas(r) {
       + `<span class="liga">${esc(NOMBRE_LIGA[p.liga] || p.liga || "")}${p.fecha ? " · " + fechaCorta(p.fecha) : ""}</span>`
       + `<span class="val">${miles(p.n)}</span></li>`).join("") + "</ol>"
     : '<p class="vacia">Nadie ha abierto un partido esta semana.</p>';
+  const equipos = r.equipos.length
+    ? '<ol class="top">' + r.equipos.map((e) => `<li><span class="nom">${esc(e.nombre || "Equipo " + e.id)}</span>`
+      + `<span class="val">${miles(e.n)}</span></li>`).join("") + "</ol>"
+    : '<p class="vacia">Nadie ha abierto la página de un equipo esta semana.</p>';
   const hoy = r.dias[r.dias.length - 1];
   const tope = r.tope_alcanzado.length
     ? `<p class="aviso">Días en que se llegó al tope de ${miles(r.tope)} escrituras (y se dejó de contar): `
@@ -349,12 +373,14 @@ ${graficoHoras(r.desglose.hora)}
 ${lista("Ligas que más se abren", r.desglose.liga, NOMBRE_LIGA)}
 ${lista("Tablas que más se abren", r.desglose.tabla, NOMBRE_LIGA)}
 <section class="tablero"><h2>Partidos más abiertos</h2>${partidos}</section>
+<section class="tablero"><h2>Equipos que más se abren <small>${miles(s.equipos)} veces esta semana</small></h2>${equipos}</section>
 ${lista("Pestañas en el móvil", r.desglose.pestana, NOMBRES.pestana, ["partidos", "panorama", "ligas"])}
 ${lista("Errores del navegador (tipo:línea de app.js)", r.desglose.error, null)}
 <section class="tablero"><h2>Búsquedas</h2><p class="grande">${miles(s.busquedas)}</p>
 <p class="vacia">veces que alguien buscó un equipo esta semana</p></section>
 <section class="tablero"><h2>Compartir, favoritos y app</h2><div class="pares">
 ${par(s.compartidos, "veces que se pulsó Compartir en un partido")}
+${par(s.equipos_compartidos, "veces que se pulsó Compartir en la página de un equipo")}
 ${par(s.imagenes, "imágenes de un partido para historias")}
 ${par(s.llegadas, "visitas que llegaron por un enlace compartido")}
 ${par(s.estrellas, "equipos marcados con la estrella")}

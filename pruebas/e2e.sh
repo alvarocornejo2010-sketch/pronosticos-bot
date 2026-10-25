@@ -8,8 +8,9 @@
 # primera (calendario.py), /partido/123 lleva la tarjeta de ese partido
 # (compartir.py), la web es instalable y tiene robots.txt y sitemap
 # (descubrir.py), las visitas se cuentan como deben (visitas.py), las cuentas
-# funcionan de crear a borrar, con correo y Turnstile (cuentas.py), y los avisos de Mis
-# equipos llegan cifrados y firmados al servicio de avisos de mentira (avisos.mjs).
+# funcionan de crear a borrar, con correo y Turnstile (cuentas.py), los avisos de Mis
+# equipos llegan cifrados y firmados al servicio de avisos de mentira (avisos.mjs) y la
+# página de cada equipo trae su tabla, su fuerza, su forma y lo que dijo la web (equipos.py).
 #
 # Uso: bash pruebas/e2e.sh   (antes: npm ci y pip install -r requirements.txt)
 # Las variables del Worker van con --var, que manda sobre .dev.vars: tu token de
@@ -104,6 +105,10 @@ python3 "$REPO/pruebas/cuentas.py" "$P_W" "$TMP/d1"
 echo "== Avisos de Mis equipos"
 node --no-warnings "$REPO/pruebas/avisos.mjs" "$P_W" "$P_INS" "$P_API" "$TMP/d1" "$TMP/wrangler.log" secreto_de_prueba_123 "$MAX_MS"
 (cd "$REPO" && FOOTBALL_DATA_TOKEN=sin_uso UPDATE_SECRET=avisos_dummy_secret python3 -c "import app; r = app.app.test_client().get('/api/avisos').get_json(); assert r == {'disponible': False}, r; print('Flask: /api/avisos responde disponible: false')")
+
+echo "== Página de cada equipo"
+python3 "$REPO/pruebas/equipos.py" "$P_W" "$P_INS" "$TMP/d1" "$MAX_MS"
+(cd "$REPO" && FOOTBALL_DATA_TOKEN=sin_uso UPDATE_SECRET=equipos_dummy_secret python3 -c "import app; c = app.app.test_client(); r = c.get('/api/equipo/86').get_json(); assert r['estado'] == 'no_disponible', r; assert c.get('/equipo/86').status_code == 200; print('Flask: /api/equipo responde no_disponible y /equipo/86 es la web')")
 
 echo "== Interfaz (Playwright)"
 node "$REPO/pruebas/interfaz.mjs" "$P_W" "$P_API"

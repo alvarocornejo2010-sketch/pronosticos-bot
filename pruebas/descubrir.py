@@ -46,6 +46,9 @@ estado = json.load(urllib.request.urlopen(W + "/api/estado"))
 ahora = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 por_jugar = {f"{W}/partido/{p['id']}" for d in estado["dias"] for p in d["partidos"] if p["utcDate"] > ahora}
 assert locs[0] == W + "/" and len(locs) == len(set(locs)), locs[:3]
-assert set(locs[1:]) == por_jugar, (len(locs) - 1, len(por_jugar), set(locs[1:]) ^ por_jugar)
-print(f"buscadores: robots.txt apunta al sitemap; el sitemap trae la portada y los {len(por_jugar)} partidos por jugar")
+# los equipos de las tablas también van (los mira equipos.py)
+partidos = {l for l in locs[1:] if "/equipo/" not in l}
+assert partidos == por_jugar, (len(partidos), len(por_jugar), partidos ^ por_jugar)
+print(f"buscadores: robots.txt apunta al sitemap; el sitemap trae la portada, los {len(por_jugar)} partidos por jugar"
+      f" y {len(locs) - 1 - len(partidos)} equipos")
 print("descubrir: OK")
