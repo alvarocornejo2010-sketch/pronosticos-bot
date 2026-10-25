@@ -564,9 +564,9 @@ equipo. Para enlazarla, cada ficha lleva `local_id` y `visita_id` (`fichaBase` y
 predicciones de antes se ponen al día solas: la base cambia y la ficha se rehace sin
 recalcular, con la siguiente descarga de su calendario.
 
-- **Arriba, su ficha:** escudo, liga, puesto, puntos y su balance, su forma (los 5
-  últimos de liga, G/E/P con el marcador; en tinta, no en colores de estado), Seguir y
-  Compartir. Debajo, "En la tabla": cuántas temporadas simuladas acaba en cada zona de
+- **Arriba, su ficha:** escudo, liga, puesto, puntos y su balance, su forma ("Últimos de
+  liga": los 5 últimos, G/E/P con el marcador; en tinta, no en colores de estado), Seguir
+  y Compartir. La pestaña del navegador lleva el mismo título que su tarjeta. Debajo, "En la tabla": cuántas temporadas simuladas acaba en cada zona de
   su liga y sus puntos medios, con la simulación de la tabla (`simularPorTandas`, la
   misma semilla: los mismos números que en `#/liga/PD/tabla`), y "Cómo juega": cuánto
   marca y cuánto encaja frente a un equipo medio de su liga contra los mismos rivales

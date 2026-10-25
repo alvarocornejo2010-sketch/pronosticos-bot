@@ -682,15 +682,21 @@
             padding: 4px 0 16px; border-bottom: 1px solid var(--linea); }
   .eq-cab > .escudo, .eq-cab > .escudo img { width: 64px; height: 64px; }
   .eq-cab > .escudo.mono { font-size: var(--t-24); }
-  .eq-que { display: grid; gap: 10px; min-width: 0; }
-  .eq-linea { display: flex; align-items: center; gap: 10px; margin: 0; font-size: var(--t-15); line-height: 1.4; color: var(--tinta-2); }
-  .eq-linea b { color: var(--tinta); font-weight: 700; }
-  .eq-linea .insignia { flex-shrink: 0; }
-  .eq-acciones { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+  .eq-que { display: grid; gap: 4px; min-width: 0; }
+  .eq-que p { margin: 0; }
+  .eq-liga { display: flex; align-items: center; gap: 8px; font-size: var(--t-13); font-weight: 600; color: var(--tinta-2); }
+  .eq-liga .insignia { flex-shrink: 0; }
+  .eq-puesto { font-family: var(--f-disp); font-size: var(--t-20); font-weight: 600; color: var(--tinta-2); line-height: 1.2; }
+  .eq-puesto b { font-weight: 800; color: var(--tinta); }
+  .eq-balance { font-size: var(--t-13); line-height: 1.4; color: var(--tinta-3); }
+  .eq-acciones { grid-column: 3; grid-row: 1; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
   .eq-acciones .accion { min-height: 2.25rem; padding: 0 12px; font-size: var(--t-13); }
+  .eq-forma-fila { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .eq-forma-fila .k { font-size: var(--t-12); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tinta-3); }
   @container centro (max-width: 559px) {
     .eq-cab { grid-template-columns: auto minmax(0, 1fr); }
-    .eq-acciones { grid-column: 1 / -1; justify-content: flex-start; }
+    .eq-acciones { grid-column: 1 / -1; grid-row: auto; justify-content: flex-start; }
+    .eq-cab > .escudo, .eq-cab > .escudo img { width: 52px; height: 52px; }
   }
   .eq-forma { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
   .eq-forma li { display: grid; justify-items: center; min-width: 3rem; padding: 5px 6px 6px; border-radius: var(--r-celda);
@@ -700,6 +706,11 @@
   .eq-forma .g { background: var(--tinta); color: var(--oscura); }
   .eq-forma .e { background: var(--panel-alto); color: var(--tinta); box-shadow: inset 0 0 0 1px var(--linea-viva); }
   .eq-forma .p { background: none; color: var(--tinta-2); box-shadow: inset 0 0 0 1px var(--linea-viva); }
+  .eq-ficha .cas .corto { display: none; }
+  @container centro (max-width: 399px) {   /* "Descenso <1" no cabe en un tercio del panel */
+    .eq-ficha .cas .largo { display: none; }
+    .eq-ficha .cas .corto { display: inline; }
+  }
   .eq-proy { margin: 10px 0 0; font-size: var(--t-14); color: var(--tinta-2); }
   .eq-proy b { color: var(--tinta); }
   .eq-ir { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; font-size: var(--t-14); font-weight: 600;

@@ -963,7 +963,8 @@ function htmlProyeccion(d) {
     const etiqueta = z[0] + " (" + donde + "): " + (v === null ? "simulando" : txt === "—" ? "no pasa en ninguna temporada simulada"
       : txt + " % de las temporadas simuladas");
     return '<span class="cas" role="group" style="' + estilo + '" aria-label="' + esc(etiqueta) + '">'
-      + '<small aria-hidden="true">' + esc(z[0]) + '</small><b aria-hidden="true">' + esc(txt) + '</b>'
+      + '<small aria-hidden="true"><span class="largo">' + esc(z[0]) + '</span><span class="corto">' + esc(ZONA_CORTA[z[0]] || z[0])
+      + '</span></small><b aria-hidden="true">' + esc(txt) + '</b>'
       + '<span class="que" aria-hidden="true">' + esc(donde) + '</span></span>';
   }).join("");
   const puntos = listo ? Math.round(sim.puntos[i] / sim.hechas) : null;
@@ -1004,18 +1005,22 @@ function htmlFuerza(d) {
       : "Recién llegado a la liga: parte de lo que suelen rendir los que llegan, hasta que juegue.") + '</p>';
 }
 
+const cuantos = (n, uno, varios) => n + " " + (n === 1 ? uno : varios);
+
 function htmlFichaEquipo(d, nombre, suyo, id) {
   const escudo = d ? d.escudo : suyo && suyo[(suyo.local_id === id ? "local" : "visita") + "_escudo"];
   const sigo = favoritos.has(nombre);
   const corto = (d && d.corto) || nombre;
-  const linea = d && d.tabla
-    ? htmlInsignia(d.liga) + '<span><b>' + d.tabla.pos + '.º</b> de ' + d.tabla.equipos + ' con <b>' + d.tabla.pts + ' puntos</b> · '
-      + d.tabla.pj + ' jugados, ' + d.tabla.g + ' ganados, ' + d.tabla.e + ' empatados y ' + d.tabla.p + ' perdidos · goles '
-      + d.tabla.gf + ':' + d.tabla.gc + '</span>'
-    : d && d.liga ? htmlInsignia(d.liga) + '<span>' + esc(d.liga_nombre || d.liga) + '</span>' : "";
+  const t = d && d.tabla;
+  const forma = d ? htmlFormaEquipo(d.forma) : "";
   const cab = '<div class="eq-cab">' + htmlEscudo(escudo, corto)
-    + '<div class="eq-que">' + (linea ? '<p class="eq-linea">' + linea + '</p>' : "")
-    + (d ? htmlFormaEquipo(d.forma) : "") + '</div>'
+    + '<div class="eq-que">'
+    + (d && d.liga ? '<p class="eq-liga">' + htmlInsignia(d.liga) + '<span>' + esc(d.liga_nombre || d.liga) + '</span></p>' : "")
+    + (t ? '<p class="eq-puesto"><b>' + t.pos + '.º</b> de ' + t.equipos + ' · <b>' + cuantos(t.pts, "punto", "puntos") + '</b></p>'
+      + '<p class="eq-balance">' + cuantos(t.pj, "jugado", "jugados") + ': ' + cuantos(t.g, "ganado", "ganados") + ', '
+      + cuantos(t.e, "empatado", "empatados") + ' y ' + cuantos(t.p, "perdido", "perdidos") + ' · goles ' + t.gf + ':' + t.gc + '</p>' : "")
+    + '</div>'
+    + (forma ? '<div class="eq-forma-fila"><span class="k">Últimos de liga</span>' + forma + '</div>' : "")
     + '<div class="eq-acciones"><button class="accion" data-seguir="' + esc(nombre) + '" aria-pressed="' + sigo + '"'
     + ' aria-label="' + esc((sigo ? "Dejar de seguir a " : "Seguir a ") + corto) + '">'
     + (sigo ? ICONO_ESTRELLA_LLENA : ICONO_ESTRELLA) + '<span>' + (sigo ? "Siguiendo" : "Seguir") + '</span></button>'
@@ -1057,6 +1062,8 @@ function bloquesEquipo(todos, id) {
   const nombre = d ? d.nombre : suyo ? (suyo.local_id === id ? suyo.local : suyo.visita) : null;
   const out = { titulo: nombre || "Equipo", sub: d && d.tabla ? (d.liga_nombre + " · " + d.tabla.pos + ".º") : "",
     mezcla: true, bloques: [] };
+  // el título de la pestaña, el mismo que pone el Worker en /equipo/86 (textosEquipo)
+  if (nombre) out.pestana = ((d && d.corto) || nombre) + ": próximos partidos y pronóstico · Pronósticos";
   if (!nombre) {
     out.vacio = e.doc && e.doc.estado === "no_encontrado" ? ["No encontramos ese equipo", e.doc.nota]
       : e.error ? ["No se pudo cargar el equipo", e.error] : ["Cargando el equipo…", "Un momento."];
@@ -1695,6 +1702,7 @@ function render() {
   ligaContada = ligaVista;
   const equipoVista = ruta.vista === "equipo" ? ruta.id : null;
   if (equipoVista && equipoVista !== equipoContado) contar({ t: "equipo", id: equipoVista });
+  if (!equipoVista && equipoContado) document.title = "Pronósticos";   // sale de la página de un equipo
   equipoContado = equipoVista;
   const clave = JSON.stringify(ruta) + "|" + orden + "|" + (busqueda ? "b" : "") + "|" + mqEscritorio.matches;
   const reconstruir = clave !== rutaPintada;
@@ -1726,6 +1734,7 @@ function render() {
   }
   const c = bloquesCentro(todos, ruta);
   tituloEl.innerHTML = esc(c.titulo) + (c.sub ? '<small>' + esc(c.sub) + '</small>' : "");
+  if (c.pestana && document.title !== c.pestana) document.title = c.pestana;
   centroEl.classList.toggle("mezcla", !!c.mezcla);
   centroEl.classList.toggle("con-dia", c.bloques.some(b => b.conDia));
   limpiarHueco.innerHTML = busqueda ? '<button class="limpiar" id="limpiar">Limpiar búsqueda</button>' : "";
