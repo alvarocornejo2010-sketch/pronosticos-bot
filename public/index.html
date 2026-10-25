@@ -405,7 +405,8 @@
   .oculto { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .tabla-vista { padding: 4px 0 24px; }
   .tabla-sim { margin: 0 0 10px; font-size: var(--t-13); color: var(--tinta-3); }
-  .tabla-desliza { overflow-x: auto; }
+  .tabla-desliza { overflow-x: auto; border-radius: var(--r-celda); }
+  .tabla-desliza:focus-visible { outline: 2px solid var(--tinta-2); outline-offset: 2px; }
   .tabla-liga { width: 100%; border-collapse: collapse; font-size: var(--t-14); font-variant-numeric: tabular-nums; }
   .tabla-liga th, .tabla-liga td { padding: 6px 6px; border-bottom: 1px solid var(--linea); text-align: left; white-space: nowrap; }
   .tabla-liga thead th { font-size: var(--t-12); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tinta-3);

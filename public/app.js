@@ -866,7 +866,9 @@ function htmlTabla(cod, t) {
   const cuando = doc.tabla_actualizada ? "Clasificación de football-data, " + haceCuanto(doc.tabla_actualizada) + "." : "";
   const estado = listo ? "" : '<p class="tabla-sim" role="status">Simulando la temporada… ' + Math.round(100 * (sim ? sim.hechas : 0) / SIMULACIONES) + ' %</p>';
   return '<div class="tabla-vista">' + estado
-    + '<div class="tabla-desliza"><table class="tabla-liga"><caption class="oculto">Tabla de ' + esc(doc.nombre || cod)
+    // enfocable: sin un solo botón dentro, el teclado no podría desplazar la tabla (axe: scrollable-region-focusable)
+    + '<div class="tabla-desliza" tabindex="0" role="region" aria-label="' + esc("Tabla de " + (doc.nombre || cod)) + '">'
+    + '<table class="tabla-liga"><caption class="oculto">Tabla de ' + esc(doc.nombre || cod)
     + ' con la proyección de la temporada</caption>' + cab + '<tbody>' + filas + '</tbody></table></div>'
     + '<p class="tabla-nota">' + esc(cuando) + ' Proyección: la temporada que falta (' + doc.restantes.length
     + ' partidos) jugada ' + String(SIMULACIONES).replace(/\B(?=(\d{3})+$)/g, ".") + ' veces, cada partido con los goles esperados del modelo, como los de la semana.'
