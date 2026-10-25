@@ -3,7 +3,7 @@ aparato, las estrellas en la cuenta, cambiar la contraseña (cierra las demás
 sesiones), el correo (crear con él, entrar con él, cambiarlo o quitarlo con la
 contraseña), Turnstile al crear (sin la ficha o con una ya usada, no), el bloqueo tras
 10 intentos sin acertar (también si llegan todos a la vez, y contando los de cambiar la
-contraseña), ponerle usuario a una cuenta de la primera
+contraseña), el freno por IP (5 por minuto desde una misma IP), ponerle usuario a una cuenta de la primera
 versión (la del código), cerrar sesión (en uno y en todos), descargar los datos y
 borrar la cuenta; lo que llega de otra web no entra, una ruta que no existe no hace
 nada, cada cuenta guarda 20 sesiones como mucho, y los topes del día (cuentas nuevas,
@@ -24,10 +24,12 @@ UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chr
 PROPIA = {"Origin": "null", "Sec-Fetch-Site": "same-origin"}   # lo que manda la web (no-referrer)
 clave = lambda texto: hashlib.sha256(texto.encode()).hexdigest()   # como si fuera el PBKDF2 del navegador
 FICHAS = count()   # Turnstile: una ficha nueva para cada cuenta que se crea
+IPS = count(1)     # cada petición, desde su IP (como gente distinta): el freno por IP va aparte
 
 
-def pedir(ruta, cuerpo=None, sesion=None, cabeceras=PROPIA, tipo="application/json", metodo=None):
-    cab = {"User-Agent": UA, **cabeceras}
+def pedir(ruta, cuerpo=None, sesion=None, cabeceras=PROPIA, tipo="application/json", metodo=None, ip=None):
+    n = next(IPS)
+    cab = {"User-Agent": UA, "CF-Connecting-IP": ip or f"10.9.{n // 250}.{n % 250 + 1}", **cabeceras}
     if sesion:
         cab["Cookie"] = f"sesion={sesion}"
     datos = None
@@ -195,6 +197,21 @@ db.execute("UPDATE usuarios SET bloqueado = 1 WHERE usuario = 'de.antes'")
 db.commit()
 assert pedir("/api/cuenta/entrar", {"usuario": "de.antes", "clave": clave("vieja-1"), "equipos": []})[0] == 200
 print("30 intentos a la vez: 9 sin acertar y el bloqueo; ninguno más llega a mirar la contraseña")
+
+# el freno por IP (FRENO en wrangler.jsonc): 5 por minuto desde una misma IP, entre entrar,
+# crear y cambiar la contraseña o el correo. Lo frenado no cuenta como intento (ni para el
+# tope del día ni para el bloqueo del usuario), y desde otra IP se sigue entrando
+IP = "203.0.113.7"
+intentos = lambda: db.execute("SELECT coalesce(sum(n), 0) FROM visitas WHERE tipo = 'intentos' AND clave = ''").fetchone()[0]
+for i in range(5):
+    assert pedir("/api/cuenta/entrar", {"usuario": "nadie.mas", "clave": clave(f"f{i}"), "equipos": []}, ip=IP)[0] == 401
+antes = intentos()
+st, c, _, _ = pedir("/api/cuenta/entrar", {"usuario": "de.antes", "clave": clave("vieja-1"), "equipos": []}, ip=IP)
+assert st == 429 and "espera un minuto" in c["error"], (st, c)
+assert pedir("/api/cuenta/crear", {"usuario": "frenado", "clave": clave("x"), "equipos": []}, ip=IP)[0] == 429
+assert intentos() == antes
+assert pedir("/api/cuenta/entrar", {"usuario": "de.antes", "clave": clave("vieja-1"), "equipos": []})[0] == 200
+print("freno por IP: a la sexta en un minuto desde la misma IP, 429 (también al crear) sin gastar intentos; desde otra, entra")
 
 # el correo: opcional al crear, en minúsculas, único, y con él también se entra (la
 # clave del correo es la misma contraseña con el correo de sal: aquí, otra cualquiera)

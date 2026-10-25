@@ -97,6 +97,7 @@ python3 "$REPO/pruebas/compartir.py" "$P_W"
 
 echo "== Instalable y buscadores"
 python3 "$REPO/pruebas/descubrir.py" "$P_W"
+(cd "$REPO" && FOOTBALL_DATA_TOKEN=sin_uso UPDATE_SECRET=privacidad_dummy_secret python3 -c "import app; r = app.app.test_client().get('/privacidad'); assert r.status_code == 200 and 'Ley N.º 29733' in r.get_data(as_text=True) and \"script-src 'self'\" in r.headers['Content-Security-Policy'], r; print('Flask: /privacidad es la misma página, con la CSP de la web')")
 
 echo "== Visitas"
 python3 "$REPO/pruebas/visitas.py" "$P_W" secreto_de_prueba_123

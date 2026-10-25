@@ -14,7 +14,7 @@
 
 import { ajustes } from "./config.js";
 import { Reloj } from "./tiempo.js";
-import { cuerpoJson, limpiarEquipos, mismoSitio } from "./cuentas.js";
+import { cuerpoJson, frenado, limpiarEquipos, mismoSitio } from "./cuentas.js";
 import { enterosQueSuman } from "./compartir.js";
 import { CAMPOS_PARTIDO, isoSinMs } from "./registro.js";
 import { mensajeAviso } from "./avisos.js";
@@ -46,7 +46,8 @@ function claveNueva() {
 
 // POST /api/calendario {clave?, equipos}: crea el calendario o le cambia los equipos. Con
 // una clave que ya no está (borrada por no usarse), la vuelve a crear con esa misma: así
-// el calendario que la persona ya tenía suscrito sigue funcionando.
+// el calendario que la persona ya tenía suscrito sigue funcionando. {clave, borrar: true}
+// lo quita en el acto: la dirección deja de funcionar.
 export async function atenderCalendario(request, env, almacen, cabeceras, ahora = Date.now()) {
   const url = new URL(request.url);
   const aj = ajustes(env);
@@ -56,9 +57,18 @@ export async function atenderCalendario(request, env, almacen, cabeceras, ahora 
   if (!mismoSitio(request, url)) return json({ error: "Solo desde la propia web." }, 403);
   const d = await cuerpoJson(request);
   if (!d || (d.clave != null && !CLAVE.test(d.clave))) return json({ error: "Petición mal formada." }, 400);
+  // quitarlo: siempre, sin topes (la clave es lo único que hace falta)
+  if (d.borrar === true) {
+    if (!d.clave) return json({ error: "Petición mal formada." }, 400);
+    const r = await almacen.consultar(() => db.prepare("DELETE FROM calendarios WHERE clave = ?1").bind(d.clave).run());
+    return json({ ok: true, borrado: r.meta.changes > 0 });
+  }
   const equipos = limpiarEquipos(d.equipos);
   // uno que ya existe puede quedarse sin equipos (se quitaron todas las estrellas)
   if (!equipos.length && !d.clave) return json({ error: "Sigue a algún equipo antes de crear el calendario." }, 400);
+  if (!d.clave && await frenado(env, request, "calendario")) {
+    return json({ error: "Demasiados calendarios nuevos desde tu conexión: espera un minuto." }, 429);
+  }
   const dia = new Reloj(aj.tz).local(ahora).fecha;
   const clave = d.clave || claveNueva();
   const [ya, topes] = await almacen.consultar(() => db.batch([

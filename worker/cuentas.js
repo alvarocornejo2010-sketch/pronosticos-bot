@@ -121,6 +121,24 @@ export async function cuerpoJson(request) {
   } catch { return null; }
 }
 
+// El freno por IP (el binding FRENO de wrangler.jsonc, Rate Limiting de Workers): como
+// mucho 5 por minuto desde una misma IP, contados por Cloudflare en cada uno de sus sitios.
+// Sin él, un solo atacante gastaba en unos minutos el tope de intentos del día
+// (MAX_INTENTOS_DIA) y nadie más podía entrar. La IP solo es la clave del contador, que
+// vive un minuto en Cloudflare: aquí no se guarda. Sin el binding (o si falla) no frena:
+// los topes del día siguen ahí.
+export async function frenado(env, request, tipo) {
+  const ip = request.headers.get("CF-Connecting-IP");
+  if (!env.FRENO || !ip) return false;
+  try {
+    return !(await env.FRENO.limit({ key: tipo + ":" + ip })).success;
+  } catch (e) {
+    console.error(`freno: ${(e && e.stack) || e}`);
+    return false;
+  }
+}
+const FRENADAS = new Set(["/crear", "/entrar", "/contrasena", "/correo", "/usuario"]);
+
 // Nombres de equipo tal como los guarda la web (los de football-data): texto, sin
 // repetir, hasta MAX_EQUIPOS. Solo los ve su dueño, y la web los escapa al pintarlos.
 export function limpiarEquipos(lista) {
@@ -163,6 +181,7 @@ const MAL = "Usuario o contraseña incorrectos.";
 export class Cuentas {
   constructor(request, env, almacen, cabeceras, ahora = Date.now()) {
     this.request = request;
+    this.env = env;
     this.url = new URL(request.url);
     this.aj = ajustes(env);
     this.almacen = almacen;
@@ -577,6 +596,9 @@ export class Cuentas {
     if (!mismoSitio(this.request, this.url)) return this.error("Solo desde la propia web.", 403);
     const body = await cuerpoJson(this.request);
     if (!body) return this.error("Petición mal formada.", 400);
+    if (FRENADAS.has(ruta) && await frenado(this.env, this.request, "cuenta")) {
+      return this.error("Demasiados intentos desde tu conexión: espera un minuto y vuelve a probar.", 429);
+    }
     if (ruta === "/crear") return this.crear(body);
     if (ruta === "/entrar") return this.entrar(body);
     const s = await this.sesion();

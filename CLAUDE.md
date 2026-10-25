@@ -240,7 +240,8 @@ solo en Cloudflare, `/api/avisos/alta` y `/api/avisos/baja` (POST; ver "Avisos d
 equipos"). Y `/api/equipo/86`, la página de un equipo (en Render, `no_disponible`), y
 `/equipo/86`, la web con su tarjeta (en Render, la web sin tarjeta; ver "Página de cada
 equipo"). Y el calendario de Mis equipos, solo en Cloudflare: `/api/calendario` (POST) y
-`/calendario/<clave>.ics` (ver "Calendario de Mis equipos").
+`/calendario/<clave>.ics` (ver "Calendario de Mis equipos"). Y `/privacidad`, la política
+de privacidad (ver "Privacidad").
 
 **Efecto secundario de cada deploy:** el disco de Render free es efímero, cada
 deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
@@ -660,7 +661,7 @@ correo; en el iPhone, solo con la web instalada (Safari no los deja de otra form
   (unas pocas por hora): con 2.000, unas 300.000 filas leídas al día de los 5 millones.
 - **Qué se guarda** (`suscripciones`): la dirección del servicio, las dos claves del
   navegador y los nombres de los equipos, con cuándo se creó y se renovó. Nada de
-  quién es. La política de privacidad tendrá que decirlo.
+  quién es (lo dice la política de privacidad).
 - **En el panel de visitas**, el tablero "Avisos de Mis equipos": suscripciones
   (y cuántas siguen a algún equipo), altas de la semana, avisos mandados antes del
   partido y con el resultado, los que el servicio no aceptó, los que llegaron tarde y
@@ -699,7 +700,10 @@ tenga ve y cambia esa lista de equipos, nada más.
   crear otro); si la web lo vuelve a mandar con su clave, se crea de nuevo con la misma, y
   la dirección que la persona tenía suscrita sigue valiendo.
 - **Qué se guarda** (`calendarios`): la clave, los nombres de los equipos y cuándo se creó
-  y se pidió por última vez. Nada de quién es. La política de privacidad tendrá que decirlo.
+  y se pidió por última vez. Nada de quién es (lo dice la política de privacidad).
+- **Quitarlo:** "Quitar el calendario" en la tarjeta (`{clave, borrar: true}`) lo borra en el
+  acto, sin mirar topes: su dirección da 404. Crear uno nuevo (sin clave) pasa por el freno
+  por IP (ver "Cuentas").
 - `robots.txt` deja fuera `/calendario/` y `/api/calendario`. En el panel de visitas, el
   tablero "Calendario de Mis equipos": guardados, nuevos de la semana y pedidos en la
   última semana. Solo en Cloudflare: en Render la tarjeta no sale y `/api/calendario` da 404.
@@ -812,8 +816,8 @@ es lo que pidió el dueño del proyecto; lo que cueste dinero (mandar correos) e
   contraseña ni los tokens), cerrar sesión en este aparato o en todos, y **borrar
   la cuenta** (con confirmación en la misma ventana): se borran en el acto la cuenta,
   su usuario (que queda libre), sesiones y equipos. D1 guarda copias de los
-  últimos 7 días (Time Travel del plan gratis): la política de privacidad tendrá
-  que decirlo. Mientras va una petición, la ventana no se cierra.
+  últimos 7 días (Time Travel del plan gratis): lo dice la política de privacidad.
+  Mientras va una petición, la ventana no se cierra.
 - **Qué se guarda** (`worker/cuentas.js`): `cuentas` (id al azar, creada, última
   vez), `usuarios` (usuario, cuenta, sal, hash, fallos seguidos, bloqueo),
   `correos` (correo, cuenta, sal, hash, verificado, desde cuándo), `sesiones`
@@ -821,8 +825,8 @@ es lo que pidió el dueño del proyecto; lo que cueste dinero (mandar correos) e
   cuándo) y `accesos` (los códigos de la primera versión; queda para una passkey o
   Google). Nada de nombre ni IP. Las tablas se crean solas la primera vez que hacen
   falta (probado sobre una base sin `usuarios` y otra sin `correos`, como la de
-  producción el 24 oct). Con correos guardados, la política de privacidad ya hace
-  falta (ver "Pendiente").
+  producción el 24 oct). Con correos guardados hacía falta la política de privacidad:
+  ver "Privacidad".
 - **Topes del día** (de Lima), contados en `visitas`: `MAX_CUENTAS_DIA` (300)
   cuentas nuevas (tipo `cuentas`; cuentan las creadas, no las que quedan, así que
   crear y borrar en bucle no lo esquiva), `MAX_ESCRITURAS_CUENTAS_DIA` (10.000,
@@ -837,11 +841,21 @@ es lo que pidió el dueño del proyecto; lo que cueste dinero (mandar correos) e
   Borrar la cuenta no mira ningún tope: tiene que funcionar siempre. El panel de
   visitas tiene un tablero "Cuentas" (en total, creadas esta semana contando las
   borradas, activas, con equipos, con usuario, con correo e intentos de entrar de la semana:
-  muchos más intentos que entradas es alguien probando contraseñas). Lo que
-  falta para que un solo atacante no pueda gastar el tope de intentos: un límite
-  por IP (el binding de Rate Limiting de Workers, que no cuesta escrituras; no
-  está claro que entre en el plan gratis) o la regla de límite de un dominio
-  propio.
+  muchos más intentos que entradas es alguien probando contraseñas).
+- **El freno por IP** (oct 2026, `frenado` en `cuentas.js`): el binding `FRENO` de
+  `wrangler.jsonc` (Rate Limiting de Workers) deja como mucho 5 por minuto desde una misma
+  IP entre entrar, crear la cuenta y cambiar la contraseña, el correo o el usuario (y,
+  aparte, 5 calendarios nuevos por minuto); el sexto da 429 ("espera un minuto") antes de
+  tocar D1, así que no cuenta como intento ni para el bloqueo del usuario. Antes, un solo
+  atacante gastaba en unos minutos los 3.000 intentos del día y nadie más podía entrar;
+  ahora le harían falta 10 horas o muchas IP. No cuesta escrituras ni dinero: la IP es la
+  clave del contador, que Cloudflare guarda un minuto en cada uno de sus sitios (cuenta
+  aproximado, por sitio). Sin el binding (o si falla) no frena: los topes del día siguen.
+  **Por confirmar en producción** que el plan gratis lo acepta: la documentación no lo
+  limita a un plan; si no, el despliegue fallaría y se quitaría el bloque de
+  `wrangler.jsonc`. En `wrangler dev` funciona igual, y la IP es la cabecera
+  `CF-Connecting-IP` que mande el cliente: `cuentas.py` e `ics.py` mandan una distinta en
+  cada petición (como gente distinta) y prueban el freno con una repetida.
 - **Solo en Cloudflare:** en Render, `/api/cuenta` responde `disponible: false` y
   el botón no sale.
 - **Para crecer:** verificar el correo y recuperar la contraseña con él (cuando se
@@ -886,6 +900,28 @@ es lo que pidió el dueño del proyecto; lo que cueste dinero (mandar correos) e
   detalle de cada partido. Los números están fijos en `POCO_FIABLES` (`app.js`),
   medidos con `afinar_liga.py` en las temporadas de prueba: si se reajusta el
   modelo, actualizarlos.
+
+## Privacidad (oct 2026)
+
+`/privacidad` (`public/privacidad.html`): la política de privacidad, según la Ley 29733 del
+Perú. Una página estática con el estilo de la web, sin JavaScript (la sirven los archivos
+estáticos con las cabeceras de `public/_headers`; en Flask, su ruta). La enlazan la barra de
+estado, el pie del tablero de Ligas (en el móvil, la pestaña Ligas), la ventana de la cuenta
+y las tarjetas de los avisos y del calendario ("Qué se guarda").
+
+- **Dice:** qué se guarda sin cuenta (las claves de `localStorage` y las visitas sumadas,
+  sin IP), con cuenta, con los avisos y con el calendario; cuánto dura cada cosa (sesiones y
+  avisos, 180 días sin uso; calendarios, 120; las copias de D1, 7 días; los registros de
+  Cloudflare, 3); quién más interviene (Cloudflare, Turnstile, Google Fonts,
+  football-data.org y los servicios de avisos de los navegadores) y qué ve cada uno; que
+  los datos salen del Perú (Cloudflare, EE. UU.); y cómo ejercer los derechos ARCO desde la
+  web: descargar los datos, cambiar el correo, borrar la cuenta, quitar los avisos y el
+  calendario. Las cuentas no son para menores de 14 años.
+- **Sin contacto:** el dueño del proyecto eligió no poner ni nombre ni correo (oct 2026);
+  la página dice que todo se hace desde la web y que se puede reclamar ante la Autoridad
+  Nacional de Protección de Datos Personales. Ver "Pendiente".
+- **Si cambia lo que se guarda** (`cuentas.js`, `avisos.js`, `calendario.js`, `visitas.js`
+  o las claves de `localStorage` de `app.js`), cambiar la página y su fecha.
 
 ## Seguridad (revisada en oct 2026)
 
@@ -955,8 +991,9 @@ UTC (la web en sí, que es estática, seguiría cargando). En `workers.dev` no h
 reglas de WAF; con un dominio propio en Cloudflare sí habría una regla de
 límite de peticiones gratis. Las rutas públicas que escriben en D1 son
 `/api/contar`, las de las cuentas, el alta de los avisos y la del calendario, todas con
-tope diario (ver "Visitas", "Cuentas", "Avisos de Mis equipos" y "Calendario de Mis equipos"); quien machaque `/api/cuenta/entrar` deja a todos sin poder entrar ese
-día (no sin sus equipos).
+tope diario (ver "Visitas", "Cuentas", "Avisos de Mis equipos" y "Calendario de Mis equipos"). Entrar y crear una cuenta o un calendario llevan además el freno por IP
+(5 por minuto, ver "Cuentas"): para dejar a todos sin poder entrar un día hacen falta
+muchas IP o 10 horas desde una.
 
 ## El modelo (oct 2026)
 
@@ -1439,11 +1476,11 @@ Environment).
   Mis equipos (ver "Avisos de Mis equipos"), la página de cada equipo (ver "Página
   de cada equipo") y el calendario de Mis equipos (ver "Calendario de Mis equipos").
 
-- **Cuentas, la versión siguiente** (ver "Cuentas"): una página de política de
-  privacidad (Ley 29733: qué se guarda, ahora también el correo, las suscripciones
-  de los avisos y los calendarios, para qué, los 7 días
-  de copias de D1 y cómo pedir o borrar los datos; conviene que la revise alguien que
-  sepa de leyes); poner las claves de Turnstile en el panel; verificar el correo y
+- **Cuentas, la versión siguiente** (ver "Cuentas"): que alguien que sepa de leyes
+  revise `/privacidad` (hecha en oct 2026, ver "Privacidad"): si hace falta inscribir el
+  banco de datos en el Registro Nacional de Protección de Datos Personales y que figuren
+  el nombre y un contacto del responsable (hoy no, por decisión del dueño); confirmar que
+  el freno por IP despliega en el plan gratis; poner las claves de Turnstile en el panel; verificar el correo y
   recuperar la contraseña con él (Cloudflare Email Service: plan de pago de Workers,
   US$5 al mes con 3.000 correos, y un dominio propio en Cloudflare, que además daría
   Search Console y la regla de límite por IP); y, si la gente las usa, entrar con
@@ -1525,11 +1562,14 @@ Environment).
     avisos. Que la página de cada equipo trae su fila de la tabla, su ataque y su defensa
     (los del modelo, con su puesto), su forma (la de la caché) y lo que dijo la web de un
     partido suyo con resultado, con ETag, 404 para uno que no existe, su tarjeta en
-    `/equipo/86` y todos los equipos en el sitemap (`equipos.py`). Que el calendario de
+    `/equipo/86` y todos los equipos en el sitemap (`equipos.py`). Que `/privacidad` se sirve
+  con la CSP de la web y sin JavaScript, en el Worker y en Flask (`descubrir.py`), y el
+  freno por IP: a la sexta en un minuto desde la misma IP, 429, también al crear, sin
+  gastar intentos (`cuentas.py`). Que el calendario de
     Mis equipos es un iCalendar bien formado (CRLF, líneas de 75 octetos, texto escapado)
     con un evento por partido de sus equipos, su hora y su pronóstico, y el resultado al
     terminar; que cambiar los equipos con la misma clave cambia los eventos, que una clave
-    borrada vuelve, que lo raro no entra y que el tope de nuevos corta (`ics.py`, con
+    borrada vuelve, que quitarlo lo borra en el acto, que lo raro no entra y que el tope de nuevos corta (`ics.py`, con
     `MAX_CALENDARIOS_DIA=5`; va después de la interfaz, que también crea uno). Y la
     interfaz en un navegador de verdad (`interfaz.mjs`,
     Playwright): 13 vistas (semana, día, liga, por claros y por reñidos, búsqueda,
@@ -1537,7 +1577,8 @@ Environment).
     proyección y la página de un equipo) en 7 anchos de 360 a 1920 px, sin texto que se salga de su caja, sin
     piezas de una fila que se pisen, sin errores de JavaScript, con la tarjeta y la
     invitación de los avisos (y activarlos y quitarlos contra el Worker, con el
-    servicio de avisos del navegador de mentira), crear el calendario y sus enlaces, los nombres del detalle enlazando con
+    servicio de avisos del navegador de mentira), crear el calendario y sus enlaces (y quitarlo), la página de
+    privacidad en los 7 anchos (con axe en 390 y 1440), los nombres del detalle enlazando con
     la página de su equipo, y axe-core sin nada en la semana,
     Mis equipos, los dos detalles, la tabla y la página de un equipo, en el móvil y en escritorio. Es lo que en oct
     2026 encontró la fecha bajo el escudo y "Seguir" cortado en el móvil. El job

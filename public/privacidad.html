@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0b130f">
+<meta name="color-scheme" content="dark">
+<title>Privacidad · Pronósticos</title>
+<meta name="description" content="Qué datos guarda la web de Pronósticos, para qué, cuánto tiempo y cómo verlos o borrarlos.">
+<link rel="canonical" href="https://pronosticos-bot.alvarocornejo2010.workers.dev/privacidad">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b130f'/%3E%3Crect x='3' y='8.5' width='7.6' height='15' rx='2' fill='%23ffd24c'/%3E%3Crect x='12.2' y='8.5' width='7.6' height='15' rx='2' fill='%23a18047'/%3E%3Crect x='21.4' y='8.5' width='7.6' height='15' rx='2' fill='%23594d39'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400..800&family=Saira:wdth,wght@75..100,500..800&display=swap">
+<!-- La política de privacidad (Ley 29733 del Perú). Página estática, sin JavaScript
+     (la CSP de public/_headers no deja nada en línea). Si cambia lo que se guarda
+     (worker/cuentas.js, avisos.js, calendario.js, visitas.js o las claves de
+     localStorage de app.js), cambiarla aquí y su fecha. -->
+<style>
+  :root {
+    --fondo: #070d0a;
+    --banda: #0b130f;
+    --panel: #111a15;
+    --linea: #1f2b25;
+    --tinta: #f4f7f5;
+    --tinta-2: #b8c5bd;
+    --tinta-3: #87968c;
+    --f-disp: "Saira", "Archivo Narrow", "Arial Narrow", system-ui, sans-serif;
+    --f-txt: "Figtree", "Segoe UI", system-ui, -apple-system, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--fondo); color: var(--tinta-2);
+    font-family: var(--f-txt); font-size: 1rem; line-height: 1.6;
+    -webkit-text-size-adjust: 100%;
+  }
+  .cab {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px max(16px, env(safe-area-inset-left)); padding-top: calc(14px + env(safe-area-inset-top));
+    background: var(--banda); border-bottom: 1px solid var(--linea);
+  }
+  .marca { display: flex; align-items: center; gap: 10px; color: var(--tinta); text-decoration: none;
+           font-family: var(--f-disp); font-stretch: 88%; font-weight: 800; font-size: 1.25rem; }
+  .marca:hover { text-decoration: underline; text-underline-offset: 3px; }
+  main { max-width: 44rem; margin: 0 auto; padding: 28px 16px 64px; }
+  h1, h2 { font-family: var(--f-disp); font-stretch: 88%; color: var(--tinta); line-height: 1.2; text-wrap: balance; }
+  h1 { font-size: 2rem; font-weight: 800; margin: 0 0 4px; }
+  h2 { font-size: 1.25rem; font-weight: 700; margin: 36px 0 8px; }
+  .fecha { margin: 0 0 24px; color: var(--tinta-3); font-size: 0.875rem; }
+  p, li { max-width: 65ch; }
+  p { margin: 0 0 12px; }
+  ul { margin: 0 0 12px; padding-left: 1.2em; }
+  li { margin-bottom: 6px; }
+  li::marker { color: var(--tinta-3); }
+  strong { color: var(--tinta); font-weight: 650; }
+  code { font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: 0.875em; color: var(--tinta);
+         overflow-wrap: anywhere; }
+  a { color: var(--tinta); text-underline-offset: 2px; }
+  .resumen { margin: 0 0 8px; padding: 16px 20px; border: 1px solid var(--linea); border-radius: 14px; background: var(--panel); }
+  .resumen h2 { margin-top: 0; font-size: 1.0625rem; }
+  .resumen ul { margin: 0; }
+  .tabla { overflow-x: auto; margin: 0 0 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9375rem; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px 8px 0; border-bottom: 1px solid var(--linea); }
+  th { color: var(--tinta); font-weight: 650; }
+  td:last-child, th:last-child { padding-right: 0; }
+  .pie { max-width: none; margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--linea); color: var(--tinta-3);
+         font-size: 0.875rem; }
+</style>
+</head>
+<body>
+<header class="cab">
+  <a class="marca" href="/">
+    <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#0b130f"/><rect x="3" y="8.5" width="7.6" height="15" rx="2" fill="#ffd24c"/><rect x="12.2" y="8.5" width="7.6" height="15" rx="2" fill="#a18047"/><rect x="21.4" y="8.5" width="7.6" height="15" rx="2" fill="#594d39"/></svg>
+    Pronósticos
+  </a>
+</header>
+<main>
+  <h1>Privacidad</h1>
+  <p class="fecha">Última actualización: 25 de octubre de 2026.</p>
+
+  <p>Pronósticos es una web gratuita de pronósticos de fútbol, sin publicidad, hecha por una persona a título
+    personal. Esta página explica qué datos guarda, para qué, cuánto tiempo y cómo verlos o borrarlos, según la
+    Ley N.º 29733, Ley de Protección de Datos Personales del Perú, y su reglamento.</p>
+
+  <section class="resumen" aria-labelledby="resumen">
+    <h2 id="resumen">En resumen</h2>
+    <ul>
+      <li>Para ver los pronósticos no hace falta dar ningún dato. La web no usa cookies de publicidad ni de
+        seguimiento, ni servicios de estadísticas de terceros.</li>
+      <li>La web no guarda tu IP ni tu nombre. Las visitas se cuentan sumadas por día, sin saber quién es
+        quién.</li>
+      <li>Solo se guarda algo tuyo si creas una cuenta, activas los avisos o añades el calendario, y solo lo
+        necesario para que funcionen.</li>
+      <li>No se vende ni se cede nada a nadie, ni se usa para publicidad.</li>
+      <li>Todo se ve y se borra desde la propia web, en el acto.</li>
+    </ul>
+  </section>
+
+  <h2>Sin cuenta</h2>
+  <p><strong>En tu navegador</strong> (su almacenamiento local, no cookies) se guardan los equipos que sigues, el día
+    de tu última visita, si tienes los avisos o el calendario activos y, si entraste en una cuenta, que hay una sesión
+    abierta. Se quedan en tu aparato: el servidor no los ve. Los borras desde los ajustes de tu navegador (borrar los
+    datos de este sitio).</p>
+  <p><strong>Las visitas</strong> se cuentan sumadas por día: cuánta gente entra y si vuelve, qué ligas, partidos y
+    equipos se abren, cuántas búsquedas se hacen (no lo que se busca), cuántas veces se pulsa Compartir, el ancho
+    de la pantalla, la web de la que llegas (solo su dominio) y los errores de la web (su tipo y su línea). No se guarda nada que diga quién eres: ni la IP, ni el
+    aparato, ni un identificador. Sirve para saber qué se usa y qué falla.</p>
+
+  <h2>Con cuenta</h2>
+  <p>La cuenta sirve para que los equipos que sigues se vean en todos tus aparatos. Se guarda:</p>
+  <ul>
+    <li>Tu <strong>usuario</strong> y una huella de tu <strong>contraseña</strong>. La contraseña nunca llega al
+      servidor: tu navegador la transforma antes de enviarla y el servidor solo guarda una huella de eso.</li>
+    <li>Tu <strong>correo</strong>, si lo pones. Solo sirve para entrar con él: no se te escribe nunca y, por ahora,
+      no se verifica.</li>
+    <li>Los <strong>equipos que sigues</strong>.</li>
+    <li>Tus <strong>sesiones abiertas</strong> (una huella del código de la cookie <code>sesion</code>, la única
+      cookie de la web, que te mantiene dentro), con cuándo se abrieron y cuándo se usaron.</li>
+    <li>Cuándo se creó la cuenta y cuándo se usó por última vez, y los intentos fallidos seguidos de entrar con tu
+      usuario (para bloquearlo 15 minutos a los diez).</li>
+  </ul>
+  <p>Una sesión que no se usa en 180 días deja de valer. La cuenta dura hasta que la borres.</p>
+
+  <h2>Avisos de tus equipos</h2>
+  <p>Si activas los avisos, se guarda la dirección que tu navegador da para enviarte avisos (es de Google, Mozilla,
+    Apple o Microsoft, según el navegador), las dos claves con que se cifran y los equipos que sigues. Nada de quién
+    eres. Cada aviso viaja cifrado a través del servicio de tu navegador. Se borra al pulsar «Quitar los avisos», si
+    tu navegador la anula o si en 180 días no se renueva.</p>
+
+  <h2>Calendario de tus equipos</h2>
+  <p>Si lo añades, se guarda una clave al azar y los equipos que sigues, con cuándo se creó y cuándo lo pidió tu
+    aplicación de calendario por última vez. Nada de quién eres. Quien tenga su dirección ve esos partidos. Se borra
+    al pulsar «Quitar el calendario», y solo si en 120 días ninguna aplicación lo pide.</p>
+
+  <h2>Quién más interviene</h2>
+  <div class="tabla">
+    <table>
+      <thead><tr><th scope="col">Quién</th><th scope="col">Para qué</th><th scope="col">Qué ve</th></tr></thead>
+      <tbody>
+        <tr><td>Cloudflare (EE. UU.)</td><td>Aloja la web, su servidor y su base de datos (en Norteamérica).</td>
+          <td>Lo guardado arriba, y la IP de cada visita, como cualquier servidor. Sus registros técnicos duran 3
+            días y las copias de seguridad de la base, 7.</td></tr>
+        <tr><td>Cloudflare Turnstile</td><td>Comprobar, si está activo, que quien crea una cuenta no es un programa.</td>
+          <td>Tu IP y datos de tu navegador, al crear la cuenta.</td></tr>
+        <tr><td>Google Fonts</td><td>Las letras de la web.</td><td>Tu IP, al cargarlas.</td></tr>
+        <tr><td>football-data.org</td><td>Los datos de los partidos y los escudos.</td>
+          <td>Tu IP, al cargar los escudos.</td></tr>
+        <tr><td>Google, Mozilla, Apple o Microsoft</td><td>Llevar los avisos, si los activas.</td>
+          <td>La suscripción de tu navegador; el contenido va cifrado.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Como Cloudflare está en Estados Unidos, lo guardado sale del Perú (flujo transfronterizo), solo para
+    alojar la web. Para frenar a quien prueba contraseñas, Cloudflare cuenta durante un minuto los intentos de entrar
+    que llegan desde cada IP; esa cuenta no se guarda en ningún sitio.</p>
+
+  <h2>Tus derechos</h2>
+  <p>Tienes derecho a ver tus datos, corregirlos, borrarlos y oponerte a que se usen (los derechos ARCO de la
+    Ley 29733). Todo se hace en la propia web, en el acto:</p>
+  <ul>
+    <li><strong>Ver</strong>: «Mi cuenta» → «Descargar mis datos» te da todo lo guardado de tu cuenta.</li>
+    <li><strong>Corregir</strong>: en «Mi cuenta» cambias o quitas tu correo, tu contraseña y los equipos que sigues.</li>
+    <li><strong>Borrar</strong>: «Mi cuenta» → «Borrar mi cuenta» borra la cuenta, sus sesiones y sus equipos;
+      «Quitar los avisos» y «Quitar el calendario», lo suyo. Lo borrado puede seguir hasta 7 días en las copias de
+      seguridad de la base y luego desaparece.</li>
+    <li><strong>Oponerte</strong>: basta con no usar la cuenta, los avisos ni el calendario.</li>
+  </ul>
+  <p>De momento no hay otro canal de contacto. Si crees que no se respetan tus derechos, puedes reclamar ante la
+    Autoridad Nacional de Protección de Datos Personales del Ministerio de Justicia y Derechos Humanos del Perú.</p>
+  <p>Las cuentas no son para menores de 14 años.</p>
+
+  <h2>Cambios</h2>
+  <p>Si cambia lo que se guarda, cambia esta página y su fecha de arriba.</p>
+
+  <p class="pie"><a href="/">Volver a los pronósticos</a></p>
+</main>
+</body>
+</html>
