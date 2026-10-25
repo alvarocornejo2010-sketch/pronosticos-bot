@@ -4,7 +4,7 @@ números que el de app.py y validacion.py, que es el que miden afinar_liga.py y
 afinar_champions.py. Si tocas el modelo en un lado y no en el otro, esto falla.
 
 Compara:
-  - las constantes (FACTOR_LIGA, ENCOGER_GOLES, K_LIGA...) una a una;
+  - las constantes (FACTOR_LIGA, ENCOGER_TOTAL, K_LIGA...) una a una;
   - el ajuste de fuerzas (ajustar_fuerzas) en cientos de ligas al azar: tiene
     que dar el mismo double, sin tolerancia, y las listas compactas de partidos
     (partidos_compactos) de respuestas de la API inventadas;
@@ -67,7 +67,7 @@ const out = {
     MAX_ITER_FUERZAS: c.MAX_ITER_FUERZAS, K_LIGA: c.K_LIGA,
     PRIOR_AVG_LOCAL: c.PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA: c.PRIOR_AVG_VISITA,
     DIAS_VALIDEZ_PRIOR: c.DIAS_VALIDEZ_PRIOR, LIMITE_GOLES: c.LIMITE_GOLES, RHO_EMPATES: c.RHO_EMPATES,
-    ENCOGER_GOLES: c.ENCOGER_GOLES, LIGAS_ANO_NATURAL: [...c.LIGAS_ANO_NATURAL].sort(), DIAS_SEMANA: c.DIAS_SEMANA,
+    ENCOGER_TOTAL: c.ENCOGER_TOTAL, LIGAS_ANO_NATURAL: [...c.LIGAS_ANO_NATURAL].sort(), DIAS_SEMANA: c.DIAS_SEMANA,
     MAX_INTENTOS_VALIDACION: c.MAX_INTENTOS_VALIDACION, MAX_DIAS_BUSQUEDA: aj.maxDiasBusqueda,
     HORAS_VALIDEZ_FIXTURES: aj.horasValidezFixtures, MIN_MINUTOS_ACTUALIZACION: aj.minMinutosActualizacion,
     TZ: aj.tz,
@@ -314,7 +314,7 @@ def _python(casos):
         "LIGA_DE_ARRIBA", "ATAQUE_DESCENDIDO", "DEFENSA_DESCENDIDO", "VERSION_MODELO", "FORMATO_LISTAS",
         "TOLERANCIA_FUERZAS",
         "MAX_ITER_FUERZAS", "K_LIGA", "PRIOR_AVG_LOCAL", "PRIOR_AVG_VISITA", "DIAS_VALIDEZ_PRIOR",
-        "LIMITE_GOLES", "RHO_EMPATES", "ENCOGER_GOLES", "DIAS_SEMANA", "MAX_DIAS_BUSQUEDA",
+        "LIMITE_GOLES", "RHO_EMPATES", "ENCOGER_TOTAL", "DIAS_SEMANA", "MAX_DIAS_BUSQUEDA",
         "HORAS_VALIDEZ_FIXTURES")}
     constantes.update({
         "ESCALA_CHAMPIONS": list(app.ESCALA_CHAMPIONS),

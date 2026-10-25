@@ -1,14 +1,14 @@
 // El modelo, el mismo de app.py: fuerzas de ataque y defensa de cada equipo
 // ajustadas por el rival (ajustarFuerzas), Poisson con la corrección de
-// Dixon-Coles para el 1X2 (RHO_EMPATES) y los mercados de goles con los goles
-// esperados acercados a la media (ENCOGER_GOLES).
+// Dixon-Coles para el 1X2 (RHO_EMPATES) y los mercados de goles con el total de
+// goles esperados acercado a la media (ENCOGER_TOTAL).
 //
 // Cada función hace las mismas operaciones y en el mismo orden que su gemela de
 // Python, así que salen los mismos números. test_paridad.py lo comprueba con
 // miles de casos: si cambias algo aquí, cámbialo también en app.py.
 
 import {
-  ATAQUE_DESCENDIDO, ATAQUE_RECIEN_LLEGADO, DEFENSA_DESCENDIDO, DEFENSA_RECIEN_LLEGADO, ENCOGER_GOLES,
+  ATAQUE_DESCENDIDO, ATAQUE_RECIEN_LLEGADO, DEFENSA_DESCENDIDO, DEFENSA_RECIEN_LLEGADO, ENCOGER_TOTAL,
   ESCALA_CHAMPIONS, EXPONENTE_FUERZA_CHAMPIONS, FACTOR_DIARIO, K_HISTORIAL_CHAMPIONS, LIMITE_GOLES,
   MAX_ITER_FUERZAS, PSEUDO_GOLES_ATAQUE, PSEUDO_GOLES_DEFENSA, RHO_EMPATES, TOLERANCIA_FUERZAS,
 } from "./config.js";
@@ -298,14 +298,16 @@ export function calcularPoisson(gla, gvi, limite = LIMITE_GOLES) {
 // Mercados de goles
 // ------------------------------------------
 
-// Más/menos, ambos marcan, porterías a cero y marcadores, todos de una misma
-// rejilla de marcadores con los goles esperados acercados a la media de la liga
-// y la misma corrección de los marcadores bajos que el 1X2.
+// Más/menos, ambos marcan, porterías a cero, por cuánto gana y marcadores, todos
+// de una misma rejilla de marcadores con el total de goles esperados acercado a
+// la media de la liga, el reparto entre los dos equipos del 1X2 y la misma
+// corrección de los marcadores bajos.
 export function mercadosDeGoles(xgLocal, xgVisita, promedioLiga, limite = LIMITE_GOLES) {
-  const avgL = promedioLiga.avg_local;
-  const avgV = promedioLiga.avg_visita;
-  const gla = avgL * (xgLocal / avgL) ** ENCOGER_GOLES;
-  const gvi = avgV * (xgVisita / avgV) ** ENCOGER_GOLES;
+  const totalLiga = promedioLiga.avg_local + promedioLiga.avg_visita;
+  const totalXg = xgLocal + xgVisita;
+  const escala = totalXg > 0 ? (totalLiga + ENCOGER_TOTAL * (totalXg - totalLiga)) / totalXg : 1.0;
+  const gla = xgLocal * escala;
+  const gvi = xgVisita * escala;
 
   const n = limite + 1;
   const reutilizar = limite === LIMITE_GOLES;   // la rejilla de siempre: sin reservar memoria
@@ -324,9 +326,8 @@ export function mercadosDeGoles(xgLocal, xgVisita, promedioLiga, limite = LIMITE
   for (let k = 0; k < rejilla.length; k++) rejilla[k] /= suma;
 
   let mas15 = 0, mas25 = 0, mas35 = 0, ambos = 0, ceroLocal = 0, ceroVisita = 0;
+  let gana2Local = 0, gana2Visita = 0, ganaCeroLocal = 0, ganaCeroVisita = 0;
   const reparto = [0, 0, 0, 0, 0, 0];
-  // los tres marcadores más probables, sin ordenar la rejilla entera
-  let a = -1, b = -1, c = -1;
   for (let i = 0; i < n; i++) {
     for (let j = 0; j < n; j++) {
       const k = i * n + j;
@@ -339,9 +340,26 @@ export function mercadosDeGoles(xgLocal, xgVisita, promedioLiga, limite = LIMITE
       if (i >= 1 && j >= 1) ambos += v;
       if (j === 0) ceroLocal += v;    // portería a cero del local: el visitante no marca
       if (i === 0) ceroVisita += v;
-      if (a < 0 || v >= rejilla[a]) { c = b; b = a; a = k; }
-      else if (b < 0 || v >= rejilla[b]) { c = b; b = k; }
-      else if (c < 0 || v >= rejilla[c]) { c = k; }
+      if (i - j >= 2) gana2Local += v;
+      if (j - i >= 2) gana2Visita += v;
+      if (i >= 1 && j === 0) ganaCeroLocal += v;
+      if (j >= 1 && i === 0) ganaCeroVisita += v;
+    }
+  }
+  // los tres marcadores más probables, sin ordenar la rejilla entera. Con los goles
+  // esperados en una proporción exacta (1.0 y 2.0, 0.5 y 2.0...) hay marcadores con
+  // la misma probabilidad, que aquí y en app.py salen con una diferencia en el último
+  // bit: por debajo de EMPATE (relativo) cuentan como empate, y en un empate va
+  // primero el que deja al visitante con menos goles (el 1-0 antes que el 0-1)
+  const EMPATE = 1 + 1e-9;
+  let a = -1, b = -1, c = -1;
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      const k = i * n + j;
+      const v = rejilla[k];
+      if (a < 0 || v > rejilla[a] * EMPATE) { c = b; b = a; a = k; }
+      else if (b < 0 || v > rejilla[b] * EMPATE) { c = b; b = k; }
+      else if (c < 0 || v > rejilla[c] * EMPATE) { c = k; }
     }
   }
 
@@ -353,6 +371,10 @@ export function mercadosDeGoles(xgLocal, xgVisita, promedioLiga, limite = LIMITE
     prob_ambos: pc(ambos),
     prob_cero_local: pc(ceroLocal),
     prob_cero_visita: pc(ceroVisita),
+    prob_gana2_local: pc(gana2Local),
+    prob_gana2_visita: pc(gana2Visita),
+    prob_gana_cero_local: pc(ganaCeroLocal),
+    prob_gana_cero_visita: pc(ganaCeroVisita),
     goles_reparto: reparto.map(pc),
     marcadores: [a, b, c].map((k) => [Math.floor(k / n), k % n, pc(rejilla[k])]),
   };

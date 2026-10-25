@@ -189,10 +189,12 @@ DEFENSA_RECIEN_LLEGADO = {"PL": 1.3}   # ...salvo en la Premier, donde el que su
 LIGA_DE_ARRIBA = {"ELC": "PL"}
 ATAQUE_DESCENDIDO = 1.2
 DEFENSA_DESCENDIDO = 0.85
-VERSION_MODELO = 3              # subirlo al cambiar el modelo: las fuerzas guardadas se
-                                # recalculan, cada ficha dice con cuál se calculó y en
-                                # Cloudflare (donde D1 guarda la validación) esta se repite.
+VERSION_MODELO = 4              # subirlo al cambiar el modelo: las fuerzas guardadas se
+                                # recalculan, cada ficha dice con cuál se calculó (una de
+                                # otra versión se recalcula) y en Cloudflare (donde D1
+                                # guarda la validación) esta se repite.
                                 # 3 (oct 2026): sin los playoffs de la Championship
+                                # 4 (oct 2026): los mercados de goles con ENCOGER_TOTAL
 FORMATO_LISTAS = 2              # partidos_liga sin playoffs (solo_liga): las de antes se bajan otra vez
 TOLERANCIA_FUERZAS = 1e-4       # el ajuste se repite hasta que nada cambia más que esto:
                                 # con 1e-6 harían falta el doble de vueltas y los goles
@@ -219,14 +221,18 @@ LIMITE_GOLES = 10               # rejilla de Poisson (antes 5, que perdía hasta
 # sola no se distinguía del ruido. Se aplica también a los mercados de goles.
 RHO_EMPATES = -0.05
 
-# Cuánto de la diferencia con la media de liga se conserva en los goles esperados
-# al calcular los mercados de GOLES (más/menos, ambos marcan, porterías a cero,
-# marcadores). El 1X2 no lo usa. Los goles esperados tal cual exageran las
-# diferencias de goles entre partidos, así que se acercan a la media de la liga
-# en escala logarítmica. Con las fuerzas ajustadas por rival el mejor valor sube
-# de 0.3 a 0.5 (más de 2.5: skill +1.1% en los partidos de prueba, ambos marcan
-# +0.7%; con el modelo de antes, +0.5% y +0.2%). Detalle en CLAUDE.md.
-ENCOGER_GOLES = 0.5
+# Cuánto de la diferencia con la media de la liga se conserva en el TOTAL de goles
+# esperados de un partido al calcular los mercados de GOLES (más/menos, ambos marcan,
+# porterías a cero, por cuánto gana, marcadores). El 1X2 no lo usa. Los goles
+# esperados tal cual exageran cuántos goles habrá (donde daban 27% de más de 2.5
+# pasaba un 42%), pero no cómo se reparten entre los dos equipos: por eso se acerca
+# el total a la media de la liga, en lineal, y el reparto queda como en el 1X2.
+# Elegido en las temporadas de ajuste por la log loss del marcador exacto (0.6 de
+# 0.3 a 1.0) y juzgado en las de prueba frente al modelo 3 (que acercaba cada equipo
+# por separado, en escala logarítmica, con 0.5): mejor en más de 1.5, 2.5 y 3.5
+# (-2.7, -6.1 y -4.3 se), en las porterías a cero (-5.4 y -6.9) y en el marcador
+# (-15.3), e igual en ambos marcan (+0.2). Detalle en CLAUDE.md.
+ENCOGER_TOTAL = 0.6
 
 actualizando_ahora = False      # evita que dos actualizaciones corran a la vez
 
@@ -741,20 +747,46 @@ def calcular_poisson(gla, gvi, limite=LIMITE_GOLES):
     }
 
 
+EMPATE_MARCADORES = 1e-9
+
+
+def _tres_mejores(flat, n):
+    """Los tres marcadores más probables de la rejilla (aplanada, n×n), como
+    mercadosDeGoles en el Worker. Con los goles esperados en una proporción exacta
+    (1.0 y 2.0, 0.5 y 2.0...) hay marcadores con la misma probabilidad, que Python y
+    JavaScript calculan con una diferencia en el último bit: por debajo de
+    EMPATE_MARCADORES (relativo) cuentan como empate, y en un empate va primero el
+    que deja al visitante con menos goles (el 1-0 antes que el 0-1)."""
+    a = b = c = -1
+    for j in range(n):
+        for i in range(n):
+            k = i * n + j
+            v = flat[k]
+            if a < 0 or v > flat[a] * (1 + EMPATE_MARCADORES):
+                a, b, c = k, a, b
+            elif b < 0 or v > flat[b] * (1 + EMPATE_MARCADORES):
+                b, c = k, b
+            elif c < 0 or v > flat[c] * (1 + EMPATE_MARCADORES):
+                c = k
+    return a, b, c
+
+
 def mercados_de_goles(xg_local, xg_visita, promedio_liga, limite=LIMITE_GOLES):
-    """Más/menos, ambos marcan, porterías a cero y marcadores más probables.
+    """Más/menos, ambos marcan, porterías a cero, por cuánto gana y marcadores
+    más probables.
 
     Salen todos de una misma rejilla de marcadores, así que no se contradicen
-    entre sí. Esa rejilla usa los goles esperados acercados a la media de la
-    liga (ENCOGER_GOLES), en escala logarítmica porque el modelo es
-    multiplicativo (ataque x defensa x media), con la misma corrección de los
-    marcadores bajos que el 1X2 (RHO_EMPATES). Con dos equipos medios el
-    acercamiento no cambia nada, así que la base "equipo medio" de la
+    entre sí. Esa rejilla usa los goles esperados con su total acercado a la media
+    de la liga (ENCOGER_TOTAL) y el reparto entre los dos equipos del 1X2, con la
+    misma corrección de los marcadores bajos (RHO_EMPATES). Con dos equipos medios
+    el acercamiento no cambia nada, así que la base "equipo medio" de la
     validación es la misma rejilla.
     """
-    avg_l, avg_v = promedio_liga["avg_local"], promedio_liga["avg_visita"]
-    gla = avg_l * (xg_local / avg_l) ** ENCOGER_GOLES
-    gvi = avg_v * (xg_visita / avg_v) ** ENCOGER_GOLES
+    total_liga = promedio_liga["avg_local"] + promedio_liga["avg_visita"]
+    total_xg = xg_local + xg_visita
+    escala = (total_liga + ENCOGER_TOTAL * (total_xg - total_liga)) / total_xg if total_xg > 0 else 1.0
+    gla = xg_local * escala
+    gvi = xg_visita * escala
 
     goles = np.arange(limite + 1)
     rejilla = np.outer(poisson.pmf(goles, gla), poisson.pmf(goles, gvi))
@@ -763,8 +795,9 @@ def mercados_de_goles(xg_local, xg_visita, promedio_liga, limite=LIMITE_GOLES):
             rejilla[i, j] = rejilla[i, j] * _tau(i, j, gla, gvi)
     rejilla /= rejilla.sum()    # misma normalización que calcular_poisson
     total = np.add.outer(goles, goles)
+    dif = np.subtract.outer(goles, goles)
     reparto = [rejilla[total == k].sum() for k in range(5)] + [rejilla[total >= 5].sum()]
-    mejores = np.argsort(rejilla, axis=None)[::-1][:3]
+    mejores = _tres_mejores(rejilla.ravel(), limite + 1)
 
     pc = lambda v: round(float(v) * 100, 2)    # float(): np.float64 no va al JSON
     return {
@@ -777,11 +810,16 @@ def mercados_de_goles(xg_local, xg_visita, promedio_liga, limite=LIMITE_GOLES):
         # portería a cero del local = el visitante no marca, y al revés
         "prob_cero_local": pc(rejilla[:, 0].sum()),
         "prob_cero_visita": pc(rejilla[0, :].sum()),
+        # gana por 2 goles o más, y gana sin que el otro marque
+        "prob_gana2_local": pc(rejilla[dif >= 2].sum()),
+        "prob_gana2_visita": pc(rejilla[dif <= -2].sum()),
+        "prob_gana_cero_local": pc(rejilla[1:, 0].sum()),
+        "prob_gana_cero_visita": pc(rejilla[0, 1:].sum()),
         # goles totales del partido: 0, 1, 2, 3, 4 y 5 o más
         "goles_reparto": [pc(v) for v in reparto],
         # los tres marcadores más probables: [goles local, goles visitante, %]
-        "marcadores": [[int(i // (limite + 1)), int(i % (limite + 1)), pc(rejilla.flat[i])]
-                       for i in mejores],
+        "marcadores": [[int(k // (limite + 1)), int(k % (limite + 1)), pc(rejilla.flat[k])]
+                       for k in mejores],
     }
 
 
@@ -997,7 +1035,7 @@ def _predicciones_previas(estado):
 
 def _sigue_fresca(partido):
     calculado = partido.get("calculado")
-    if not calculado:
+    if not calculado or partido.get("version_modelo") != VERSION_MODELO:
         return False
     return ahora() - _parsear_fecha(calculado) < timedelta(hours=HORAS_VALIDEZ_PREDICCION)
 
