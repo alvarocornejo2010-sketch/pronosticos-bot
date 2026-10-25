@@ -263,7 +263,7 @@ export class Almacen {
   async ventana(desdeUtc) {
     const r = await this.consultar(() => this.db.prepare(
       `SELECT p.id, p.liga, p.fecha, p.local_id, p.visita_id, p.base,
-              q.calculado, q.base AS base_pred, q.ficha
+              q.calculado, q.base AS base_pred, q.ficha, json_extract(q.ficha, '$.version_modelo') AS version
        FROM partidos p LEFT JOIN predicciones q ON q.id = p.id
        WHERE p.utc > ?1
        ORDER BY p.fecha, p.utc, p.orden`).bind(desdeUtc).all());

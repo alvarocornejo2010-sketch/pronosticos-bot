@@ -8,8 +8,8 @@
 // Mis equipos ofrece los avisos (y que activarlos y quitarlos funciona contra el Worker,
 // con el servicio de avisos del navegador de mentira: sin red, Chromium no puede
 // suscribirse), que crear el calendario de Mis equipos da sus enlaces, que el detalle de
-// un partido de un equipo seguido propone los avisos y que sus
-// nombres enlazan con la página de cada equipo, y pasa axe-core (accesibilidad) por la
+// un partido de un equipo seguido propone los avisos, que sus nombres enlazan con la
+// página de cada equipo y que «Cómo gana» trae sus cuatro casillas, y pasa axe-core (accesibilidad) por la
 // semana, Mis equipos, el detalle, la tabla y la página de un equipo, en el móvil y en
 // escritorio. Así se vio en oct 2026 que la fecha se metía bajo el escudo y
 // que "Seguir" no cabía en el móvil.
@@ -149,6 +149,17 @@ for (const [ancho, alto] of ANCHOS) {
     if (extra === "abrir" || extra === "abrir-fav") await p.locator(".partido:not(.pendiente) .fila").first().click();
     if (extra === "abrir" && !(await p.locator('.det-eq a.n[href^="#/equipo/"]').count())) {
       fallo(`${ancho}px: los nombres del detalle no enlazan con la página de su equipo`);
+    }
+    if (extra === "abrir") {
+      // cómo gana: cuatro casillas, ninguna por encima del entero con que gana ese equipo
+      const r = await p.evaluate(() => {
+        const cas = [...document.querySelectorAll(".detalle .casillas.dos .cas b")].map((b) => Number(b.textContent));
+        const ley = [...document.querySelectorAll(".detalle .rep-ley b")].slice(0, 3).map((b) => parseInt(b.textContent, 10));
+        return { cas, ley };
+      });
+      if (r.cas.length !== 4 || r.cas[0] > r.ley[0] || r.cas[2] > r.ley[0] || r.cas[1] > r.ley[2] || r.cas[3] > r.ley[2]) {
+        fallo(`${ancho}px: «Cómo gana» no trae sus cuatro casillas o pasa del 1X2 (${JSON.stringify(r)})`);
+      }
     }
     if (extra === "abrir-fav" && !(await p.locator(".det-avisos [data-avisos=activar]").count())) {
       fallo(`${ancho}px: el detalle de un partido de Mis equipos no propone los avisos`);

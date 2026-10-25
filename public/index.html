@@ -784,6 +784,9 @@
   .rep-ley.dos b { font-size: var(--t-15); }
 
   .casillas { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .casillas.dos { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .casillas.dos .cas { grid-template-columns: minmax(0, 1fr) auto; }
+  .casillas.dos .cas small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cas { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 8px; padding: 9px 12px 10px;
          border-radius: var(--r-control); background: var(--bg); color: var(--fg); min-width: 0; }
   .cas small { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-14); font-weight: 700; opacity: 0.8; }

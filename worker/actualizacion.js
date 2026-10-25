@@ -475,11 +475,12 @@ const sigueFresca = (calculado) => Boolean(calculado)
 const MS_ENTRE_PROGRESOS = 15000;
 
 // Los partidos por jugar de la ventana, en el orden de la web, cada uno con su
-// JSON. pendiente: hay que calcularlo, porque no tiene predicción o porque la
-// suya ya pasó de HORAS_VALIDEZ_PREDICCION. Si la tenía, la web la sigue
-// enseñando mientras se recalcula (sinNumeros = false): como se calculan casi
-// todas a la vez, caducan casi a la vez, y si no media semana salía sin
-// números el rato que dura el recálculo (app.py las dejaba sin números).
+// JSON. pendiente: hay que calcularlo, porque no tiene predicción, porque la
+// suya ya pasó de HORAS_VALIDEZ_PREDICCION o porque es de otra versión del modelo
+// (al cambiar VERSION_MODELO se rehacen todas en unos minutos). Si la tenía, la
+// web la sigue enseñando mientras se recalcula (sinNumeros = false): como se
+// calculan casi todas a la vez, caducan casi a la vez, y si no media semana salía
+// sin números el rato que dura el recálculo (app.py las dejaba sin números).
 async function leerVentana(ctx, almacen) {
   const ahoraUtc = new Date().toISOString().slice(0, 19) + "Z";
   const filas = await almacen.ventana(ahoraUtc);
@@ -491,7 +492,7 @@ async function leerVentana(ctx, almacen) {
       f.json = f.base.slice(0, -1) + ',"pendiente":true}';
       continue;
     }
-    f.pendiente = !sigueFresca(f.calculado);
+    f.pendiente = !sigueFresca(f.calculado) || f.version !== VERSION_MODELO;
     f.sinNumeros = false;
     if (f.base_pred !== f.base) {
       // el calendario cambió la hora, un nombre o un escudo: la ficha se

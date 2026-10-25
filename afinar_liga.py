@@ -2,7 +2,7 @@
 Mide y afina el modelo de liga de app.py con resultados reales: las fuerzas
 ajustadas por rival (ajustar_fuerzas: FACTOR_DIARIO, PSEUDO_GOLES_ATAQUE,
 PSEUDO_GOLES_DEFENSA, ATAQUE_RECIEN_LLEGADO), la corrección de empates
-(RHO_EMPATES) y el acercamiento de los mercados de goles (ENCOGER_GOLES).
+(RHO_EMPATES) y el acercamiento de los mercados de goles (ENCOGER_TOTAL).
 
 Datos: openfootball/football.json en GitHub, gratis y sin token. Ocho ligas
 (LaLiga, Premier, Bundesliga, Serie A, Ligue 1, Eredivisie, Primeira Liga y
@@ -328,9 +328,12 @@ def rejillas(lh, la, rho):
     return r / r.sum(axis=(1, 2), keepdims=True)
 
 
-def puntuar(f, rho, alfa):
+def puntuar(f, rho, alfa, forma="total"):
     """Brier por partido del 1X2, de más de 2.5 y de ambos marcan, del modelo y
-    de la base "equipo medio" (la media de la liga para los dos)."""
+    de la base "equipo medio" (la media de la liga para los dos). Los mercados de
+    goles, con el total de goles esperados acercado a la media de la liga (lineal,
+    alfa: ENCOGER_TOTAL de app.py) o, con forma="log", cada equipo por separado en
+    escala logarítmica (los modelos de antes del 4)."""
     y = np.where(f[:, 4] > f[:, 5], 0, np.where(f[:, 4] == f[:, 5], 1, 2))
     mas = (f[:, 4] + f[:, 5] > 2.5).astype(float)
     amb = ((f[:, 4] > 0) & (f[:, 5] > 0)).astype(float)
@@ -343,8 +346,13 @@ def puntuar(f, rho, alfa):
     out = {}
     out["1x2"], out["logloss"] = b1x2(rejillas(f[:, 0], f[:, 1], rho))
     out["1x2_base"], out["logloss_base"] = b1x2(rejillas(np.round(f[:, 2], 2), np.round(f[:, 3], 2), rho))
-    lh = f[:, 2] * (f[:, 0] / f[:, 2]) ** alfa
-    la = f[:, 3] * (f[:, 1] / f[:, 3]) ** alfa
+    if forma == "log":
+        lh = f[:, 2] * (f[:, 0] / f[:, 2]) ** alfa
+        la = f[:, 3] * (f[:, 1] / f[:, 3]) ** alfa
+    else:
+        total, media = f[:, 0] + f[:, 1], f[:, 2] + f[:, 3]
+        escala = (media + alfa * (total - media)) / total
+        lh, la = f[:, 0] * escala, f[:, 1] * escala
     out["mas_25"], out["ambos"] = goles(rejillas(lh, la, rho))
     out["mas_25_base"], out["ambos_base"] = goles(rejillas(f[:, 2], f[:, 3], rho))
     out["empate_pred"] = rejillas(f[:, 0], f[:, 1], rho)[:, DIF == 0].sum(1)
@@ -374,8 +382,8 @@ def _juntar(res):
 def evaluar(pool, lista):
     nuevo, liga, temp = _juntar(pool.map(recorrer_app, lista))
     viejo, _, _ = _juntar(pool.map(recorrer_anterior, lista))
-    pn = puntuar(nuevo, app.RHO_EMPATES, app.ENCOGER_GOLES)
-    pv = puntuar(viejo, 0.0, 0.3)          # el modelo anterior, con su Poisson sin corregir
+    pn = puntuar(nuevo, app.RHO_EMPATES, app.ENCOGER_TOTAL)
+    pv = puntuar(viejo, 0.0, 0.3, "log")   # el modelo anterior, con su Poisson sin corregir
     grupos = [("ajuste (hasta 2020/21)", temp <= FIN_AJUSTE), ("prueba (2021/22-2025/26)", (temp > FIN_AJUSTE) & (temp <= 2025)),
               ("2026/27 en curso", temp >= 2026)]
     print("\n1X2: skill frente a la base 'equipo medio' y diferencia de Brier con el modelo anterior")
@@ -424,7 +432,7 @@ def afinar(pool, lista):
         clave = tuple(p[k] for k in rejilla)
         if clave not in memo:
             f, _, _ = _juntar(pool.map(_np, [(c, clave) for c in ajuste]))
-            memo[clave] = puntuar(f, app.RHO_EMPATES, app.ENCOGER_GOLES)["1x2"].mean()
+            memo[clave] = puntuar(f, app.RHO_EMPATES, app.ENCOGER_TOTAL)["1x2"].mean()
         return memo[clave]
 
     print(f"Búsqueda en {len(ajuste)} temporadas de ajuste (Brier del 1X2):")
@@ -444,12 +452,12 @@ def afinar(pool, lista):
     print("\nCon esas fuerzas, corrección de empates y mercados de goles (Brier; ajuste | prueba):")
     aj, pr = temp <= FIN_AJUSTE, temp > FIN_AJUSTE
     for rho in (0.0, -0.03, -0.05, -0.08, -0.12):
-        p = puntuar(f, rho, app.ENCOGER_GOLES)
+        p = puntuar(f, rho, app.ENCOGER_TOTAL)
         print(f"  RHO_EMPATES {rho:+.2f}: 1X2 {p['1x2'][aj].mean():.5f} | {p['1x2'][pr].mean():.5f}"
               f"   empates {100 * p['empate_pred'][aj].mean():.1f}% (hubo {100 * p['empate_real'][aj].mean():.1f}%)")
-    for alfa in (0.3, 0.4, 0.5, 0.6, 0.7, 1.0):
+    for alfa in (0.4, 0.5, 0.6, 0.7, 0.8, 1.0):
         p = puntuar(f, app.RHO_EMPATES, alfa)
-        print(f"  ENCOGER_GOLES {alfa}: más de 2.5 {skill(p['mas_25'][aj], p['mas_25_base'][aj]):+.2f}% | "
+        print(f"  ENCOGER_TOTAL {alfa}: más de 2.5 {skill(p['mas_25'][aj], p['mas_25_base'][aj]):+.2f}% | "
               f"{skill(p['mas_25'][pr], p['mas_25_base'][pr]):+.2f}%   ambos marcan "
               f"{skill(p['ambos'][aj], p['ambos_base'][aj]):+.2f}% | {skill(p['ambos'][pr], p['ambos_base'][pr]):+.2f}%")
 
@@ -487,7 +495,7 @@ def descensos(pool, lista):
     def brier(casos_liga, d0, baja):
         res = pool.map(_np_prior, [(x, d0, baja) for x in casos_liga])
         return {g: puntuar(np.concatenate([r[2] for r in res if filtro(r[1])]), app.RHO_EMPATES,
-                           app.ENCOGER_GOLES)["1x2"]
+                           app.ENCOGER_TOTAL)["1x2"]
                 for g, filtro in (("ajuste", lambda s: s <= FIN_AJUSTE),
                                   ("prueba", lambda s: FIN_AJUSTE < s <= 2025))}
 

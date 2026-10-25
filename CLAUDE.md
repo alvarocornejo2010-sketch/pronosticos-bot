@@ -7,7 +7,7 @@ proyecto.
 ## Qué es
 
 Web que predice resultados de fútbol (1/X/2, doble oportunidad y mercados de
-goles: más/menos, ambos marcan, porterías a cero y marcadores) con un modelo
+goles: más/menos, ambos marcan, porterías a cero, por cuánto gana y marcadores) con un modelo
 Poisson de fuerzas de ataque y defensa ajustadas por rival (ver "El modelo").
 Corre en dos sitios con la misma lógica:
 
@@ -161,8 +161,9 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
   bloques con título pequeño: Quién gana (una barra repartida 1/X/2, cada tramo
   en el tono de la rampa de su probabilidad, con leyenda), Doble oportunidad
   (tres casillas), Goles esperados (dos barras enfrentadas desde el centro, en
-  la tinta del texto: no son probabilidades), Portería a cero, Goles en el
-  partido (el histograma 0 a 5+), Más / menos (1.5, 2.5 y 3.5, una barra
+  la tinta del texto: no son probabilidades), Portería a cero, Cómo gana
+  (cuatro casillas: gana por 2 o más y gana sin recibir gol, de cada uno; ver
+  "Mercados de goles"), Goles en el partido (el histograma 0 a 5+), Más / menos (1.5, 2.5 y 3.5, una barra
   repartida cada una), Ambos marcan y Marcadores más probables (tres
   casillas). Al final, apagado, "Cómo se calculó": muestra, cuándo, lo de la
   Champions y las notas. Los avisos (pocos partidos, liga fuera del plan,
@@ -170,8 +171,8 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
   760px o más (container query `centro`), resultado y goles en dos columnas.
   Todos los % son enteros, los mismos que la tabla (`reparto`); "menos de" y
   "ambos marcan: no" son 100 menos el entero de "más de" y "sí". Cada % de los
-  mercados (1X2, doble oportunidad, porterías a cero, más/menos, ambos marcan y
-  marcadores) lleva debajo su **cuota justa** (`cuotaJusta`: 100 / el entero que
+  mercados (1X2, doble oportunidad, porterías a cero, cómo gana, más/menos, ambos
+  marcan y marcadores) lleva debajo su **cuota justa** (`cuotaJusta`: 100 / el entero que
   se enseña, para que cuadre a la vista: 56 % es 1.79), siempre visible, como
   pidió el dueño del proyecto (oct 2026); "Cómo se calculó" explica qué es (lo que
   pagaría una apuesta sin el margen de la casa; las casas pagan menos) y que
@@ -978,7 +979,8 @@ repite hasta que no cambian (unas 13 vueltas). Cada partido pesa
 hacia el prior del equipo: 1 si ya estaba en la liga la temporada anterior; si
 no, lo que diga `prior_recien_llegado` (ver "Recién llegados"). Encima, el 1X2
 lleva la corrección de Dixon-Coles de los marcadores bajos (`RHO_EMPATES` =
--0.05) y los mercados de goles encogen con `ENCOGER_GOLES` = 0.5.
+-0.05) y los mercados de goles acercan el total de goles a la media con
+`ENCOGER_TOTAL` = 0.6 (ver "Mercados de goles").
 
 **Recién llegados** (`prior_recien_llegado`, oct 2026). Un equipo que no estaba
 en la liga la temporada anterior parte de:
@@ -1247,39 +1249,82 @@ la misma base "equipo medio". Cuesta 2
 peticiones por liga y solo la primera vez — las temporadas terminadas no cambian,
 así que quedan cacheadas en disco.
 
-## Mercados de goles — `ENCOGER_GOLES = 0.5` (oct 2026)
+## Mercados de goles — `ENCOGER_TOTAL = 0.6` (modelo 4, oct 2026)
 
-Más/menos, ambos marcan, porterías a cero y marcadores salen de
-`mercados_de_goles`, no de `calcular_poisson`. El 1X2 no cambió ni en el código.
-La función usa los goles esperados acercados a la media de la liga, en escala
-logarítmica: `media · (xg/media)^0.3`.
-
-Por qué: con los goles esperados tal cual, el modelo exagera las diferencias de
-goles entre partidos. Donde daba 27% de "más de 2.5" pasó un 42%, y donde daba
-74% pasó un 62%. El orden lo acierta, la magnitud no. Así perdía contra la base
-"equipo medio": skill −1.3% en más de 2.5 y −1.0% en ambos marcan.
-
-Primera medida (con el modelo de antes y `afinar_goles.py`, ya retirado): 3.484
-partidos de cinco ligas, 2023 y 2024; cualquier α entre 0.2 y 0.4 ganaba a la
-base en las dos temporadas y se puso 0.3.
-
-Con las fuerzas ajustadas por rival los goles esperados son mejores y conviene
-encoger menos. Medido con `afinar_liga.py afinar` (ajuste | prueba, skill frente
-a la base "equipo medio"):
+Más/menos, ambos marcan, porterías a cero, cómo gana (por 2 o más y sin recibir
+gol) y marcadores salen de `mercados_de_goles`, no de `calcular_poisson`: todos de
+una misma rejilla de marcadores, así que no se contradicen entre sí. El 1X2 no
+cambió ni en el código. La rejilla usa el **total** de goles esperados acercado a
+la media de la liga, en lineal, y el reparto entre los dos equipos del 1X2:
 
 ```
-alfa   más de 2.5          ambos marcan
-0.3    +0.94% | +0.85%     +0.56% | +0.55%
-0.5    +1.24% | +1.13%     +0.69% | +0.69%   <- app.py
-0.6    +1.29% | +1.18%     +0.68% | +0.68%
-1.0    +0.74% | +0.74%     +0.06% | +0.07%
+total' = media + 0.6 · (xg_local + xg_visita − media)      (media = avg_local + avg_visita)
+goles de cada equipo = sus goles esperados · total' / (xg_local + xg_visita)
 ```
 
-Con el modelo de antes y su 0.3 eran +0.46% y +0.23% en la prueba. Aun así la
-ganancia es pequeña frente al ~9% del 1X2: con solo goles marcados y encajados,
-el total de goles de un partido apenas se predice mejor que con la media de su
-liga. La web lo dice en el detalle de cada partido y en el panel Fiabilidad. No
-vender estos números como el 1X2.
+Por qué: con los goles esperados tal cual, el modelo exagera cuántos goles habrá.
+Donde daba 27% de "más de 2.5" pasó un 42%, y donde daba 74% pasó un 62%: el orden
+lo acierta, la magnitud no. Pero no exagera quién los marca: los mercados que
+dependen del reparto (porterías a cero, por cuánto gana) salían mejor con los
+goles esperados tal cual. Acercar solo el total arregla lo uno sin estropear lo
+otro.
+
+**Elegido como manda la regla** (`afinar_liga.py`, 35.586 partidos): t de 0.3 a 1.0
+en las temporadas de ajuste por la log loss del marcador exacto (resume toda la
+rejilla): 0.6. Juzgado en las de prueba frente al modelo 3 (que acercaba cada
+equipo por separado en escala logarítmica, `media · (xg/media)^0.5`), diferencia
+de Brier por partido y test pareado:
+
+```
+mercado            modelo 3 -> 4 (skill, prueba)   diferencia
+más de 1.5         +0.61% -> +0.71%                -0.00017 (-2.7 se)
+más de 2.5         +1.17% -> +1.48%                -0.00077 (-6.1 se)
+más de 3.5         +1.13% -> +1.40%                -0.00058 (-4.3 se)
+ambos marcan       +0.70% -> +0.68%                +0.00006 (+0.2 se)
+portería a cero L  +3.71% -> +4.70%                -0.00207 (-5.4 se)
+portería a cero V  +3.96% -> +5.23%                -0.00223 (-6.9 se)
+marcador (log loss)                                -0.02785 (-15.3 se)
+gana por 2+ L / V  +10.80% / +8.87%   (nuevos)
+sin recibir gol    +6.15% / +6.22%    (nuevos)
+```
+
+Mejor más de 2.5 en las seis temporadas de prueba. La rejilla del 1X2 con este
+total no mejora el 1X2 (+0.8 se en la prueba), así que el 1X2 sigue con los goles
+esperados tal cual. Se probaron también, en las mismas temporadas: acercar cada
+equipo por separado en lineal (0.6: igual en el total, peor en ambos marcan, +4.1
+se) y elegir una rejilla por mercado (lineal para el total, logarítmica para ambos
+marcan, sin acercar para las porterías): ganaba un poco en ambos marcan, pero con
+números que se contradicen a la vista (en el 7% de los partidos "ambos marcan: no"
+salía por debajo de la portería a cero de uno de los dos). La de ahora gana a las
+dos o empata en todos los mercados.
+
+**Cómo gana** (oct 2026): "gana por 2 o más" (`prob_gana2_local`/`_visita`) y "gana
+sin recibir gol" (`prob_gana_cero_local`/`_visita`), de la misma rejilla. Se
+predicen casi tan bien como el 1X2 (dependen de quién es mejor, no de cuántos goles
+habrá). La web no los deja pasar del entero con que gana ese equipo en la tabla:
+salen de otra rejilla que el 1X2 y en 35.000 partidos no pasaba ni una vez, pero
+así no se contradicen nunca.
+
+**Lo que queda:** las porterías a cero salen algo altas (31.1% predicho frente a
+29.9% en la prueba, 24.1 frente a 22.6) y ambos marcan algo bajo (52.1 frente a
+53.9): un sesgo de nivel que ninguna de las rejillas probadas quita. Idea sin
+probar: una corrección de los marcadores bajos propia de los mercados de goles.
+Y la ganancia en el total sigue siendo pequeña frente al ~9% del 1X2: con solo
+goles marcados y encajados, cuántos goles habrá apenas se predice mejor que con
+la media de la liga. La web lo dice en el detalle de cada partido y en el panel
+Fiabilidad. No vender esos números como el 1X2.
+
+Historia: hasta oct 2026 (modelos 1 a 3), cada equipo por separado en escala
+logarítmica (`ENCOGER_GOLES`): 0.3 con el modelo de antes (+0.46% en más de 2.5 y
++0.23% en ambos marcan, en la prueba) y 0.5 con las fuerzas ajustadas por rival.
+
+**Mismos números en el Worker:** los tres marcadores más probables se eligen igual
+en los dos lados (`_tres_mejores` y `mercadosDeGoles`). Con el total acercado y el
+reparto intacto, dos equipos con goles esperados en una proporción exacta (1.00 y
+2.00) dan marcadores con la misma probabilidad, que Python y JavaScript calculan
+con una diferencia en el último bit; por debajo de 1e-9 (relativo) cuentan como
+empate, y va primero el que deja al visitante con menos goles (el 1-0 antes que el
+0-1). Sin eso `test_paridad.py` daba 16 marcadores cambiados de sitio.
 
 ## Afinado del modelo en sept 2026: por qué entonces no se cambió nada
 
@@ -1522,8 +1567,9 @@ Environment).
   va en los dos y `python test_paridad.py` tiene que dar "todo igual", y
   `bash pruebas/e2e.sh`, 0 diferencias (GitHub los corre en cada PR).
 - Al cambiar el modelo, subir `VERSION_MODELO` (en `app.py` y en
-  `worker/config.js`): las fuerzas guardadas se recalculan y la validación de
-  Cloudflare, que D1 conserva, se repite sola.
+  `worker/config.js`): las fuerzas guardadas se recalculan, las predicciones de
+  otra versión se rehacen en unos minutos (la web enseña las de antes mientras
+  tanto) y la validación de Cloudflare, que D1 conserva, se repite sola.
 - En el Worker, cada ejecución tiene 10 ms de CPU: nada de recorrer o parsear
   la semana entera en cada pasada sin medirlo antes (ver "Cloudflare: cómo
   funciona").

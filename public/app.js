@@ -372,7 +372,8 @@ function htmlFila(p, ctx, abierto) {
 }
 
 // El detalle de un partido, de un vistazo: arriba los dos equipos; luego el
-// resultado (1X2 repartido, doble oportunidad, goles esperados y porterías a cero)
+// resultado (1X2 repartido, doble oportunidad, goles esperados, porterías a cero y
+// cómo gana)
 // y los goles (cuántos, más/menos, ambos marcan, marcadores), con los mismos
 // enteros que la tabla y la escala oro de la probabilidad; abajo, apagado, cómo se
 // calculó. En un panel ancho, resultado y goles van en dos columnas.
@@ -388,7 +389,8 @@ function htmlDetalle(p) {
   const resultado = htmlBloque("Quién gana", htmlQuienGana(p))
     + htmlBloque("Doble oportunidad", htmlDobleOportunidad(p))
     + htmlBloque("Goles esperados", htmlGolesEsperados(p))
-    + (conGoles(p) ? htmlBloque("Portería a cero", htmlPorteriaCero(p)) : "");
+    + (conGoles(p) ? htmlBloque("Portería a cero", htmlPorteriaCero(p)) : "")
+    + (typeof p.prob_gana2_local === "number" ? htmlBloque("Cómo gana", htmlComoGana(p)) : "");
   const goles = conGoles(p)
     ? htmlBloque("Goles en el partido", htmlGraficoGoles(p), f2(p.goles_total) + " esperados")
       + htmlBloque("Más / menos", htmlMasMenos(p))
@@ -510,6 +512,27 @@ function htmlPorteriaCero(p) {
       + '<span class="mini" aria-hidden="true"><i style="width:' + v + '%;' + estiloTramo(v) + '"></i></span>'
       + '<span class="cero-v"><b>' + v + ' %</b>' + htmlCuota(v) + '</span></div>';
   }).join("");
+}
+
+// Gana por 2 o más y gana sin recibir gol, de cada equipo: cuatro casillas, las dos
+// de arriba por 2 o más. Salen de la rejilla de los goles, no de la del 1X2: nunca
+// pasan del entero con que gana en la tabla (en 35.000 partidos de prueba no pasaba
+// ni una vez, pero así no se contradicen a la vista).
+function htmlComoGana(p) {
+  const r = reparto(p);
+  const tope = { local: r.l, visita: r.v };
+  const cas = (lado, clave, que) => {
+    const v = Math.min(Math.round(p[clave + lado]), tope[lado]);
+    return '<span class="cas" role="group" style="' + estiloTramo(v) + '" aria-label="'
+      + esc(cortoDe(p, lado) + " " + que.toLowerCase() + ": " + v + " %, cuota justa " + cuotaJusta(v)) + '">'
+      + '<small aria-hidden="true">' + esc(cortoDe(p, lado)) + '</small><b aria-hidden="true">' + v + '</b>'
+      + '<span class="que" aria-hidden="true">' + que + '</span>'
+      + '<span aria-hidden="true">' + htmlCuota(v) + '</span></span>';
+  };
+  return '<div class="casillas dos">'
+    + cas("local", "prob_gana2_", "Gana por 2 o más") + cas("visita", "prob_gana2_", "Gana por 2 o más")
+    + cas("local", "prob_gana_cero_", "Gana sin recibir gol") + cas("visita", "prob_gana_cero_", "Gana sin recibir gol")
+    + '</div>';
 }
 
 // "Menos de" es el complemento de "más de", del entero ya redondeado: cada barra suma 100.
@@ -640,9 +663,11 @@ function htmlNotaGoles(p) {
       + sk(mk.mas_25.skill_score) + " en más de 2.5 y " + sk(mk.ambos.skill_score)
       + " en ambos marcan, frente a " + sk(det.skill_score) + " en el 1X2.";
   }
-  return '<p class="nota-goles">Más/menos, ambos marcan, porterías a cero y marcadores usan los goles esperados'
-    + ' acercados a la media de la liga: con solo resultados, el modelo exagera las diferencias de goles entre'
-    + ' partidos. Medidos así quedan cerca de la media de la liga: tómalos como orientación, con menos peso que el 1X2.'
+  return '<p class="nota-goles">Más/menos, ambos marcan, porterías a cero, cómo gana y marcadores salen de una misma'
+    + ' rejilla de marcadores, con el total de goles esperados acercado a la media de la liga y el reparto entre los dos'
+    + ' equipos del 1X2: con solo resultados, el modelo exagera cuántos goles habrá, pero no quién los marca. Cuántos'
+    + ' goles habrá (más/menos, ambos marcan) apenas se predice mejor que con la media de la liga: tómalo como'
+    + ' orientación. Quién gana por 2 o más, o sin recibir gol, se predice casi tan bien como el 1X2.'
     + medida + '</p>';
 }
 
