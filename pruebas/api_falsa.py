@@ -51,6 +51,7 @@ OMITIR = {}          # /__omitir?liga=PD&n=3&veces=1: las próximas `veces` resp
 FUERZA = {e["id"]: 0.6 + (int(hashlib.md5(str(e["id"]).encode()).hexdigest()[:6], 16) % 1000) / 1000 for c in EQ for e in EQ[c]}
 INICIO = datetime.now(timezone.utc)
 FALLA_EQUIPO = EQ["SA"][7]["id"]          # sus partidos devuelven 500: se calcula solo con el prior
+FALLA_TABLA = [1]                         # la primera tabla del Brasileirão da 500: se reintenta a la hora
 CONTADOR = Counter(); TOTAL = [0]; CANDADO = threading.Lock()
 
 # hash() de Python cambia de un proceso a otro: los id tienen que salir siempre iguales
@@ -108,7 +109,50 @@ def temporada(c, n_partidos, semilla, fin):
             out.append(p)
     return out
 
+def jugado_actual(c):
+    return temporada(c, {"CL": 54, "ELC": 130}.get(c, 80), "actual", INICIO - timedelta(days=1))
+
+def restantes(c):
+    """Lo que falta de esta temporada (sin dateFrom: la temporada entera): 300 partidos
+    a partir de mañana, uno aplazado con su fecha de antes y, en la Championship, unos
+    playoffs que no son liga."""
+    r = rnd_de("restantes", c)
+    eq = EQ_ACTUAL[c]
+    pares = [(h, a) for h in eq for a in eq if h is not a]
+    r.shuffle(pares)
+    out = []
+    for k, (h, a) in enumerate(pares[:300]):
+        out.append(partido(r, c, 600000 + 1000 * list(EQ).index(c) + k, h, a, INICIO + timedelta(days=1 + k // 9, hours=r.randint(12, 22)), False))
+    out[0]["status"] = "POSTPONED"; out[0]["utcDate"] = (INICIO - timedelta(days=20)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if c == "ELC":
+        out[-1]["stage"] = "PLAYOFFS"
+    return out
+
+def clasificacion(c):
+    """La tabla de lo jugado esta temporada, como /standings: puntos, diferencia y goles a favor."""
+    t = {e["id"]: {"team": e, "playedGames": 0, "won": 0, "draw": 0, "lost": 0, "points": 0, "goalsFor": 0,
+                   "goalsAgainst": 0} for e in EQ_ACTUAL[c]}
+    for m in jugado_actual(c):
+        gl, gv = m["score"]["fullTime"]["home"], m["score"]["fullTime"]["away"]
+        for eid, gf, gc in ((m["homeTeam"]["id"], gl, gv), (m["awayTeam"]["id"], gv, gl)):
+            f = t[eid]; f["playedGames"] += 1; f["goalsFor"] += gf; f["goalsAgainst"] += gc
+            k = "won" if gf > gc else "draw" if gf == gc else "lost"; f[k] += 1
+            f["points"] += {"won": 3, "draw": 1, "lost": 0}[k]
+    filas = sorted(t.values(), key=lambda f: (-f["points"], -(f["goalsFor"] - f["goalsAgainst"]), -f["goalsFor"], f["team"]["name"]))
+    for i, f in enumerate(filas, 1):
+        f.update(position=i, goalDifference=f["goalsFor"] - f["goalsAgainst"], form=None)
+    return {"competition": {"code": c}, "standings": [{"stage": "REGULAR_SEASON", "type": "TOTAL", "group": None, "table": filas},
+                                                       {"stage": "REGULAR_SEASON", "type": "HOME", "group": None, "table": []}]}
+
 def responder(ruta, q):
+    m = re.fullmatch(r"/v4/competitions/(\w+)/standings", ruta)
+    if m:
+        c = m.group(1)
+        if c not in EQ or c == "CL": return 404, {"message": "no existe"}
+        if c == "BSA" and FALLA_TABLA[0] > 0:
+            FALLA_TABLA[0] -= 1
+            return 500, {"message": "error interno de prueba"}
+        return 200, clasificacion(c)
     m = re.fullmatch(r"/v4/competitions/(\w+)/matches", ruta)
     if m:
         c = m.group(1)
@@ -146,8 +190,9 @@ def responder(ruta, q):
             if c == "BSA" and s == 2025: return 403, {"message": "The resource you are looking for is restricted."}
             n = {"BL1": 306, "FL1": 306, "DED": 306, "PPL": 306, "ELC": 552, "CL": 189}.get(c, 380)
             return 200, {"matches": temporada(c, n, s, datetime(s + 1, 5, 25, tzinfo=timezone.utc))}
-        n = {"CL": 54, "ELC": 130}.get(c, 80)
-        jugado = temporada(c, n, "actual", INICIO - timedelta(days=1))
+        if "SCHEDULED" in q.get("status", ""):
+            return 200, {"matches": restantes(c)}
+        jugado = jugado_actual(c)
         if JUGAR[0]:
             # los del último calendario, ya terminados (mismos id), con un marcador de verdad
             for m in ULTIMO_CAL.get(c, []):

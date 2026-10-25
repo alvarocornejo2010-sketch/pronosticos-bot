@@ -1,5 +1,5 @@
 // Revisión de la interfaz con un navegador de verdad (Playwright), contra el Worker
-// local ya lleno con la API falsa (lo deja así e2e.sh). En 10 vistas y 7 anchos,
+// local ya lleno con la API falsa (lo deja así e2e.sh). En 11 vistas y 7 anchos,
 // de 360 a 1920 px, busca:
 //   - texto que se sale de su caja sin recortarse (scrollWidth > clientWidth);
 //   - piezas de una misma fila que se pisan (la hora, el escudo, los números...);
@@ -34,10 +34,10 @@ const VISTAS = [
   ["liga por claros", "#/liga/PD", "claros"], ["semana por claros", "#/semana", "claros"],
   ["día por reñidos", "#/dia/" + conPartidos[2].fecha, "renidos"], ["búsqueda", "#/semana", "buscar"],
   ["mis equipos", "#/favoritos"], ["mis equipos por claros", "#/favoritos", "claros"],
-  ["detalle", "#/dia/" + conPartidos[1].fecha, "abrir"],
+  ["detalle", "#/dia/" + conPartidos[1].fecha, "abrir"], ["tabla", "#/liga/PD/tabla", "tabla"],
 ];
 const ANCHOS = [[360, 780], [390, 844], [768, 1024], [1024, 768], [1180, 820], [1440, 900], [1920, 1080]];
-const AXE_EN = new Set(["390/semana", "390/detalle", "1440/semana", "1440/detalle"]);
+const AXE_EN = new Set(["390/semana", "390/detalle", "390/tabla", "1440/semana", "1440/detalle", "1440/tabla"]);
 
 // Lo que se sale y lo que se pisa (se corre dentro de la página).
 function revisar() {
@@ -59,7 +59,7 @@ function revisar() {
       t: Math.min(...rs.map((r) => r.top)), b: Math.max(...rs.map((r) => r.bottom)) } : null;
   };
   const pisadas = [];
-  for (const fila of document.querySelectorAll(".fila, .prox, .claro, .fecha, .liga-fila, .det-cab")) {
+  for (const fila of document.querySelectorAll(".fila, .prox, .claro, .dia-celda, .liga-fila, .det-cab, .tabla-liga tr")) {
     const hijos = [...fila.children].filter((h) => getComputedStyle(h).display !== "none" && getComputedStyle(h).visibility !== "hidden");
     const cajas = hijos.map(caja);
     for (let i = 0; i < hijos.length; i++) for (let j = i + 1; j < hijos.length; j++) {
@@ -96,7 +96,8 @@ for (const [ancho, alto] of ANCHOS) {
   for (const [nombre, hash, extra] of VISTAS) {
     await p.goto("about:blank");   // cada vista desde cero: cambiar solo el hash no recarga (la búsqueda seguiría puesta)
     await p.goto(W + "/" + hash);
-    await p.waitForSelector(".fila", { timeout: 15000 });
+    await p.waitForSelector(extra === "tabla" ? ".tabla-liga" : ".fila", { timeout: 15000 });
+    if (extra === "tabla") await p.waitForFunction(() => !document.querySelector(".tabla-sim"), null, { timeout: 30000 });
     await p.evaluate(() => document.fonts.ready);
     if (extra === "claros" || extra === "renidos") {
       const b = p.locator(`[data-orden="${extra}"]:visible`).first();

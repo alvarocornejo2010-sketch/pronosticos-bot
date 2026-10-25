@@ -397,6 +397,46 @@
                       height: 16px; min-width: 0; overflow: hidden; margin-top: 4px; }
   .dia-celda .forma i { display: block; flex: 0 0 3px; border-radius: 1.5px 1.5px 0 0; }
   .dia-celda.toda { width: 7.25rem; }
+  .dia-celda.tabla-celda .fecha { display: flex; align-items: center; height: 1.05em; color: inherit; }
+  .dia-celda.tabla-celda .que { grid-column: 1 / -1; grid-row: 3; margin-top: 4px; font-size: var(--t-12); white-space: nowrap; }
+
+  /* La tabla de una liga y su proyección (#/liga/PD/tabla) */
+  .centro.en-tabla .cab-tabla, .centro.en-tabla #orden { display: none; }
+  .oculto { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .tabla-vista { padding: 4px 0 24px; }
+  .tabla-sim { margin: 0 0 10px; font-size: var(--t-13); color: var(--tinta-3); }
+  .tabla-desliza { overflow-x: auto; border-radius: var(--r-celda); }
+  .tabla-desliza:focus-visible { outline: 2px solid var(--tinta-2); outline-offset: 2px; }
+  .tabla-liga { width: 100%; border-collapse: collapse; font-size: var(--t-14); font-variant-numeric: tabular-nums; }
+  .tabla-liga th, .tabla-liga td { padding: 6px 6px; border-bottom: 1px solid var(--linea); text-align: left; white-space: nowrap; }
+  .tabla-liga thead th { font-size: var(--t-12); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tinta-3);
+                         border-bottom-color: var(--linea-viva); }
+  .tabla-liga abbr { text-decoration: none; cursor: help; }
+  .tabla-liga .corto { display: none; }
+  .tabla-liga .n { text-align: right; }
+  .tabla-liga .pos { width: 2rem; color: var(--tinta-3); }
+  .tabla-liga th.eq { font-weight: 600; color: var(--tinta); max-width: 14rem; }
+  .tabla-liga .eq-in { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .tabla-liga .eq-in .nom { overflow: hidden; text-overflow: ellipsis; }
+  .tabla-liga tr.raya td, .tabla-liga tr.raya th { border-bottom: 2px solid var(--tinta-3); }
+  .tabla-liga .proy { color: var(--tinta-2); }
+  .tabla-liga .tz { text-align: right; width: 3.6rem; }
+  .tabla-liga .tz .v { display: inline-block; min-width: 2.6rem; padding: 3px 6px; border-radius: var(--r-celda); text-align: center;
+                       background: var(--bg); color: var(--fg); font-family: var(--f-disp); font-stretch: 88%; font-weight: 700; }
+  .tabla-liga .tz .nada { display: inline-block; min-width: 2.6rem; text-align: center; color: var(--tinta-3); }
+  .tabla-nota { margin: 14px 0 0; max-width: 75ch; font-size: var(--t-13); line-height: 1.5; color: var(--tinta-3); }
+  @container centro (max-width: 639px) {
+    .tabla-liga .c-pj, .tabla-liga .c-dg { display: none; }
+    .tabla-liga th, .tabla-liga td { padding: 6px 4px; }
+    .tabla-liga th.eq { max-width: 7.5rem; }
+    .tabla-liga thead th { letter-spacing: 0; font-size: 0.6875rem; }
+    .tabla-liga .largo { display: none; }
+    .tabla-liga .corto { display: inline; }
+    .tabla-liga .pos { width: 1.4rem; }
+    .tabla-liga .eq-in { gap: 6px; }
+    .tabla-liga .tz { width: auto; }
+    .tabla-liga .tz .v, .tabla-liga .tz .nada { min-width: 2rem; padding: 3px 3px; }
+  }
   @container centro (min-width: 720px) {
     /* padding y hueco justos para que "Mañana" y su recuento quepan en los 5.75rem */
     .dia-celda { flex: 1 1 0; width: auto; min-width: 5.75rem; max-width: 10rem; padding-inline: 10px; column-gap: 4px; }

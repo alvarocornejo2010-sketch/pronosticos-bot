@@ -8,6 +8,7 @@
 //   {t: "entrada", v: "nuevo"|"vuelve"|"repite", hace: días, d: "movil"|..., o: host}
 //   {t: "partido", id: 123}          abrió el detalle de un partido
 //   {t: "liga", c: "PD"}             entró en una liga
+//   {t: "tabla", c: "PD"}            abrió la tabla de una liga (y terminó su proyección)
 //   {t: "busqueda"}                  buscó un equipo
 //   {t: "pestana", p: "panorama"}    cambió de pestaña en el móvil
 //   {t: "compartir", id: 123}        pulsó Compartir en un partido
@@ -101,8 +102,8 @@ export function contadores(eventos, propio, hora) {
       sumar(e.t, String(e.id));
     } else if (e.t === "favorito" || e.t === "instalada") {
       sumar(e.t, "");
-    } else if (e.t === "liga" && CODIGOS.has(e.c)) {
-      sumar("liga", e.c);
+    } else if ((e.t === "liga" || e.t === "tabla") && CODIGOS.has(e.c)) {
+      sumar(e.t, e.c);
     } else if (e.t === "busqueda") {
       sumar("busqueda", "");
     } else if (e.t === "pestana" && PESTANAS.has(e.p)) {
@@ -177,7 +178,7 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
         'compartir', 'enlace', 'favorito', 'con_favoritos', 'instalada', 'en_app')
       GROUP BY dia, tipo, c`).bind(desde30),
     db.prepare(`SELECT tipo, clave, SUM(n) AS n FROM visitas
-      WHERE dia >= ?1 AND tipo IN ('origen', 'dispositivo', 'vuelta', 'hora', 'liga', 'pestana', 'error')
+      WHERE dia >= ?1 AND tipo IN ('origen', 'dispositivo', 'vuelta', 'hora', 'liga', 'tabla', 'pestana', 'error')
       GROUP BY tipo, clave`).bind(desde7),
     db.prepare(`SELECT v.clave AS id, SUM(v.n) AS n, p.liga AS liga, p.utc AS utc,
         json_extract(p.base, '$.local') AS local, json_extract(p.base, '$.visita') AS visita,
@@ -206,7 +207,7 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
   for (const d of dias) d.visitantes = d.nuevos + d.vuelven;
 
   const partes = {};
-  for (const t of ["origen", "dispositivo", "vuelta", "hora", "liga", "pestana", "error"]) partes[t] = {};
+  for (const t of ["origen", "dispositivo", "vuelta", "hora", "liga", "tabla", "pestana", "error"]) partes[t] = {};
   for (const f of desglose.results) partes[f.tipo][f.clave] = f.n;
 
   return {
@@ -343,6 +344,7 @@ ${lista("Desde qué pantalla", r.desglose.dispositivo, NOMBRES.dispositivo, ["mo
 ${lista("Cuándo vuelven", r.desglose.vuelta, NOMBRES.vuelta, ["1", "2-7", "8-30", "31+"])}
 ${graficoHoras(r.desglose.hora)}
 ${lista("Ligas que más se abren", r.desglose.liga, NOMBRE_LIGA)}
+${lista("Tablas que más se abren", r.desglose.tabla, NOMBRE_LIGA)}
 <section class="tablero"><h2>Partidos más abiertos</h2>${partidos}</section>
 ${lista("Pestañas en el móvil", r.desglose.pestana, NOMBRES.pestana, ["partidos", "panorama", "ligas"])}
 ${lista("Errores del navegador (tipo:línea de app.js)", r.desglose.error, null)}
