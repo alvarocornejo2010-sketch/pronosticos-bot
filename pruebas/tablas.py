@@ -91,7 +91,7 @@ print("ruta: ETag y 304; una liga que no existe (o la Champions) da 404")
 assert tabla("BSA")["estado"] == "sin_datos"
 for _ in range(3):
     urllib.request.urlopen(W + "/cdn-cgi/local/scheduled?cron=*+*+*+*+*").read()
-pedidas = json.load(urllib.request.urlopen(API + "/__stats"))["por_tipo"].get("/v4/competitions/BSA/standings", 0)
+pedidas = json.load(urllib.request.urlopen(API + "/__stats"))["por_tipo"].get("/vN/competitions/BSA/standings", 0)   # la API falsa cuenta con los números como N
 assert pedidas == 1, pedidas
 print("una tabla que falla espera una hora antes de volver a pedirse")
 
