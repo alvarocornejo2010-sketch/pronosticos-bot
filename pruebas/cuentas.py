@@ -1,7 +1,9 @@
 """Las cuentas (worker/cuentas.js): crear con usuario y contraseña, entrar desde otro
 aparato, las estrellas en la cuenta, cambiar la contraseña (cierra las demás
-sesiones), el bloqueo tras 10 intentos sin acertar (también si llegan todos a la vez,
-y contando los de cambiar la contraseña), ponerle usuario a una cuenta de la primera
+sesiones), el correo (crear con él, entrar con él, cambiarlo o quitarlo con la
+contraseña), Turnstile al crear (sin la ficha o con una ya usada, no), el bloqueo tras
+10 intentos sin acertar (también si llegan todos a la vez, y contando los de cambiar la
+contraseña), ponerle usuario a una cuenta de la primera
 versión (la del código), cerrar sesión (en uno y en todos), descargar los datos y
 borrar la cuenta; lo que llega de otra web no entra, una ruta que no existe no hace
 nada, cada cuenta guarda 20 sesiones como mucho, y los topes del día (cuentas nuevas,
@@ -9,16 +11,19 @@ intentos de entrar y filas escritas) cortan, menos al borrar; los intentos no ga
 lo de las estrellas. La "clave" que manda la web es el PBKDF2 de la contraseña
 (app.js, claveDe); aquí basta con 64 caracteres hexadecimales.
 Se corre contra el Worker local de e2e.sh, arrancado con MAX_CUENTAS_DIA=4,
-MAX_INTENTOS_DIA=120 y MAX_ESCRITURAS_CUENTAS_DIA=600.
+MAX_INTENTOS_DIA=120, MAX_ESCRITURAS_CUENTAS_DIA=600 y el Turnstile de mentira de
+api_falsa.py (vale "ficha-buena...", una vez cada una).
 Uso: python pruebas/cuentas.py PUERTO_WORKER DIR_D1"""
 import glob, hashlib, json, re, secrets, sqlite3, sys, time, urllib.error, urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from itertools import count
 
 W = f"http://127.0.0.1:{sys.argv[1]}"
 D1 = sys.argv[2]
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
 PROPIA = {"Origin": "null", "Sec-Fetch-Site": "same-origin"}   # lo que manda la web (no-referrer)
 clave = lambda texto: hashlib.sha256(texto.encode()).hexdigest()   # como si fuera el PBKDF2 del navegador
+FICHAS = count()   # Turnstile: una ficha nueva para cada cuenta que se crea
 
 
 def pedir(ruta, cuerpo=None, sesion=None, cabeceras=PROPIA, tipo="application/json", metodo=None):
@@ -26,6 +31,8 @@ def pedir(ruta, cuerpo=None, sesion=None, cabeceras=PROPIA, tipo="application/js
     if sesion:
         cab["Cookie"] = f"sesion={sesion}"
     datos = None
+    if ruta == "/api/cuenta/crear" and isinstance(cuerpo, dict) and "turnstile" not in cuerpo:
+        cuerpo = {**cuerpo, "turnstile": f"ficha-buena-{next(FICHAS)}"}
     if cuerpo is not None:
         datos = cuerpo if isinstance(cuerpo, bytes) else json.dumps(cuerpo).encode()
         cab["Content-Type"] = tipo
@@ -49,9 +56,16 @@ def token(galleta):
     return m.group(1)
 
 
-# sin cookie: no hay cuenta, y no se toca la cookie
+# sin cookie: no hay cuenta, y no se toca la cookie; la web recibe la clave pública de Turnstile
 st, c, g, _ = pedir("/api/cuenta")
-assert st == 200 and c == {"disponible": True, "cuenta": None} and g is None, (st, c, g)
+assert st == 200 and c == {"disponible": True, "cuenta": None, "turnstile": "clave_de_sitio_falsa"} and g is None, (st, c, g)
+
+# Turnstile: sin la ficha, con una que Cloudflare no da por buena o con una enorme, no
+# se crea la cuenta (y no cuenta para el tope de cuentas nuevas)
+for ficha in (None, 5, "ficha-mala", "ficha-buena" + "x" * 3000):
+    st, c, _, _ = pedir("/api/cuenta/crear", {"usuario": "robot.1", "clave": clave("r"), "equipos": [], "turnstile": ficha})
+    assert st == 400 and "robot" in c["error"], (ficha, st, c)
+print("Turnstile: sin la ficha o con una mala, no hay cuenta")
 
 # crear: usuario (sin distinguir mayúsculas), la cookie y los equipos del navegador, limpios
 st, c, g, _ = pedir("/api/cuenta/crear", {"usuario": " Alvaro.C ", "clave": clave("buena-1"),
@@ -182,6 +196,59 @@ db.commit()
 assert pedir("/api/cuenta/entrar", {"usuario": "de.antes", "clave": clave("vieja-1"), "equipos": []})[0] == 200
 print("30 intentos a la vez: 9 sin acertar y el bloqueo; ninguno más llega a mirar la contraseña")
 
+# el correo: opcional al crear, en minúsculas, único, y con él también se entra (la
+# clave del correo es la misma contraseña con el correo de sal: aquí, otra cualquiera)
+ku, kc = clave("usuario:cc-1"), clave("correo:cc-1")
+for malo in ("sin-arroba", "a@b", "con espacio@x.com", "ñ@x.com"):
+    st, c, _, _ = pedir("/api/cuenta/crear", {"usuario": "con.correo", "clave": ku, "correo": malo, "clave_correo": kc, "equipos": []})
+    assert st == 400 and "correo" in c["error"], (malo, st, c)
+assert pedir("/api/cuenta/crear", {"usuario": "con.correo", "clave": ku, "correo": "ana@x.com", "equipos": []})[0] == 400
+st, c, g, _ = pedir("/api/cuenta/crear", {"usuario": "con.correo", "clave": ku, "correo": " Ana.Lopez@Example.COM ",
+                                          "clave_correo": kc, "equipos": []})
+assert st == 200 and c["cuenta"]["correo"] == "ana.lopez@example.com" and c["cuenta"]["usuario"] == "con.correo", (st, c)
+cc = token(g)
+assert pedir("/api/cuenta", sesion=cc)[1]["cuenta"]["correo"] == "ana.lopez@example.com"
+st, c, _, _ = pedir("/api/cuenta/correo", {"correo": "ana.lopez@example.com", "clave_correo": kc, "actual": clave("vieja-1")}, viejo_token)
+assert st == 409 and "otra cuenta" in c["error"], (st, c)   # de.antes no puede quedarse el correo de otra
+st, c, g, _ = pedir("/api/cuenta/entrar", {"correo": "ANA.LOPEZ@example.com", "clave": kc, "equipos": ["Aston Villa FC"]})
+assert st == 200 and c["cuenta"]["usuario"] == "con.correo" and c["cuenta"]["equipos"] == ["Aston Villa FC"], (st, c)
+assert pedir("/api/cuenta/entrar", {"correo": "ana.lopez@example.com", "clave": ku, "equipos": []})[0] == 401   # la del usuario no vale
+assert pedir("/api/cuenta/entrar", {"correo": "nadie@example.com", "clave": kc, "equipos": []})[0] == 401
+assert pedir("/api/cuenta/entrar", {"usuario": "con.correo", "clave": ku, "equipos": []})[0] == 200
+assert pedir("/api/cuenta/equipo", {"equipo": "Aston Villa FC", "seguir": False}, cc)[0] == 200
+# un fallo con el correo cuenta para el bloqueo de su cuenta, y acertar lo pone a 0
+assert pedir("/api/cuenta/entrar", {"correo": "ana.lopez@example.com", "clave": clave("mal"), "equipos": []})[0] == 401
+assert db.execute("SELECT fallos FROM usuarios WHERE usuario = 'con.correo'").fetchone()[0] == 1
+assert pedir("/api/cuenta/entrar", {"correo": "ana.lopez@example.com", "clave": kc, "equipos": []})[0] == 200
+assert db.execute("SELECT fallos FROM usuarios WHERE usuario = 'con.correo'").fetchone()[0] == 0
+d = pedir("/api/cuenta/datos", sesion=cc)[1]
+assert d["correo"]["correo"] == "ana.lopez@example.com" and d["correo"]["verificado"] is False and kc not in json.dumps(d), d["correo"]
+assert db.execute("SELECT length(hash), verificado FROM correos WHERE correo = 'ana.lopez@example.com'").fetchone() == (64, 0)
+print("correo: opcional, en minúsculas y de una sola cuenta; con él se entra (y sus fallos cuentan para el bloqueo)")
+
+# cambiarlo o quitarlo pide la contraseña (y cuenta como intento); la contraseña nueva
+# va también con la sal del correo, o entrar con él pediría la vieja
+kc2 = clave("correo2:cc-1")
+st, c, _, _ = pedir("/api/cuenta/correo", {"correo": "ana@nuevo.pe", "clave_correo": kc2, "actual": clave("mal")}, cc)
+assert st == 403 and pedir("/api/cuenta", sesion=cc)[1]["cuenta"]["correo"] == "ana.lopez@example.com", (st, c)
+st, c, _, _ = pedir("/api/cuenta/correo", {"correo": "ana@nuevo.pe", "clave_correo": kc2, "actual": ku}, cc)
+assert st == 200 and c["cuenta"]["correo"] == "ana@nuevo.pe", (st, c)
+assert pedir("/api/cuenta/entrar", {"correo": "ana.lopez@example.com", "clave": kc, "equipos": []})[0] == 401
+assert pedir("/api/cuenta/entrar", {"correo": "ana@nuevo.pe", "clave": kc2, "equipos": []})[0] == 200
+ku3, kc3 = clave("usuario:cc-3"), clave("correo2:cc-3")
+assert pedir("/api/cuenta/contrasena", {"actual": ku, "nueva": ku3}, cc)[0] == 400   # falta la del correo
+assert pedir("/api/cuenta/contrasena", {"actual": ku, "nueva": ku3, "nueva_correo": kc3}, cc)[0] == 200
+assert pedir("/api/cuenta/entrar", {"correo": "ana@nuevo.pe", "clave": kc2, "equipos": []})[0] == 401
+assert pedir("/api/cuenta/entrar", {"correo": "ana@nuevo.pe", "clave": kc3, "equipos": []})[0] == 200
+assert pedir("/api/cuenta/entrar", {"usuario": "con.correo", "clave": ku3, "equipos": []})[0] == 200
+st, c, _, _ = pedir("/api/cuenta/correo", {"correo": "", "actual": ku3}, cc)
+assert st == 200 and c["cuenta"]["correo"] is None, (st, c)
+assert pedir("/api/cuenta/entrar", {"correo": "ana@nuevo.pe", "clave": kc3, "equipos": []})[0] == 401
+st, c, _, _ = pedir("/api/cuenta/correo", {"correo": "ana@nuevo.pe", "clave_correo": kc3, "actual": ku3}, cc)
+assert st == 200 and c["cuenta"]["correo"] == "ana@nuevo.pe", (st, c)
+assert pedir("/api/cuenta/correo", {"correo": "ana@nuevo.pe", "clave_correo": kc3, "actual": clave("vieja-1")}, viejo_token)[0] == 409
+print("cambiar o quitar el correo: con la contraseña; la contraseña nueva vale con el usuario y con el correo")
+
 # cerrar sesión: en este aparato, y luego en todos
 st, c, g, _ = pedir("/api/cuenta/salir", {"todas": False}, tercera)
 assert st == 200 and "Max-Age=0" in g
@@ -195,12 +262,17 @@ print("cerrar sesión: en este aparato (los demás siguen) y en todos")
 # borrar la cuenta: ya no hay nada, ni se puede entrar, y el usuario queda libre
 st, c, g, _ = pedir("/api/cuenta/entrar", {"usuario": "alvaro.c", "clave": clave("buena-2"), "equipos": []})
 d4 = token(g)
+assert pedir("/api/cuenta/correo", {"correo": "alvaro@example.com", "clave_correo": clave("correo:buena-2"),
+                                   "actual": clave("buena-2")}, d4)[0] == 200
 st, c, g, _ = pedir("/api/cuenta/borrar", {}, d4)
 assert st == 200 and "Max-Age=0" in g
 assert pedir("/api/cuenta", sesion=d4)[1]["cuenta"] is None
 assert pedir("/api/cuenta/entrar", {"usuario": "alvaro.c", "clave": clave("buena-2"), "equipos": []})[0] == 401
 assert db.execute("SELECT count(*) FROM usuarios WHERE usuario = 'alvaro.c'").fetchone()[0] == 0
-print("borrar la cuenta: fuera las sesiones, el usuario (que queda libre) y los equipos")
+assert db.execute("SELECT count(*) FROM correos WHERE correo = 'alvaro@example.com'").fetchone()[0] == 0
+assert pedir("/api/cuenta/correo", {"correo": "alvaro@example.com", "clave_correo": clave("c"), "actual": clave("vieja-1")},
+             viejo_token)[0] == 200   # el correo queda libre: de.antes se lo puede poner
+print("borrar la cuenta: fuera las sesiones, el usuario y el correo (que quedan libres) y los equipos")
 
 # hasta 60 equipos por cuenta
 st, c, g, _ = pedir("/api/cuenta/crear", {"usuario": "sesenta", "clave": clave("s"), "equipos": [f"Equipo {i}" for i in range(70)]})
@@ -213,7 +285,7 @@ print("tope de equipos: 60 por cuenta")
 
 # el tope de cuentas nuevas del día (MAX_CUENTAS_DIA=4): se cuentan las creadas,
 # también las que ya se borraron (la de la primera versión se metió a mano)
-creadas, n = 2, 0
+creadas, n = 3, 0
 while True:
     st, c, _, _ = pedir("/api/cuenta/crear", {"usuario": f"nueva.{n}", "clave": clave("n"), "equipos": []})
     n += 1
@@ -262,7 +334,7 @@ db.close()
 
 # el panel de visitas las cuenta (creadas: también las borradas; la de la primera versión no pasó por crear)
 v = json.load(urllib.request.urlopen(W + "/api/visitas?token=secreto_de_prueba_123"))
-assert v["cuentas"] == {"total": 3, "creadas": 4, "activas": 3, "con_equipos": 1, "con_usuario": 3,
+assert v["cuentas"] == {"total": 3, "creadas": 4, "activas": 3, "con_equipos": 1, "con_usuario": 3, "con_correo": 2,
                         "intentos": 120}, v["cuentas"]
-print("panel de visitas: 4 creadas esta semana, 3 quedan, todas con usuario; 120 intentos de entrar")
+print("panel de visitas: 4 creadas esta semana, 3 quedan, todas con usuario y 2 con correo; 120 intentos de entrar")
 print("cuentas: OK")

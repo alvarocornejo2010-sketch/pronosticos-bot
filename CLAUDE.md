@@ -96,7 +96,8 @@ el cliente sondeando `/api/estado` (cada 4s mientras hay cálculo en curso, cada
 30s el resto del tiempo y nada con la pestaña oculta: al volver a ella pide en el
 acto). No hay `static/`, ni build, ni dependencias de JS; de
 fuera solo llegan las fuentes Saira y Figtree (Google Fonts, con fallback del
-sistema) y los escudos (URLs de football-data.org). Al tocar la web se trabaja
+sistema), los escudos (URLs de football-data.org) y, al crear una cuenta,
+Cloudflare Turnstile (ver "Cuentas"). Al tocar la web se trabaja
 sobre las funciones `pintar*` y `html*` de `app.js`, no sobre bucles de
 plantilla. **Nada de JavaScript en `index.html`** (ni `<script>` en línea ni
 `onclick=`): la CSP (`script-src 'self'`) lo bloquearía y la web se quedaría en
@@ -207,7 +208,7 @@ web con la tarjeta de ese partido para compartir (en Render, la web sin tarjeta;
 ver "Compartir y favoritos"), y `/robots.txt` y `/sitemap.xml` para los buscadores
 (ver "Instalable y buscadores"). Y las cuentas: `/api/cuenta` (la de la sesión;
 en Render, `disponible: false`) y, solo en Cloudflare, `/api/cuenta/crear`,
-`/entrar`, `/equipo`, `/contrasena`, `/usuario`, `/salir`, `/borrar` (POST) y
+`/entrar`, `/equipo`, `/contrasena`, `/correo`, `/usuario`, `/salir`, `/borrar` (POST) y
 `/datos` (ver "Cuentas").
 
 **Efecto secundario de cada deploy:** el disco de Render free es efímero, cada
@@ -285,7 +286,7 @@ vivo), `documentos` (`estado` que sirve `/api/estado`, `resumen`, `validacion`,
 `temporada:liga:{código}:{año}`) y
 `candado` (que dos pasadas no se pisen, hora de la última petición, pasadas
 muertas), `visitas` (los contadores de visitas por día, ver "Visitas") y las de
-las cuentas: `cuentas`, `usuarios`, `accesos`, `sesiones` y `favoritos` (ver
+las cuentas: `cuentas`, `usuarios`, `correos`, `accesos`, `sesiones` y `favoritos` (ver
 "Cuentas").
 
 **Si una pasada muere** (lo más probable, por CPU) deja el candado puesto; la
@@ -442,15 +443,20 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
 ## Cuentas (oct 2026)
 
 Para que los equipos que sigues se vean en todos tus aparatos y no se pierdan al
-borrar los datos del navegador. **Usuario y contraseña, sin email.** La primera
-versión (23 oct) entraba con un código de acceso; desde el 24 oct el código ya no
-sirve para entrar y cada cuenta tiene un **ID** ("K7P4-QX2M", `idPublico`: los 40
-primeros bits de su id en letras de Crockford) que solo sirve para identificarla.
+borrar los datos del navegador. **Usuario y contraseña, y un correo si la persona
+quiere** (para entrar con él; aún sin verificar). La primera versión (23 oct) entraba
+con un código de acceso; desde el 24 oct el código ya no sirve para entrar y cada
+cuenta tiene un **ID** ("K7P4-QX2M", `idPublico`: los 40 primeros bits de su id en
+letras de Crockford) que solo sirve para identificarla. **Todo en Cloudflare y gratis:**
+es lo que pidió el dueño del proyecto; lo que cueste dinero (mandar correos) espera.
 
 - **Cómo se entra:** "Entrar" en la cabecera (en el móvil, el icono de la persona;
   con la sesión abierta, "Mi cuenta" y la cabeza rellena) abre una ventana
-  (`<dialog>`, sección CUENTA de `app.js`) con tres formularios: crear (usuario,
-  contraseña y repetirla), entrar y cambiar la contraseña. El usuario: de 3 a 24
+  (`<dialog>`, sección CUENTA de `app.js`) con sus formularios: crear (usuario,
+  correo opcional, contraseña y repetirla, y el recuadro de Turnstile), entrar
+  ("Usuario o correo": si lleva `@` es un correo), cambiar o quitar el correo y
+  cambiar la contraseña. Al crear la cuenta o entrar, los equipos de ese navegador
+  pasan a la cuenta. El usuario: de 3 a 24
   letras sin tildes, números, punto, guion o guion bajo, empezando por letra o
   número, sin distinguir mayúsculas (`normalizarUsuario`, igual en los dos lados).
   La contraseña: 8 caracteres o más, distinta del usuario y fuera de una lista corta
@@ -482,8 +488,40 @@ primeros bits de su id en letras de Crockford) que solo sirve para identificarla
   usuario puede tenerlo bloqueado probando contraseñas cada 15 minutos (sin email
   no hay otra forma de demostrar quién es); su dueño sigue dentro donde ya tenía la
   sesión.
-- **Sin recuperación:** sin email, una contraseña olvidada no se recupera; solo se
-  puede cambiar desde un aparato donde ya se haya entrado. Lo dice el formulario.
+- **El correo** (`correos`, `/api/cuenta/correo`): opcional, en minúsculas, sin
+  tildes ni ñ (`normalizarCorreo`, igual en los dos lados), uno por cuenta y el mismo
+  no puede estar en dos. Para entrar con él sin preguntarle antes al servidor cuál es
+  su usuario (eso diría a cualquiera el usuario de un correo), el navegador manda la
+  contraseña pasada por PBKDF2 dos veces, con el usuario y con el correo de sal
+  (`clave_correo`), y el Worker guarda las dos, cada una con su sal. Un usuario no
+  lleva `@`, así que las dos sales no coinciden nunca. Por eso cambiar la contraseña
+  manda también la nueva con el correo (`nueva_correo`), y poner o cambiar el correo
+  pide la contraseña (cuenta como intento, como cambiar la contraseña). Los fallos con
+  el correo van al bloqueo de su cuenta. Las cuentas de la primera versión, sin
+  usuario, no pueden poner correo hasta tener usuario.
+- **Sin verificar y sin recuperación:** mandar correos a cualquier dirección desde
+  Cloudflare (Email Service) necesita el plan de pago de Workers (US$5 al mes) y un
+  dominio propio; en el plan gratis solo se puede mandar a direcciones verificadas de
+  la propia cuenta de Cloudflare. Así que hoy el correo no se verifica (`verificado`
+  = 0) y una contraseña olvidada no se recupera: solo se puede cambiar desde un
+  aparato donde ya se haya entrado. Lo dicen los formularios. Mientras tanto,
+  alguien podría poner un correo que no es suyo y quien sí lo es no podría usarlo:
+  cuando se verifique, que uno verificado pueda quitárselo a uno sin verificar.
+- **Turnstile** (Cloudflare, gratis, contra los bots): "Crear cuenta" lleva su
+  recuadro (casi siempre pasa solo) y el Worker comprueba la ficha con siteverify
+  (`turnstileValido`: que sea buena, de esta web y para `crear`; cada ficha vale una
+  vez, y tras cada intento la web pide otra). Solo funciona con las dos claves:
+  `TURNSTILE_SITEKEY` y `TURNSTILE_SECRET`, las dos en el panel como tipo Secret (la
+  del sitio es pública y la web la recibe en `GET /api/cuenta`, pero como Secret el
+  despliegue no la borra: `wrangler deploy` quita las variables de texto que no
+  están en `wrangler.jsonc`). Sin ellas, crear no lo pide. Se crean en Cloudflare →
+  Turnstile → Add widget, con el dominio `pronosticos-bot.alvarocornejo2010.workers.dev`
+  y modo Managed. El script se carga solo al abrir "Crear cuenta" (la CSP deja
+  `script-src` y `frame-src` de `challenges.cloudflare.com` en los dos sitios). La IP
+  va a Cloudflare con la ficha, como pide siteverify; aquí no se guarda. Entrar no lo
+  lleva: lo frenan el bloqueo y el tope de intentos. La web va con `Referrer-Policy:
+  no-referrer`; si con la clave de verdad Turnstile diera el error 110200 ("dominio no
+  autorizado") con el dominio bien puesto, probar con `strict-origin`.
 - **La sesión** es una cookie `sesion` (HttpOnly, Secure, SameSite=Lax; 180 días
   que se renuevan al usarla) con un token al azar; en D1 solo va su SHA-256.
   Cambiar la contraseña cierra las sesiones de los demás aparatos. Cada cuenta
@@ -514,11 +552,13 @@ primeros bits de su id en letras de Crockford) que solo sirve para identificarla
   que decirlo. Mientras va una petición, la ventana no se cierra.
 - **Qué se guarda** (`worker/cuentas.js`): `cuentas` (id al azar, creada, última
   vez), `usuarios` (usuario, cuenta, sal, hash, fallos seguidos, bloqueo),
-  `sesiones` (SHA-256 del token, creada, última vez), `favoritos` (cuenta, equipo,
-  desde cuándo) y `accesos` (los códigos de la primera versión; queda para una
-  passkey o Google). Nada de email, nombre ni IP. Las tablas se crean solas la
-  primera vez que hacen falta (probado sobre una base sin `usuarios`, como la de
-  producción el 24 oct).
+  `correos` (correo, cuenta, sal, hash, verificado, desde cuándo), `sesiones`
+  (SHA-256 del token, creada, última vez), `favoritos` (cuenta, equipo, desde
+  cuándo) y `accesos` (los códigos de la primera versión; queda para una passkey o
+  Google). Nada de nombre ni IP. Las tablas se crean solas la primera vez que hacen
+  falta (probado sobre una base sin `usuarios` y otra sin `correos`, como la de
+  producción el 24 oct). Con correos guardados, la política de privacidad ya hace
+  falta (ver "Pendiente").
 - **Topes del día** (de Lima), contados en `visitas`: `MAX_CUENTAS_DIA` (300)
   cuentas nuevas (tipo `cuentas`; cuentan las creadas, no las que quedan, así que
   crear y borrar en bucle no lo esquiva), `MAX_ESCRITURAS_CUENTAS_DIA` (10.000,
@@ -532,7 +572,7 @@ primeros bits de su id en letras de Crockford) que solo sirve para identificarla
   siguiente, pero quien ya tiene la sesión abierta sigue guardando sus equipos.
   Borrar la cuenta no mira ningún tope: tiene que funcionar siempre. El panel de
   visitas tiene un tablero "Cuentas" (en total, creadas esta semana contando las
-  borradas, activas, con equipos, con usuario e intentos de entrar de la semana:
+  borradas, activas, con equipos, con usuario, con correo e intentos de entrar de la semana:
   muchos más intentos que entradas es alguien probando contraseñas). Lo que
   falta para que un solo atacante no pueda gastar el tope de intentos: un límite
   por IP (el binding de Rate Limiting de Workers, que no cuesta escrituras; no
@@ -540,9 +580,10 @@ primeros bits de su id en letras de Crockford) que solo sirve para identificarla
   propio.
 - **Solo en Cloudflare:** en Render, `/api/cuenta` responde `disponible: false` y
   el botón no sale.
-- **Para crecer:** recuperar la contraseña por email, entrar con passkey o con
-  Google (otro tipo en `accesos` de la misma cuenta). Lo que falta antes de
-  anunciarlo a lo grande, en "Pendiente".
+- **Para crecer:** verificar el correo y recuperar la contraseña con él (cuando se
+  pague el plan de Workers y haya dominio), entrar con passkey o con Google (otro tipo
+  en `accesos` de la misma cuenta). Lo que falta antes de anunciarlo a lo grande, en
+  "Pendiente".
 
 ## Instalable y buscadores (oct 2026)
 
@@ -610,8 +651,9 @@ la cuenta; para que los siguientes no lo lleven: GitHub → Settings → Emails 
 comprueba que coinciden): `nosniff`, `X-Frame-Options: DENY`, `no-referrer`,
 `no-store`, HSTS de un año y una **CSP** que solo deja cargar el JS de la propia
 web (`script-src 'self'`, nada en línea), las fuentes de Google, los escudos de
-`crests.football-data.org`, y el manifiesto y el service worker de la propia web
-(`manifest-src 'self'`, `worker-src 'self'`); un escudo de otro dominio se
+`crests.football-data.org`, el manifiesto y el service worker de la propia web
+(`manifest-src 'self'`, `worker-src 'self'`) y Cloudflare Turnstile (`script-src` y
+`frame-src` de `challenges.cloudflare.com`, al crear una cuenta); un escudo de otro dominio se
 bloquea y la web pinta el monograma. Probado en Chromium en los dos sitios: la web pinta igual, sin
 violaciones, y un `<img onerror=...>` inyectado a mano no se ejecuta. Las
 respuestas JSON llevan `default-src 'none'`.
@@ -1076,10 +1118,12 @@ Environment).
   instalarla como app, el sitemap y la marca de las ligas de fiabilidad baja.
 
 - **Cuentas, la versión siguiente** (ver "Cuentas"): una página de política de
-  privacidad (Ley 29733: qué se guarda, para qué, los 7 días de copias de D1 y cómo
-  pedir o borrar los datos; conviene que la revise alguien que sepa de leyes); una
-  forma de recuperar la contraseña olvidada (un email, que pide un servicio para
-  mandarlos y guardar un dato personal más); y, si la gente las usa, entrar con
+  privacidad (Ley 29733: qué se guarda, ahora también el correo, para qué, los 7 días
+  de copias de D1 y cómo pedir o borrar los datos; conviene que la revise alguien que
+  sepa de leyes); poner las claves de Turnstile en el panel; verificar el correo y
+  recuperar la contraseña con él (Cloudflare Email Service: plan de pago de Workers,
+  US$5 al mes con 3.000 correos, y un dominio propio en Cloudflare, que además daría
+  Search Console y la regla de límite por IP); y, si la gente las usa, entrar con
   passkey (huella o cara) como otro tipo de acceso. Las sesiones de 180 días sin uso solo se borran
   cuando alguien intenta usarlas (y cada cuenta guarda 20 como mucho): si se
   acumulan, limpiarlas en el cron.
@@ -1132,8 +1176,10 @@ Environment).
     que las visitas se cuentan bien, que lo inventado no entra y que el tope corta
     (`visitas.py`, con `MAX_VISITAS_DIA=60`). Y las cuentas, de crear a borrar,
     con el bloqueo por intentos (también 30 a la vez), la cuenta de la primera
-    versión que se pasa a usuario y los tres topes (`cuentas.py`, con
-    `MAX_CUENTAS_DIA=4`, `MAX_INTENTOS_DIA=120` y `MAX_ESCRITURAS_CUENTAS_DIA=600`). En
+    versión que se pasa a usuario, el correo (crear, entrar, cambiar y quitar),
+    Turnstile y los tres topes (`cuentas.py`, con `MAX_CUENTAS_DIA=4`,
+    `MAX_INTENTOS_DIA=120`, `MAX_ESCRITURAS_CUENTAS_DIA=600` y el Turnstile de mentira
+    de `api_falsa.py`, `/turnstile/v0/siteverify`, por `TURNSTILE_VERIFICAR`). En
     GitHub, 1-2 minutos; en local,
     unos 10.
   - Las variables del Worker van con `--var`, que manda sobre `.dev.vars`: el token

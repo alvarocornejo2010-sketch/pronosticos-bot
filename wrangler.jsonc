@@ -33,6 +33,8 @@
   // Ajustes sin secreto (los mismos nombres que en app.py). Los secretos,
   // FOOTBALL_DATA_TOKEN y UPDATE_SECRET, van en el panel: Settings →
   // Variables and Secrets. En local, en .dev.vars (ver .dev.vars.example).
+  // También ahí, como Secret, las dos claves de Turnstile (TURNSTILE_SITEKEY y
+  // TURNSTILE_SECRET): sin ellas, crear una cuenta no lo pide.
   "vars": {
     "TZ_LOCAL": "America/Lima"
   },

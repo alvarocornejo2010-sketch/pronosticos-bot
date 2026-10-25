@@ -3,7 +3,9 @@ respuesta, así Flask (app.py) y el Worker ven exactamente los mismos datos.
 Además de /v4/..., responde a /__stats (peticiones recibidas), /__reset,
 /__limite?n=N (un 429 cada N peticiones), /__jugar?si=1 (los partidos del último
 calendario pasan a estar jugados, para el registro en vivo) y
-/__omitir?liga=PD&n=3&veces=1 (calendarios incompletos).
+/__omitir?liga=PD&n=3&veces=1 (calendarios incompletos). Y, por POST, a
+/turnstile/v0/siteverify, un Cloudflare Turnstile de mentira: vale la ficha
+"ficha-buena" (una vez cada una: "ficha-buena-2" es otra), y cualquier otra no.
 Uso: python pruebas/api_falsa.py PUERTO [limite429]"""
 import hashlib, json, random, re, sys, threading
 from collections import Counter
@@ -177,8 +179,23 @@ def responder(ruta, q):
                      "runningCompetitions": comp + [{"code": "CL", "type": "CUP"}]}
     return 404, {"message": "ruta desconocida"}
 
+FICHAS_USADAS = set()   # Turnstile: cada ficha vale una vez
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
+    def do_POST(self):
+        u = urlparse(self.path)
+        datos = {k: v[0] for k, v in parse_qs(self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()).items()}
+        if u.path != "/turnstile/v0/siteverify":
+            self.send_response(404); self.end_headers(); return
+        ficha = datos.get("response", "")
+        with CANDADO:
+            ok = bool(datos.get("secret")) and ficha.startswith("ficha-buena") and ficha not in FICHAS_USADAS
+            FICHAS_USADAS.add(ficha)
+        d = {"success": ok, "hostname": "127.0.0.1", "action": "crear"} if ok else \
+            {"success": False, "error-codes": ["invalid-input-response"]}
+        cuerpo = json.dumps(d).encode()
+        self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(cuerpo)
     def do_GET(self):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}

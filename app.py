@@ -1216,13 +1216,15 @@ def redirigir_a_cloudflare():
 # Lo que la web puede cargar (Content-Security-Policy). El JavaScript va en
 # public/app.js y no en línea, así que basta script-src 'self': si un nombre de
 # equipo con <script> o un onerror= se colara por un fallo de escapado, el
-# navegador no lo ejecutaría. Las mismas cabeceras van en public/_headers para
+# navegador no lo ejecutaría. De fuera, solo Cloudflare Turnstile (al crear una
+# cuenta, que en Render no sale). Las mismas cabeceras van en public/_headers para
 # Cloudflare (test_paridad.py comprueba que coinciden).
-CSP_WEB = ("default-src 'none'; script-src 'self'; "
+CSP_WEB = ("default-src 'none'; script-src 'self' https://challenges.cloudflare.com; "
            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
            "font-src https://fonts.gstatic.com; "
            "img-src 'self' data: https://crests.football-data.org; "
            "connect-src 'self'; manifest-src 'self'; worker-src 'self'; "
+           "frame-src https://challenges.cloudflare.com; "
            "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 # El JSON no carga nada.
 CSP_API = "default-src 'none'; frame-ancestors 'none'"

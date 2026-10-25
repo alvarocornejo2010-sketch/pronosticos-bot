@@ -2,12 +2,13 @@
 # comprueba que coinciden). no-store: después de un despliegue el navegador tiene
 # que ver la interfaz nueva sin Ctrl+F5, y index.html y app.js tienen que ir a la par.
 # La CSP solo deja cargar el JS de la propia web (app.js, nada en línea), las
-# fuentes de Google Fonts, los escudos de football-data.org, y el manifiesto y el
-# service worker de la propia web (instalarla como app).
+# fuentes de Google Fonts, los escudos de football-data.org, el manifiesto y el
+# service worker de la propia web (instalarla como app) y Cloudflare Turnstile (su
+# script y su recuadro, al crear una cuenta).
 /*
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: no-referrer
   Cache-Control: no-store, must-revalidate
   Strict-Transport-Security: max-age=31536000
-  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://crests.football-data.org; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://crests.football-data.org; connect-src 'self'; manifest-src 'self'; worker-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
