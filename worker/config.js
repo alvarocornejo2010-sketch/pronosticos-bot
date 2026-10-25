@@ -127,5 +127,10 @@ export function ajustes(env = {}) {
     urlWeb: env.URL_WEB || "https://pronosticos-bot.alvarocornejo2010.workers.dev",
     // solo en las pruebas: el origen de un servicio de avisos de mentira (http://127.0.0.1:...)
     pushPrueba: env.PUSH_PRUEBA || "",
+    // El calendario de Mis equipos (calendario.js): cuántos puede haber, cuántos nuevos al
+    // día y cuántas filas escriben al día las altas y los cambios de equipos.
+    maxCalendarios: num("MAX_CALENDARIOS", 5000),
+    maxCalendariosDia: num("MAX_CALENDARIOS_DIA", 300),
+    maxEscriturasCalendariosDia: num("MAX_ESCRITURAS_CALENDARIOS_DIA", 3000),
   };
 }

@@ -1130,13 +1130,13 @@ function bloquesCentro(todos, ruta) {
         "Abre un partido y toca la estrella de un equipo: sus partidos saldrán aquí y los primeros de cada día."];
       return out;
     }
-    const tarjeta = bloqueAvisos();
+    const tarjetas = [bloqueAvisos(), bloqueCalendario()].filter(Boolean);
     if (!suyos.length) {
       out.vacio = ["Tus equipos no juegan esta semana", "Sigues a " + [...favoritos].join(", ") + "."];
-      out.extra = tarjeta;
+      out.extra = tarjetas;
       return out;
     }
-    if (tarjeta) out.bloques.push(tarjeta);
+    out.bloques.push(...tarjetas);
     if (orden !== "hora") { out.bloques.push(...bloquesDePartidos(ordenar(suyos), { conDia: true })); return out; }
     porDias(suyos).forEach(d => {
       out.bloques.push(bloqueGrupo("fav-" + d.fecha, nombreDia(d), d.partidos.length, null, "dia"));
@@ -1740,7 +1740,7 @@ function render() {
   limpiarHueco.innerHTML = busqueda ? '<button class="limpiar" id="limpiar">Limpiar búsqueda</button>' : "";
   if (c.vacio) {
     vista.innerHTML = '<div class="vacio"><h2>' + esc(c.vacio[0]) + '</h2><p>' + esc(c.vacio[1]) + '</p></div>'
-      + (c.extra ? '<div class="' + c.extra.clase + '">' + c.extra.html + '</div>' : "");
+      + (c.extra || []).map(x => '<div class="' + x.clase + '">' + x.html + '</div>').join("");
   } else {
     pintarBloques(vista, c.bloques);
   }
@@ -1929,6 +1929,8 @@ document.addEventListener("click", (e) => {
   if (img) { imagenPartido(img.dataset.imagen, img); return; }
   const av = t.closest("[data-avisos]");
   if (av) { accionAvisos(av.dataset.avisos); return; }
+  const cal = t.closest("[data-calendario]");
+  if (cal) { accionCalendario(cal.dataset.calendario); return; }
 
   const liga = t.closest("[data-liga]");
   if (liga && (liga.classList.contains("liga-fila") || liga.closest(".tira-ligas"))) {
@@ -2662,6 +2664,7 @@ async function prepararAvisos() {
 // Cambiaron las estrellas: con los avisos activos, los equipos van al servidor (juntos,
 // si se tocan varias seguidas).
 function equiposCambiados() {
+  calendarioAlDia();
   if (avisos.estado === "apagados" && favoritos.size) claveServidor().catch(() => {});
   if (avisos.estado !== "activos") return;
   clearTimeout(sincronia);
@@ -2745,6 +2748,87 @@ function htmlInvitacionAvisos(p) {
 }
 
 // ==========================================
+// CALENDARIO
+// El de Mis equipos (worker/calendario.js): una dirección .ics que se suscribe una vez
+// desde Google Calendar, el iPhone u Outlook, con los partidos de los equipos con estrella
+// y su pronóstico (y el resultado al terminar). Sin cuenta: el servidor da una clave al azar
+// para la lista de equipos de este navegador, y cada vez que cambian las estrellas la lista
+// nueva va con la misma clave, así que el calendario suscrito la sigue solo. Solo en
+// Cloudflare.
+// ==========================================
+const CLAVE_CALENDARIO = "pronosticos.calendario";   // { clave, huella }: el de este navegador y lo último mandado
+const calendario = { ocupado: false, mensaje: "" };
+let sincroniaCal = null;
+const ICONO_CALENDARIO = '<svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor"'
+  + ' stroke-width="1.5" stroke-linejoin="round"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3"/></svg>';
+
+async function mandarCalendario(clave) {
+  const equipos = [...favoritos].sort();
+  const r = await fetch("/api/calendario", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(clave ? { clave, equipos } : { equipos }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "no hubo respuesta; inténtalo otra vez.");
+  guardarLocal(CLAVE_CALENDARIO, { clave: d.clave, huella: equipos.join("|") });
+  return d.clave;
+}
+
+// Si las estrellas cambiaron desde lo último que se mandó (en esta pestaña, en otra o con la
+// cuenta), la lista nueva va al servidor; juntas, si se tocan varias seguidas.
+function calendarioAlDia() {
+  const cal = leerLocal(CLAVE_CALENDARIO, null);
+  if (!cal || !cal.clave || cal.huella === [...favoritos].sort().join("|")) return;
+  clearTimeout(sincroniaCal);
+  sincroniaCal = setTimeout(() => mandarCalendario(cal.clave).catch(() => { /* con la próxima estrella o visita */ }), 1500);
+}
+
+async function accionCalendario(que) {
+  const cal = leerLocal(CLAVE_CALENDARIO, null);
+  if (que === "copiar") {
+    const url = location.origin + "/calendario/" + cal.clave + ".ics";
+    try { await navigator.clipboard.writeText(url); avisar("Enlace del calendario copiado: pégalo donde se añaden calendarios por URL."); }
+    catch (e) { avisar("Copia este enlace: " + url); }
+    return;
+  }
+  if (calendario.ocupado) return;
+  calendario.ocupado = true;
+  calendario.mensaje = "";
+  render();
+  try { await mandarCalendario(null); }
+  catch (e) { calendario.mensaje = "No se pudo crear: " + (e.message || e); }
+  finally { calendario.ocupado = false; render(); }
+}
+
+// La tarjeta del calendario, en Mis equipos (solo en Cloudflare y con algún equipo).
+function bloqueCalendario() {
+  if (!datos || datos.plataforma !== "cloudflare" || !favoritos.size) return null;
+  const cal = leerLocal(CLAVE_CALENDARIO, null);
+  const n = favoritos.size;
+  let titulo, texto, botones;
+  if (cal && cal.clave) {
+    const webcal = "webcal://" + location.host + "/calendario/" + cal.clave + ".ics";
+    titulo = "Tu calendario de Mis equipos";
+    texto = "Suscríbete una vez y se pone al día solo: los partidos de tus " + n + (n === 1 ? " equipo" : " equipos")
+      + ", con el pronóstico y, al terminar, el resultado. También cuando sigas a otro.";
+    botones = '<a class="accion principal" href="https://calendar.google.com/calendar/render?cid=' + encodeURIComponent(webcal)
+      + '" target="_blank" rel="noopener">Google Calendar</a>'
+      + '<a class="accion" href="' + esc(webcal) + '">iPhone, Mac u Outlook</a>'
+      + '<button class="accion" data-calendario="copiar">Copiar el enlace</button>';
+  } else {
+    titulo = "Tus partidos en tu calendario";
+    texto = "Los partidos de tus equipos, con el pronóstico, en Google Calendar, el iPhone u Outlook. Se pone al día"
+      + " solo, también cuando sigues a otro equipo. Sin cuenta.";
+    botones = '<button class="accion principal" data-calendario="crear"' + (calendario.ocupado ? " disabled" : "") + '>'
+      + esc(calendario.ocupado ? "Un momento…" : "Añadir a mi calendario") + '</button>';
+  }
+  return {
+    id: "calendario", clase: "avisos-tarjeta", huella: (cal && cal.clave) + "|" + n + "|" + calendario.ocupado + "|" + calendario.mensaje,
+    html: ICONO_CALENDARIO + '<div><h2>' + esc(titulo) + '</h2><p>' + esc(texto) + '</p>'
+      + (calendario.mensaje ? '<p class="error" role="status">' + esc(calendario.mensaje) + '</p>' : "")
+      + '<div class="botones">' + botones + '</div></div>',
+  };
+}
+
+// ==========================================
 // SONDEO
 // Con la pestaña oculta no se pregunta: una pestaña olvidada costaba hasta 2.880
 // peticiones al día, y el plan gratis de Cloudflare da 100.000 para todos.
@@ -2766,7 +2850,7 @@ async function refrescar() {
     if (!r.ok) throw new Error("HTTP " + r.status);   // un 500 no pisa los datos que ya hay
     etagEstado = r.headers.get("ETag");
     datos = await r.json();
-    if (datos.plataforma === "cloudflare") { botonCuenta.hidden = false; prepararAvisos(); }   // solo existen allí
+    if (datos.plataforma === "cloudflare") { botonCuenta.hidden = false; prepararAvisos(); calendarioAlDia(); }   // solo existen allí
     periodo = (datos.estado === "actualizando") ? 15000 : 60000;
     // las medias de liga y el registro en vivo solo cambian cuando termina una pasada
     if (estadoPrevio === "actualizando" && datos.estado !== "actualizando") { cargarLigas(); cargarRegistro(); }

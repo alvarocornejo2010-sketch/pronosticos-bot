@@ -7,7 +7,8 @@
 // que la imagen para historias sale (un PNG de 1080x1920 al menú de compartir), que
 // Mis equipos ofrece los avisos (y que activarlos y quitarlos funciona contra el Worker,
 // con el servicio de avisos del navegador de mentira: sin red, Chromium no puede
-// suscribirse), que el detalle de un partido de un equipo seguido los propone y que sus
+// suscribirse), que crear el calendario de Mis equipos da sus enlaces, que el detalle de
+// un partido de un equipo seguido propone los avisos y que sus
 // nombres enlazan con la página de cada equipo, y pasa axe-core (accesibilidad) por la
 // semana, Mis equipos, el detalle, la tabla y la página de un equipo, en el móvil y en
 // escritorio. Así se vio en oct 2026 que la fecha se metía bajo el escudo y
@@ -160,6 +161,13 @@ for (const [ancho, alto] of ANCHOS) {
       await tarjeta.locator("h2", { hasText: "Avisos activados en este aparato" }).waitFor({ timeout: 15000 });
       await tarjeta.locator("[data-avisos=desactivar]").click();
       await tarjeta.locator("[data-avisos=activar]").waitFor({ timeout: 15000 });
+      // el calendario: se crea contra el Worker y da los enlaces para suscribirse
+      await p.locator("[data-calendario=crear]").click();
+      const google = p.locator('#calendario a[href^="https://calendar.google.com/calendar/render?cid=webcal%3A%2F%2F"]');
+      await google.waitFor({ timeout: 15000 });
+      const webcal = await p.locator('#calendario a[href^="webcal://"]').getAttribute("href");
+      const ics = await fetch(webcal.replace(/^webcal:/, "http:"));
+      if (ics.status !== 200 || !(await ics.text()).startsWith("BEGIN:VCALENDAR")) fallo(`${ancho}px: el calendario creado no se sirve`);
     }
     if (extra === "abrir" && (ancho === 390 || ancho === 1440)) {
       // la imagen para historias: lo que llegaría al menú de compartir del sistema

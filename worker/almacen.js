@@ -144,6 +144,14 @@ export const ESQUEMA = [
      tipo        TEXT NOT NULL,
      intentos    INTEGER NOT NULL,
      PRIMARY KEY (suscripcion, partido, tipo)) WITHOUT ROWID`,
+  // El calendario de Mis equipos (calendario.js): cada uno, su clave al azar (la de su
+  // dirección .ics) y los equipos que sigue, en JSON. visto: la última vez que un
+  // calendario lo pidió (se apunta una vez al día como mucho). Horas en ms.
+  `CREATE TABLE IF NOT EXISTS calendarios (
+     clave   TEXT PRIMARY KEY,
+     equipos TEXT NOT NULL,
+     creado  INTEGER NOT NULL,
+     visto   INTEGER NOT NULL) WITHOUT ROWID`,
 ];
 
 const SIN_TABLA = /no such (table|index)/i;

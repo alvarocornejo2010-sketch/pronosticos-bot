@@ -10,7 +10,8 @@
 # (descubrir.py), las visitas se cuentan como deben (visitas.py), las cuentas
 # funcionan de crear a borrar, con correo y Turnstile (cuentas.py), los avisos de Mis
 # equipos llegan cifrados y firmados al servicio de avisos de mentira (avisos.mjs) y la
-# página de cada equipo trae su tabla, su fuerza, su forma y lo que dijo la web (equipos.py).
+# página de cada equipo trae su tabla, su fuerza, su forma y lo que dijo la web (equipos.py),
+# y el calendario de Mis equipos es un .ics bien hecho que sigue a sus equipos (ics.py).
 #
 # Uso: bash pruebas/e2e.sh   (antes: npm ci y pip install -r requirements.txt)
 # Las variables del Worker van con --var, que manda sobre .dev.vars: tu token de
@@ -65,6 +66,7 @@ echo "== Worker"
   --var TURNSTILE_SITEKEY:clave_de_sitio_falsa --var TURNSTILE_SECRET:secreto_turnstile_falso \
   --var "TURNSTILE_VERIFICAR:http://127.0.0.1:$P_API/turnstile/v0/siteverify" \
   --var "PUSH_PRUEBA:http://127.0.0.1:$P_API" --var AVISO_ANTES_MIN:20160 --var MAX_ENVIOS_PASADA:3 \
+  --var MAX_CALENDARIOS_DIA:5 \
   > "$TMP/wrangler.log" 2>&1) &
 esperar "http://127.0.0.1:$P_W/salud"
 python3 "$REPO/pruebas/correr_cron.py" "$P_W" "$P_INS" 600 "$MAX_MS" | tail -4
@@ -112,4 +114,8 @@ python3 "$REPO/pruebas/equipos.py" "$P_W" "$P_INS" "$TMP/d1" "$MAX_MS"
 
 echo "== Interfaz (Playwright)"
 node "$REPO/pruebas/interfaz.mjs" "$P_W" "$P_API"
+
+echo "== Calendario de Mis equipos"
+python3 "$REPO/pruebas/ics.py" "$P_W" "$P_INS" "$TMP/d1" secreto_de_prueba_123 "$MAX_MS"
+(cd "$REPO" && FOOTBALL_DATA_TOKEN=sin_uso UPDATE_SECRET=calendario_dummy_secret python3 -c "import app; r = app.app.test_client().post('/api/calendario', json={}); assert r.status_code == 404 and r.get_json() == {'disponible': False}, r; print('Flask: /api/calendario no existe')")
 echo "e2e: OK"
