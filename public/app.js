@@ -958,7 +958,8 @@ function htmlProyeccion(d) {
     const txt = v === null ? "…" : textoPct(v);
     const [a, b] = puestosDe(z, n);
     const donde = a === b ? "puesto " + a : "puestos " + a + " a " + b;
-    const estilo = v === null || txt === "—" ? "--bg:var(--panel-alto);--fg:var(--tinta-3)" : estiloTramo(Math.round(v));
+    // sin número (aún simulando, o no pasa nunca): gris, con la tinta que aguanta la opacidad de la etiqueta
+    const estilo = v === null || txt === "—" ? "--bg:var(--panel-alto);--fg:var(--tinta-2)" : estiloTramo(Math.round(v));
     const etiqueta = z[0] + " (" + donde + "): " + (v === null ? "simulando" : txt === "—" ? "no pasa en ninguna temporada simulada"
       : txt + " % de las temporadas simuladas");
     return '<span class="cas" role="group" style="' + estilo + '" aria-label="' + esc(etiqueta) + '">'
