@@ -115,5 +115,17 @@ export function ajustes(env = {}) {
     turnstileSitio: env.TURNSTILE_SITEKEY || "",
     turnstileSecreto: env.TURNSTILE_SECRET || "",
     turnstileVerificar: env.TURNSTILE_VERIFICAR || "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    // Los avisos de Mis equipos (avisos.js): cuántos minutos antes del partido, cuántos se
+    // mandan como mucho por minuto (cifrar y firmar cada uno cuesta ~0,3 ms de CPU) y los
+    // topes de suscripciones (en total y nuevas al día) y de lo que escriben al día.
+    avisoAntesMin: num("AVISO_ANTES_MIN", 120),
+    maxEnviosPasada: num("MAX_ENVIOS_PASADA", 8),
+    maxSuscripciones: num("MAX_SUSCRIPCIONES", 2000),
+    maxSuscripcionesDia: num("MAX_SUSCRIPCIONES_DIA", 300),
+    maxEscriturasAvisosDia: num("MAX_ESCRITURAS_AVISOS_DIA", 5000),
+    // la dirección de la web, que va en la firma VAPID como contacto
+    urlWeb: env.URL_WEB || "https://pronosticos-bot.alvarocornejo2010.workers.dev",
+    // solo en las pruebas: el origen de un servicio de avisos de mentira (http://127.0.0.1:...)
+    pushPrueba: env.PUSH_PRUEBA || "",
   };
 }

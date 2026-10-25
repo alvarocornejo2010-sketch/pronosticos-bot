@@ -36,6 +36,7 @@ cab, txt = pedir("/robots.txt")
 txt = txt.decode()
 assert cab["Content-Type"].startswith("text/plain") and f"Sitemap: {W}/sitemap.xml" in txt
 assert "Disallow: /api/contar" in txt and "Disallow: /api/visitas" in txt and "Disallow: /visitas" in txt
+assert "Disallow: /api/avisos" in txt
 assert "Disallow: /api/\n" not in txt   # Google pinta la página con /api/estado
 cab, xml = pedir("/sitemap.xml")
 assert cab["Content-Type"].startswith("application/xml")

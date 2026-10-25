@@ -34,6 +34,7 @@
 import { COMPETICIONES, ajustes } from "./config.js";
 import { Reloj, sumarDias } from "./tiempo.js";
 import { mismoSitio, resumenCuentas } from "./cuentas.js";
+import { resumenAvisos } from "./avisos.js";
 
 const MAX_CUERPO = 4096;
 const MAX_EVENTOS = 30;
@@ -215,6 +216,7 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
     hoy,
     hora: reloj.local(ahora).hora,
     cuentas: await resumenCuentas(almacen, desde7, ahora),
+    avisos: await resumenAvisos(almacen, desde7),
     tope: aj.maxVisitasDia,
     tope_alcanzado: dias.filter((d) => d.escrituras >= aj.maxVisitasDia).map((d) => d.dia),
     semana: sumarDias7(dias.slice(-7)),
@@ -368,6 +370,15 @@ ${par(r.cuentas.con_equipos, "cuentas que siguen a algún equipo")}
 ${par(r.cuentas.con_usuario, "cuentas con usuario y contraseña")}
 ${par(r.cuentas.con_correo, "cuentas con correo (sin verificar)")}
 ${par(r.cuentas.intentos, "intentos de entrar esta semana (con acierto o sin él)")}
+</div></section>
+<section class="tablero"><h2>Avisos de Mis equipos</h2><div class="pares">
+${par(r.avisos.total, `navegadores con los avisos activados (${miles(r.avisos.con_equipos)} siguen a algún equipo)`)}
+${par(r.avisos.nuevas, "se activaron esta semana")}
+${par(r.avisos.previo, "avisos antes de un partido esta semana")}
+${par(r.avisos.final, "avisos con el resultado esta semana")}
+${par(r.avisos.fallo, "avisos que el servicio del navegador no aceptó")}
+${par(r.avisos.caducado, "avisos que llegaron tarde a la cola y no se mandaron")}
+${par(r.avisos.baja, "suscripciones que ya no existían (el navegador las quitó) y se borraron")}
 </div></section>
 </div>
 <footer><h2>Cómo se cuenta</h2><ul>

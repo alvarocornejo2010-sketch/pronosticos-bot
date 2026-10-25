@@ -1,8 +1,9 @@
-// El service worker de la web. Solo sirve para dos cosas: que el móvil la pueda
-// instalar como app (manifest.webmanifest) y que, sin red, salga una página que lo
-// diga en vez del error del navegador. No guarda nada en caché: la web tiene que
-// verse siempre al día (va con no-store) y los números cambian cada minuto.
-// Solo toca las navegaciones (abrir la página); lo demás va como sin él.
+// El service worker de la web. Sirve para tres cosas: que el móvil la pueda instalar
+// como app (manifest.webmanifest), que, sin red, salga una página que lo diga en vez
+// del error del navegador, y enseñar los avisos de Mis equipos (worker/avisos.js). No
+// guarda nada en caché: la web tiene que verse siempre al día (va con no-store) y los
+// números cambian cada minuto. De las peticiones, solo toca las navegaciones (abrir la
+// página); lo demás va como sin él.
 
 const SIN_CONEXION = `<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -39,4 +40,28 @@ self.addEventListener("fetch", (e) => {
       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
     },
   })));
+});
+
+// Un aviso de Mis equipos: el navegador lo trae ya descifrado ({titulo, cuerpo, url,
+// tag}). La etiqueta es la del partido: el del resultado sustituye al de antes.
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (err) { /* sin texto: el aviso genérico */ }
+  const url = typeof d.url === "string" && /^\/(?!\/)/.test(d.url) ? d.url : "/";
+  e.waitUntil(self.registration.showNotification(d.titulo || "Pronósticos", {
+    body: d.cuerpo || "", tag: d.tag || "", renotify: Boolean(d.tag), lang: "es",
+    icon: "/icono-192.png", badge: "/insignia-96.png", data: { url },
+  }));
+});
+
+// Al tocarlo: la web, en la pestaña que ya estuviera abierta si la hay.
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || "/", self.location.origin).href;
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((lista) => {
+    const abierta = lista.find((c) => new URL(c.url).origin === self.location.origin && "focus" in c);
+    if (!abierta) return self.clients.openWindow(url);
+    // primero al frente (el permiso para hacerlo dura poco) y luego al partido
+    return abierta.focus().then((c) => (c || abierta).navigate(url)).catch(() => null);
+  }));
 });

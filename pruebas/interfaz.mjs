@@ -1,14 +1,17 @@
 // Revisión de la interfaz con un navegador de verdad (Playwright), contra el Worker
-// local ya lleno con la API falsa (lo deja así e2e.sh). En 11 vistas y 7 anchos,
+// local ya lleno con la API falsa (lo deja así e2e.sh). En 12 vistas y 7 anchos,
 // de 360 a 1920 px, busca:
 //   - texto que se sale de su caja sin recortarse (scrollWidth > clientWidth);
 //   - piezas de una misma fila que se pisan (la hora, el escudo, los números...);
 //   - errores de JavaScript;
-// que la imagen para historias sale (un PNG de 1080x1920 al menú de compartir),
-// y pasa axe-core (accesibilidad) por la semana y el detalle, en el móvil y en
-// escritorio. Así se vio en oct 2026 que la fecha se metía bajo el escudo y que
-// "Seguir" no cabía en el móvil.
-// Uso: node pruebas/interfaz.mjs PUERTO_WORKER
+// que la imagen para historias sale (un PNG de 1080x1920 al menú de compartir), que
+// Mis equipos ofrece los avisos (y que activarlos y quitarlos funciona contra el Worker,
+// con el servicio de avisos del navegador de mentira: sin red, Chromium no puede
+// suscribirse) y que el detalle de un partido de un equipo seguido los propone, y pasa
+// axe-core (accesibilidad) por la semana, Mis equipos, el detalle y la tabla, en el
+// móvil y en escritorio. Así se vio en oct 2026 que la fecha se metía bajo el escudo y
+// que "Seguir" no cabía en el móvil.
+// Uso: node pruebas/interfaz.mjs PUERTO_WORKER PUERTO_API
 // Las fuentes vienen de Google; sin red, FUENTES=carpeta con fuentes.css, mapa.txt
 // (URL de cada woff2 y su archivo) y los woff2.
 import { chromium } from "playwright";
@@ -17,6 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const W = `http://127.0.0.1:${process.argv[2]}`;
+const API = `http://127.0.0.1:${process.argv[3]}`;   // su /push/... es el servicio de avisos de mentira (PUSH_PRUEBA)
 const AXE = fs.readFileSync(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8");
 const FUENTES = process.env.FUENTES;
 const mapa = FUENTES ? Object.fromEntries(fs.readFileSync(path.join(FUENTES, "mapa.txt"), "utf8").trim().split("\n")
@@ -36,9 +40,33 @@ const VISTAS = [
   ["día por reñidos", "#/dia/" + conPartidos[2].fecha, "renidos"], ["búsqueda", "#/semana", "buscar"],
   ["mis equipos", "#/favoritos"], ["mis equipos por claros", "#/favoritos", "claros"],
   ["detalle", "#/dia/" + conPartidos[1].fecha, "abrir"], ["tabla", "#/liga/PD/tabla", "tabla"],
+  ["detalle de mis equipos", "#/favoritos", "abrir-fav"],
 ];
 const ANCHOS = [[360, 780], [390, 844], [768, 1024], [1024, 768], [1180, 820], [1440, 900], [1920, 1080]];
-const AXE_EN = new Set(["390/semana", "390/detalle", "390/tabla", "1440/semana", "1440/detalle", "1440/tabla"]);
+const AXE_EN = new Set(["390/semana", "390/detalle", "390/tabla", "390/mis equipos", "390/detalle de mis equipos",
+  "1440/semana", "1440/detalle", "1440/tabla", "1440/mis equipos", "1440/detalle de mis equipos"]);
+
+// El servicio de avisos del navegador, de mentira: una suscripción con claves de verdad
+// (el Worker comprueba que son un punto de la curva) y una dirección del servicio de
+// mentira, y el permiso concedido al pedirlo.
+function avisosDeMentira(api) {
+  let permiso = "default", sub = null;
+  const b64u = (b) => btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const nueva = async (clave) => {
+    const par = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+    const keys = { p256dh: b64u(new Uint8Array(await crypto.subtle.exportKey("raw", par.publicKey))),
+      auth: b64u(crypto.getRandomValues(new Uint8Array(16))) };
+    const endpoint = api + "/push/interfaz-" + keys.auth;
+    return { endpoint, options: { applicationServerKey: clave.buffer }, toJSON: () => ({ endpoint, keys }),
+      unsubscribe: async () => { sub = null; return true; } };
+  };
+  const pm = { getSubscription: async () => sub, subscribe: async (o) => (sub = await nueva(o.applicationServerKey)) };
+  const reg = { pushManager: pm };
+  Object.defineProperty(navigator, "serviceWorker", { value: { ready: Promise.resolve(reg),
+    getRegistration: async () => reg, register: async () => reg } });
+  Object.defineProperty(Notification, "permission", { get: () => permiso, configurable: true });
+  Notification.requestPermission = async () => (permiso = "granted");
+}
 
 // Lo que se sale y lo que se pisa (se corre dentro de la página).
 function revisar() {
@@ -90,6 +118,9 @@ for (const [ancho, alto] of ANCHOS) {
   await ctx.route("https://crests.football-data.org/**", (r) => r.abort());   // sin escudo: el monograma
   await ctx.addInitScript((fav) => {   // también corre en about:blank, que no tiene localStorage
     if (location.protocol.startsWith("http")) localStorage.setItem("pronosticos.favoritos", JSON.stringify(fav));
+    // sin ventana, Chromium da siempre los avisos por bloqueados ("denied"): aquí, sin
+    // decidir, como para quien entra por primera vez
+    Object.defineProperty(Notification, "permission", { get: () => "default", configurable: true });
   }, FAVORITOS);
   const p = await ctx.newPage();
   const errores = [];
@@ -98,6 +129,7 @@ for (const [ancho, alto] of ANCHOS) {
     await p.goto("about:blank");   // cada vista desde cero: cambiar solo el hash no recarga (la búsqueda seguiría puesta)
     await p.goto(W + "/" + hash);
     await p.waitForSelector(extra === "tabla" ? ".tabla-liga" : ".fila", { timeout: 15000 });
+    if (hash === "#/favoritos") await p.waitForSelector(".avisos-tarjeta", { timeout: 15000 });
     if (extra === "tabla") await p.waitForFunction(() => !document.querySelector(".tabla-sim"), null, { timeout: 30000 });
     await p.evaluate(() => document.fonts.ready);
     if (extra === "claros" || extra === "renidos") {
@@ -105,7 +137,19 @@ for (const [ancho, alto] of ANCHOS) {
       if (await b.count()) await b.click(); else await p.evaluate((o) => { orden = o; render(); }, extra);
     }
     if (extra === "buscar") await p.evaluate(() => { busqueda = "a"; render(); });
-    if (extra === "abrir") await p.locator(".partido:not(.pendiente) .fila").first().click();
+    if (extra === "abrir" || extra === "abrir-fav") await p.locator(".partido:not(.pendiente) .fila").first().click();
+    if (extra === "abrir-fav" && !(await p.locator(".det-avisos [data-avisos=activar]").count())) {
+      fallo(`${ancho}px: el detalle de un partido de Mis equipos no propone los avisos`);
+    }
+    if (nombre === "mis equipos" && ancho === 1440) {
+      // activar y quitar, contra el Worker de verdad
+      await p.evaluate(avisosDeMentira, API);
+      const tarjeta = p.locator(".avisos-tarjeta");
+      await tarjeta.locator("[data-avisos=activar]").click();
+      await tarjeta.locator("h2", { hasText: "Avisos activados en este aparato" }).waitFor({ timeout: 15000 });
+      await tarjeta.locator("[data-avisos=desactivar]").click();
+      await tarjeta.locator("[data-avisos=activar]").waitFor({ timeout: 15000 });
+    }
     if (extra === "abrir" && (ancho === 390 || ancho === 1440)) {
       // la imagen para historias: lo que llegaría al menú de compartir del sistema
       await p.evaluate(() => {
