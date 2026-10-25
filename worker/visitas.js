@@ -38,6 +38,7 @@ import { COMPETICIONES, ajustes } from "./config.js";
 import { Reloj, sumarDias } from "./tiempo.js";
 import { mismoSitio, resumenCuentas } from "./cuentas.js";
 import { resumenAvisos } from "./avisos.js";
+import { resumenCalendarios } from "./calendario.js";
 
 const MAX_CUERPO = 4096;
 const MAX_EVENTOS = 30;
@@ -236,6 +237,7 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
     hora: reloj.local(ahora).hora,
     cuentas: await resumenCuentas(almacen, desde7, ahora),
     avisos: await resumenAvisos(almacen, desde7),
+    calendarios: await resumenCalendarios(almacen, desde7, ahora),
     tope: aj.maxVisitasDia,
     tope_alcanzado: dias.filter((d) => d.escrituras >= aj.maxVisitasDia).map((d) => d.dia),
     semana: sumarDias7(dias.slice(-7)),
@@ -405,6 +407,11 @@ ${par(r.avisos.final, "avisos con el resultado esta semana")}
 ${par(r.avisos.fallo, "avisos que el servicio del navegador no aceptó")}
 ${par(r.avisos.caducado, "avisos que llegaron tarde a la cola y no se mandaron")}
 ${par(r.avisos.baja, "suscripciones que ya no existían (el navegador las quitó) y se borraron")}
+</div></section>
+<section class="tablero"><h2>Calendario de Mis equipos</h2><div class="pares">
+${par(r.calendarios.total, "calendarios creados que siguen guardados")}
+${par(r.calendarios.nuevos, "se crearon esta semana")}
+${par(r.calendarios.usados, "los pidió algún calendario (Google, iPhone...) en la última semana")}
 </div></section>
 </div>
 <footer><h2>Cómo se cuenta</h2><ul>

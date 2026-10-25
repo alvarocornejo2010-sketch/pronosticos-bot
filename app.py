@@ -1383,6 +1383,13 @@ def api_equipo(id_equipo):
                     "nota": "La página de cada equipo funciona en la versión de Cloudflare."})
 
 
+@app.route("/api/calendario", methods=["POST"])
+def api_calendario():
+    """El calendario de Mis equipos (.ics) solo existe en Cloudflare
+    (worker/calendario.js): guarda cada calendario en D1. La web no lo ofrece aquí."""
+    return jsonify({"disponible": False}), 404
+
+
 @app.route("/api/avisos")
 def api_avisos():
     """Los avisos de Mis equipos solo existen en Cloudflare (worker/avisos.js): los

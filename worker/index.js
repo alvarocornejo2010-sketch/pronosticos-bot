@@ -19,6 +19,8 @@
 //                     con los equipos que sigue y darse de baja (avisos.js)
 //   /api/equipo/86    un equipo: su tabla, su fuerza, su forma y lo que dijo la web
 //                     de sus últimos partidos; /equipo/86, la web con su tarjeta (equipos.js)
+//   /api/calendario   POST: crear el calendario de Mis equipos o cambiarle los equipos;
+//                     /calendario/<clave>.ics, el calendario para suscribirse (calendario.js)
 //
 // El trabajo de verdad lo hace el cron (planificador.js), una vez por minuto.
 
@@ -36,6 +38,7 @@ import { Cuentas, RUTAS_CUENTA } from "./cuentas.js";
 import { CODIGOS_TABLA } from "./tablas.js";
 import { RUTAS_AVISOS, atenderAvisos } from "./avisos.js";
 import { apiEquipo, paginaEquipo } from "./equipos.js";
+import { RUTAS_CALENDARIO, atenderCalendario, servirCalendario } from "./calendario.js";
 
 // Las mismas cabeceras que pone app.py a sus respuestas JSON (la web y app.js
 // llevan las suyas en public/_headers). no-store: el JSON cambia cada pocos
@@ -198,9 +201,11 @@ export default {
     };
     for (const r of Object.keys(RUTAS_CUENTA)) rutas[r] = (almacen) => new Cuentas(request, env, almacen, CABECERAS).atender();
     for (const r of Object.keys(RUTAS_AVISOS)) rutas[r] = (almacen) => atenderAvisos(request, env, almacen, CABECERAS);
+    for (const r of Object.keys(RUTAS_CALENDARIO)) rutas[r] = (almacen) => atenderCalendario(request, env, almacen, CABECERAS);
     const enlace = url.pathname.match(/^\/partido\/(\d{1,12})\/?$/);
     const tabla = url.pathname.match(/^\/api\/tabla\/([A-Z0-9]{2,4})$/);
     const equipo = url.pathname.match(/^\/(api\/)?equipo\/(\d{1,9})\/?$/);
+    const calendario = url.pathname.match(/^\/calendario\/([a-z2-7]{26})\.ics$/);
     const ruta = rutas[url.pathname]
       || (enlace && ((almacen) => paginaPartido(request, env, almacen, Number(enlace[1]))))
       || (equipo && (equipo[1]
@@ -209,12 +214,13 @@ export default {
           return d.estado === "listo" ? condicional(request, JSON.stringify(d)) : json(d, 404);
         }
         : (almacen) => paginaEquipo(request, env, almacen, Number(equipo[2]))))
+      || (calendario && ((almacen) => servirCalendario(request, env, almacen, calendario[1])))
       || (tabla && (async (almacen) => (CODIGOS_TABLA.includes(tabla[1])
         ? condicional(request, (await almacen.leerDocTexto("tabla:" + tabla[1])) ?? JSON.stringify(TABLA_PENDIENTE))
         : json({ error: "no hay tabla de esa liga" }, 404))));
     if (!ruta) return env.ASSETS.fetch(request);   // lo demás: los archivos de public/
     const metodos = url.pathname === "/api/contar" ? ["POST"]
-      : RUTAS_CUENTA[url.pathname] || RUTAS_AVISOS[url.pathname] || ["GET", "HEAD"];
+      : RUTAS_CUENTA[url.pathname] || RUTAS_AVISOS[url.pathname] || RUTAS_CALENDARIO[url.pathname] || ["GET", "HEAD"];
     if (!metodos.includes(request.method)) {
       return new Response("Método no permitido", { status: 405, headers: { ...CABECERAS, Allow: metodos.join(", ") } });
     }

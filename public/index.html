@@ -667,7 +667,8 @@
   .avisos-tarjeta p { margin: 0; max-width: 62ch; color: var(--tinta-2); font-size: var(--t-14); line-height: 1.5; }
   .avisos-tarjeta .botones { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   .avisos-tarjeta .error, .det-avisos .error { margin-top: 8px; color: var(--critico); font-weight: 600; }
-  .vacio + .avisos-tarjeta { margin: 0 20px 20px; max-width: 600px; }
+  .vacio ~ .avisos-tarjeta { margin: 0 20px 20px; max-width: 600px; }
+  .avisos-tarjeta a.accion { text-decoration: none; }
   .det-avisos { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin: 14px 0 0; padding: 12px 14px;
                 background: var(--panel-alto); border: 1px solid var(--linea); border-radius: var(--r-tarjeta); }
   .det-avisos p { flex: 1 1 14rem; margin: 0; color: var(--tinta-2); font-size: var(--t-14); }

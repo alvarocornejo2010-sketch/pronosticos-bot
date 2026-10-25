@@ -42,14 +42,17 @@ assert.equal(deB64u(clave).length, 65);
 assert.equal((await get("/api/avisos")).clave, clave);
 console.log("clave VAPID: la crea el Worker la primera vez y la guarda");
 
-// 2. los equipos: A, el local del primer partido de la semana; B, uno que no juega con A
+// 2. los equipos: A, el que más juega en la ventana; B, el que más juega sin cruzarse con A.
+// Así hay avisos de sobra para varias pasadas a cualquier hora (el domingo por la tarde, al
+// primer equipo de la semana ya casi no le quedaban partidos)
 const estado = await get("/api/estado");
 const todos = estado.dias.flatMap((d) => d.partidos).filter((p) => p.prob_local !== undefined);
 const porId = new Map(todos.map((p) => [p.id, p]));
 const juegos = (eq) => todos.filter((p) => p.local === eq || p.visita === eq);
-const A = todos[0].local;
+const masJuega = (lista) => lista.map((e) => [e, juegos(e).length]).reduce((a, b) => (b[1] > a[1] ? b : a))[0];
+const A = masJuega(todos.map((p) => p.local));
 const conA = new Set(juegos(A).flatMap((p) => [p.local, p.visita]));
-const B = todos.find((p) => !conA.has(p.local) && !conA.has(p.visita)).visita;
+const B = masJuega(todos.filter((p) => !conA.has(p.local) && !conA.has(p.visita)).map((p) => p.visita));
 const conB = new Set(juegos(B).flatMap((p) => [p.local, p.visita]));
 const C = todos.find((p) => ![p.local, p.visita].some((e) => conA.has(e) || conB.has(e))).local;
 
@@ -109,7 +112,9 @@ for (let i = 0; i < 40; i++) {
   if (r.cola === 0 && r.proximo > Date.now() && (await recibidos()).length >= esperados.size) break;
 }
 const avisosTicks = ticks.filter((t) => t.tarea === "avisos");
-assert.ok(avisosTicks.length >= 2, JSON.stringify(ticks));
+// de 3 en 3 (MAX_ENVIOS_PASADA en e2e.sh): hacen falta varias pasadas
+assert.ok(esperados.size > 3, `solo ${esperados.size} avisos: no se prueba el reparto en pasadas`);
+assert.ok(avisosTicks.length >= Math.ceil(esperados.size / 3), JSON.stringify(ticks));
 
 // 5. lo que llegó: cada aviso descifrado, con su firma, sus cabeceras y su texto
 async function abrir(a) {

@@ -12,11 +12,13 @@ import { isoSinMs } from "./registro.js";
 import { equiposDeTablas } from "./equipos.js";
 
 export function robots(origen) {
-  return `# La web, los partidos y los datos que pinta sí; las visitas, los avisos y las rutas con token, no.
+  return `# La web, los partidos y los datos que pinta sí; las visitas, los avisos, los calendarios y las rutas con token, no.
 User-agent: *
 Disallow: /api/contar
 Disallow: /api/visitas
 Disallow: /api/avisos
+Disallow: /api/calendario
+Disallow: /calendario/
 Disallow: /visitas
 Disallow: /actualizar
 Disallow: /validar

@@ -238,7 +238,8 @@ Mis equipos: `/api/avisos` (la clave pública VAPID; en Render, `disponible: fal
 solo en Cloudflare, `/api/avisos/alta` y `/api/avisos/baja` (POST; ver "Avisos de Mis
 equipos"). Y `/api/equipo/86`, la página de un equipo (en Render, `no_disponible`), y
 `/equipo/86`, la web con su tarjeta (en Render, la web sin tarjeta; ver "Página de cada
-equipo").
+equipo"). Y el calendario de Mis equipos, solo en Cloudflare: `/api/calendario` (POST) y
+`/calendario/<clave>.ics` (ver "Calendario de Mis equipos").
 
 **Efecto secundario de cada deploy:** el disco de Render free es efímero, cada
 deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
@@ -280,7 +281,7 @@ incluidos), `actualizacion.js` (la pasada), `validacion.js`, `metricas.js`
 `buscadores.js` (`robots.txt` y `sitemap.xml`), `cuentas.js` (las cuentas),
 `tablas.js` (la tabla de cada liga y lo que le falta), `avisos.js` (los avisos de Mis
 equipos), `push.js` (su cifrado y su firma, Web Push), `equipos.js` (la página de cada
-equipo) e `index.js` (rutas).
+equipo), `calendario.js` (el calendario `.ics` de Mis equipos) e `index.js` (rutas).
 
 **El ritmo lo marca la CPU.** El plan gratis da 10 ms por ejecución y leer el
 JSON de la API cuesta ~7 ms por MB, así que en vez de una pasada de 40
@@ -329,7 +330,7 @@ de claves, y `avisos_resumen`, cuándo volver a mirar) y
 muertas), `visitas` (los contadores de visitas por día, ver "Visitas"), las de
 las cuentas: `cuentas`, `usuarios`, `correos`, `accesos`, `sesiones` y `favoritos` (ver
 "Cuentas"), y las de los avisos: `suscripciones`, `avisos` y `envios` (ver "Avisos de
-Mis equipos").
+Mis equipos"), y `calendarios` (ver "Calendario de Mis equipos").
 
 **Si una pasada muere** (lo más probable, por CPU) deja el candado puesto; la
 siguiente lo nota y hace la mitad (presupuesto, bytes y cálculos), hasta un
@@ -403,8 +404,9 @@ para no leer las fichas enteras). Lo prueba `pruebas/semana.mjs`.
 - `/actualizar?forzar=1` y `/validar` dejan un pedido en D1 que el cron recoge
   en menos de un minuto: una petición web no puede durar lo que una pasada;
 - el registro en vivo (`/api/registro`), las visitas (`/visitas`), la tabla con
-  su proyección (`/api/tabla/PD`), los avisos de Mis equipos (`/api/avisos`) y la
-  página de cada equipo (`/api/equipo/86`) solo existen aquí.
+  su proyección (`/api/tabla/PD`), los avisos de Mis equipos (`/api/avisos`), la
+  página de cada equipo (`/api/equipo/86`) y el calendario de Mis equipos
+  (`/calendario/<clave>.ics`) solo existen aquí.
 
 **En local:** `npm install`, copiar `.dev.vars.example` a `.dev.vars`, `npm run
 dev` y lanzar el cron a mano con
@@ -550,7 +552,8 @@ hay (es un torneo).
   en ese navegador; con cuenta, también en la web (ver "Cuentas"). Con la web abierta
   en dos pestañas, cada una toma al momento las estrellas de la otra (evento
   `storage`), para no borrarlas al guardar las suyas. Y pueden avisar antes de cada
-  partido (ver "Avisos de Mis equipos").
+  partido (ver "Avisos de Mis equipos") y salir en el calendario de cada uno (ver
+  "Calendario de Mis equipos").
 
 ## Página de cada equipo (oct 2026)
 
@@ -661,6 +664,44 @@ correo; en el iPhone, solo con la web instalada (Safari no los deja de otra form
   (y cuántas siguen a algún equipo), altas de la semana, avisos mandados antes del
   partido y con el resultado, los que el servicio no aceptó, los que llegaron tarde y
   las suscripciones borradas por 404/410 (`push` y `suscripciones` en `visitas`).
+
+## Calendario de Mis equipos (oct 2026)
+
+Los partidos de los equipos con estrella en el calendario de cada uno (Google Calendar, el
+iPhone, Outlook), con su pronóstico, que se pone al día solo. Sin cuenta: una tarjeta en
+Mis equipos ("Añadir a mi calendario") pide al Worker un calendario con la lista de
+equipos de ese navegador (`POST /api/calendario`), que da una clave al azar (128 bits,
+base32); la dirección es `/calendario/<clave>.ics`, y la tarjeta la ofrece para Google
+Calendar (`calendar.google.com/calendar/render?cid=webcal://...`), para el iPhone, el Mac
+u Outlook (`webcal://...`) y para copiarla. Cada vez que cambian las estrellas (y al abrir
+la web, si cambiaron en otra pestaña o con la cuenta) la lista nueva va con la misma clave
+(`calendarioAlDia` en `app.js`; `pronosticos.calendario` guarda la clave y lo último
+mandado): el calendario suscrito la sigue solo. La clave es el único secreto; quien la
+tenga ve y cambia esa lista de equipos, nada más.
+
+- **Qué lleva** (`worker/calendario.js`): un evento de 2 h por partido de esos equipos
+  (los de la ventana, con predicción o sin ella, y los de los últimos 7 días), en UTC (cada
+  calendario lo pasa a su hora), "libre" (`TRANSP:TRANSPARENT`, no ocupa la agenda). Antes
+  de terminar: "Real Madrid – Barcelona" y el pronóstico con los enteros de la web y más de
+  2.5; con resultado: "Real Madrid 2-1 Barcelona" y lo que dijo la web, el texto de los
+  avisos (`mensajeAviso`). Siempre con el enlace a `/partido/123`. `UID` por partido: un
+  partido que cambia de hora se mueve, no se duplica. Pide volver a leerlo cada 6 h
+  (`REFRESH-INTERVAL`; Google lo lee cuando quiere, a veces cada 12-24 h).
+- **Formato:** iCalendar (RFC 5545) a mano, sin dependencias: texto escapado, líneas de 75
+  octetos como mucho sin partir un carácter de UTF-8, CRLF. Lo comprueba `ics.py`.
+- **Coste:** leerlo es una consulta (por el nombre de cada equipo, con los índices de las
+  predicciones de "Página de cada equipo") y como mucho una escritura al día (`visto`). Un
+  alta o un cambio de equipos, una fila.
+- **Topes** (contados en `visitas`): `MAX_CALENDARIOS` (5.000 en total),
+  `MAX_CALENDARIOS_DIA` (300 nuevos al día) y `MAX_ESCRITURAS_CALENDARIOS_DIA` (3.000 filas
+  al día por altas y cambios). Uno que ningún calendario pide en 120 días se borra (al
+  crear otro); si la web lo vuelve a mandar con su clave, se crea de nuevo con la misma, y
+  la dirección que la persona tenía suscrita sigue valiendo.
+- **Qué se guarda** (`calendarios`): la clave, los nombres de los equipos y cuándo se creó
+  y se pidió por última vez. Nada de quién es. La política de privacidad tendrá que decirlo.
+- `robots.txt` deja fuera `/calendario/` y `/api/calendario`. En el panel de visitas, el
+  tablero "Calendario de Mis equipos": guardados, nuevos de la semana y pedidos en la
+  última semana. Solo en Cloudflare: en Render la tarjeta no sale y `/api/calendario` da 404.
 
 ## Cuentas (oct 2026)
 
@@ -830,7 +871,7 @@ es lo que pidió el dueño del proyecto; lo que cueste dinero (mandar correos) e
   `canonical`. El Worker sirve
   `/robots.txt` (sí a la web, los partidos y los datos que pinta: Google pinta la
   página pidiendo `/api/estado`, y sin él indexaría "Cargando"; no a
-  `/api/contar`, `/api/visitas`, `/visitas`, `/actualizar` ni `/validar`) y `/sitemap.xml` con la portada, los partidos por
+  `/api/contar`, `/api/visitas`, `/visitas`, `/api/avisos`, `/api/calendario`, `/calendario/`, `/actualizar` ni `/validar`) y `/sitemap.xml` con la portada, los partidos por
   jugar y los equipos de las tablas (`buscadores.js`, dos consultas a D1). Las direcciones salen del origen de
   la petición. Solo en Cloudflare. Para que Google lo lea antes, falta darlo de
   alta en Search Console (verificar la propiedad con una etiqueta `meta`, la
@@ -912,8 +953,8 @@ machacara a propósito dejaría `/api/estado` sin servicio hasta la medianoche
 UTC (la web en sí, que es estática, seguiría cargando). En `workers.dev` no hay
 reglas de WAF; con un dominio propio en Cloudflare sí habría una regla de
 límite de peticiones gratis. Las rutas públicas que escriben en D1 son
-`/api/contar`, las de las cuentas y el alta de los avisos, todas con tope diario
-(ver "Visitas", "Cuentas" y "Avisos de Mis equipos"); quien machaque `/api/cuenta/entrar` deja a todos sin poder entrar ese
+`/api/contar`, las de las cuentas, el alta de los avisos y la del calendario, todas con
+tope diario (ver "Visitas", "Cuentas", "Avisos de Mis equipos" y "Calendario de Mis equipos"); quien machaque `/api/cuenta/entrar` deja a todos sin poder entrar ese
 día (no sin sus equipos).
 
 ## El modelo (oct 2026)
@@ -1350,12 +1391,12 @@ Environment).
   oct 2026: el enlace con vista previa, los favoritos, el resumen de la semana,
   instalarla como app, el sitemap, la marca de las ligas de fiabilidad baja, las
   cuentas (ver "Cuentas"; lo que les falta, en el punto siguiente), los avisos de
-  Mis equipos (ver "Avisos de Mis equipos") y la página de cada equipo (ver "Página
-  de cada equipo").
+  Mis equipos (ver "Avisos de Mis equipos"), la página de cada equipo (ver "Página
+  de cada equipo") y el calendario de Mis equipos (ver "Calendario de Mis equipos").
 
 - **Cuentas, la versión siguiente** (ver "Cuentas"): una página de política de
-  privacidad (Ley 29733: qué se guarda, ahora también el correo y las suscripciones
-  de los avisos, para qué, los 7 días
+  privacidad (Ley 29733: qué se guarda, ahora también el correo, las suscripciones
+  de los avisos y los calendarios, para qué, los 7 días
   de copias de D1 y cómo pedir o borrar los datos; conviene que la revise alguien que
   sepa de leyes); poner las claves de Turnstile en el panel; verificar el correo y
   recuperar la contraseña con él (Cloudflare Email Service: plan de pago de Workers,
@@ -1439,14 +1480,19 @@ Environment).
     avisos. Que la página de cada equipo trae su fila de la tabla, su ataque y su defensa
     (los del modelo, con su puesto), su forma (la de la caché) y lo que dijo la web de un
     partido suyo con resultado, con ETag, 404 para uno que no existe, su tarjeta en
-    `/equipo/86` y todos los equipos en el sitemap (`equipos.py`). Y al final, la
+    `/equipo/86` y todos los equipos en el sitemap (`equipos.py`). Que el calendario de
+    Mis equipos es un iCalendar bien formado (CRLF, líneas de 75 octetos, texto escapado)
+    con un evento por partido de sus equipos, su hora y su pronóstico, y el resultado al
+    terminar; que cambiar los equipos con la misma clave cambia los eventos, que una clave
+    borrada vuelve, que lo raro no entra y que el tope de nuevos corta (`ics.py`, con
+    `MAX_CALENDARIOS_DIA=5`; va después de la interfaz, que también crea uno). Y la
     interfaz en un navegador de verdad (`interfaz.mjs`,
     Playwright): 13 vistas (semana, día, liga, por claros y por reñidos, búsqueda,
     Mis equipos, el detalle abierto, el de un partido de Mis equipos, la tabla con su
     proyección y la página de un equipo) en 7 anchos de 360 a 1920 px, sin texto que se salga de su caja, sin
     piezas de una fila que se pisen, sin errores de JavaScript, con la tarjeta y la
     invitación de los avisos (y activarlos y quitarlos contra el Worker, con el
-    servicio de avisos del navegador de mentira), los nombres del detalle enlazando con
+    servicio de avisos del navegador de mentira), crear el calendario y sus enlaces, los nombres del detalle enlazando con
     la página de su equipo, y axe-core sin nada en la semana,
     Mis equipos, los dos detalles, la tabla y la página de un equipo, en el móvil y en escritorio. Es lo que en oct
     2026 encontró la fecha bajo el escudo y "Seguir" cortado en el móvil. El job
