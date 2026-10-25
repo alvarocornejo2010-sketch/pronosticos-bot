@@ -157,6 +157,8 @@ function fechaCorta(iso) { const p = partes(iso); return p.d + " " + MESES[p.m -
 function fechaLarga(iso) { const p = partes(iso); return p.d + " de " + MESES_LARGOS[p.m - 1]; }
 // Lun, Mar, Sáb...: con las tarjetas de día estrechas, "Sábado" no cabía y salía "Sába…".
 function diaCorto(d) { return d === "Hoy" || d === "Mañana" ? d : d.slice(0, 3); }
+// "Sáb 31 oct", o solo "Hoy" / "Mañana", que ya dicen el día (y "Mañana 25 oct" no cabía)
+function diaConFecha(p) { return p.dia === "Hoy" || p.dia === "Mañana" ? p.dia : diaCorto(p.dia) + " " + fechaCorta(p.fecha); }
 function pct(v) { return Number(v).toFixed(1) + " %"; }
 
 // Hoy en Lima ("2026-10-21"): UTC-5 todo el año, sin horario de verano. Hoy, Mañana
@@ -303,7 +305,7 @@ function muestraDe(p) {
 
 function htmlFila(p, ctx, abierto) {
   const hora = '<span class="c-hora"><span class="hh">' + esc(p.hora) + '</span>'
-    + (ctx.conDia ? '<span class="dd">' + esc(diaCorto(p.dia)) + " " + fechaCorta(p.fecha) + '</span>' : "")
+    + (ctx.conDia ? '<span class="dd">' + esc(diaConFecha(p)) + '</span>' : "")
     + '</span>';
   const liga = '<span class="c-liga">' + htmlInsignia(p.liga_codigo) + '</span>';
 
@@ -606,6 +608,7 @@ function bloquesDePartidos(partidos, ctx) {
       id: "p-" + p.id,
       huella: JSON.stringify(p) + "|" + JSON.stringify(ctx) + "|" + abierto + "|" + escudosRotos.size + "|" + versionFav,
       clase: "partido" + (p.pendiente ? " pendiente" : ""),
+      conDia: !!ctx.conDia,
       html: htmlFila(p, ctx, abierto),
     };
   });
@@ -1251,6 +1254,7 @@ function render() {
   const c = bloquesCentro(todos, ruta);
   tituloEl.innerHTML = esc(c.titulo) + (c.sub ? '<small>' + esc(c.sub) + '</small>' : "");
   centroEl.classList.toggle("mezcla", !!c.mezcla);
+  centroEl.classList.toggle("con-dia", c.bloques.some(b => b.conDia));
   limpiarHueco.innerHTML = busqueda ? '<button class="limpiar" id="limpiar">Limpiar búsqueda</button>' : "";
   if (c.vacio) {
     vista.innerHTML = '<div class="vacio"><h2>' + esc(c.vacio[0]) + '</h2><p>' + esc(c.vacio[1]) + '</p></div>';

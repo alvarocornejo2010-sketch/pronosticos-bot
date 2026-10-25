@@ -138,10 +138,16 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
   al de la ventana. Las columnas entran por prioridad: <640px compacta (equipos
   apilados + 1 X 2), ≥640px tabla con 1 X 2, ≥780px más de 2.5 y ambos marcan,
   ≥940px 1X/X2/12, ≥1080px goles esperados y muestra, ≥1280px la barra de
-  reparto. La columna Liga solo aparece en las vistas que mezclan ligas.
+  reparto. La columna Liga solo aparece en las vistas que mezclan ligas. En las
+  que mezclan días en una sola lista (Claros o Reñidos, una liga entera fuera del
+  orden por hora, la búsqueda) cada fila lleva su día ("Sáb 31 oct", o solo "Hoy" /
+  "Mañana") debajo de la hora, y la columna de la hora se ensancha (`con-dia` en
+  `.centro`, `--col-hora` y `--col-hora-c`): antes iba al lado, no cabía en la
+  columna y se metía bajo el escudo del local (oct 2026).
 - **El detalle de un partido** (al abrirlo, oct 2026; antes era una lista de
   etiquetas con frases). Arriba, los dos equipos frente a frente (escudo,
-  nombre entero y "Seguir"), y en medio la liga, la hora y Compartir. Debajo,
+  nombre entero y "Seguir"; con el panel central de menos de 420px, solo la
+  estrella, que el texto no cabía), y en medio la liga, la hora y Compartir. Debajo,
   bloques con título pequeño: Quién gana (una barra repartida 1/X/2, cada tramo
   en el tono de la rampa de su probabilidad, con leyenda), Doble oportunidad
   (tres casillas), Goles esperados (dos barras enfrentadas desde el centro, en
