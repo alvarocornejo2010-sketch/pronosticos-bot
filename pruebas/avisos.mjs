@@ -106,15 +106,18 @@ async function tick() {
 const recibidos = async () => (await fetch(API + "/__push")).json();
 const esperados = new Map();   // "s1|123|previo"
 for (const n of navs) for (const eq of n.equipos) for (const p of juegos(eq)) esperados.set(`${n.id}|${p.id}|previo`, p);
+// la de gone-s3 se borra con su cola en cuanto el servicio responde 410: de las suyas
+// llegan solo las que iban en esa pasada; las demás, todas
+const entregables = [...esperados.keys()].filter((k) => !k.startsWith("gone")).length;
 for (let i = 0; i < 40; i++) {
   await tick();
   const r = resumen();
-  if (r.cola === 0 && r.proximo > Date.now() && (await recibidos()).length >= esperados.size) break;
+  if (r.cola === 0 && r.proximo > Date.now() && (await recibidos()).length >= entregables) break;
 }
 const avisosTicks = ticks.filter((t) => t.tarea === "avisos");
 // de 3 en 3 (MAX_ENVIOS_PASADA en e2e.sh): hacen falta varias pasadas
-assert.ok(esperados.size > 3, `solo ${esperados.size} avisos: no se prueba el reparto en pasadas`);
-assert.ok(avisosTicks.length >= Math.ceil(esperados.size / 3), JSON.stringify(ticks));
+assert.ok(entregables > 3, `solo ${entregables} avisos: no se prueba el reparto en pasadas`);
+assert.ok(avisosTicks.length >= Math.ceil(entregables / 3), JSON.stringify(ticks));
 
 // 5. lo que llegó: cada aviso descifrado, con su firma, sus cabeceras y su texto
 async function abrir(a) {
