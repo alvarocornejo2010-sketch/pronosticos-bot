@@ -640,7 +640,7 @@ Render. Los commits de fusión hechos desde la web de GitHub llevan el email de
 la cuenta; para que los siguientes no lo lleven: GitHub → Settings → Emails →
 "Keep my email addresses private".
 
-**Los dos secretos** y dónde viven (nunca en el repo):
+**Los secretos** y dónde viven (nunca en el repo):
 - `FOOTBALL_DATA_TOKEN`: la clave de la API. Render → Environment y Cloudflare
   → Settings → Variables and Secrets (tipo Secret). Viaja en la cabecera
   `X-Auth-Token`, nunca en la URL, y no se escribe en ningún log.
@@ -650,6 +650,9 @@ la cuenta; para que los siguientes no lo lleven: GitHub → Settings → Emails 
   queda en el historial del navegador y en los logs de Render y Cloudflare, que
   solo ve el dueño de la cuenta: no pegar esa URL en ningún sitio público. Si
   se filtra, se cambia en los dos paneles y listo (no hay nada más atado a él).
+- `TURNSTILE_SECRET`, solo en Cloudflare (tipo Secret, con `TURNSTILE_SITEKEY`,
+  que es pública: ver "Cuentas"). Si se filtra, se rota en Cloudflare →
+  Turnstile y se cambia en el panel.
 - En local van en `.env` / `.dev.vars`, que `.gitignore` deja fuera
   (`.dev.vars.example` sí se sube: solo lleva ejemplos).
 
@@ -1067,7 +1070,8 @@ secretos (la página saldría rota), y el proyecto evita URLs de más
 
 Secretos, en el panel (Settings → Variables and Secrets, tipo Secret):
 `FOOTBALL_DATA_TOKEN` y `UPDATE_SECRET`, los mismos valores que en Render →
-Environment. Sin el token, la web lo dice ("Falta el secreto
+Environment, y las dos claves de Turnstile (`TURNSTILE_SITEKEY` y
+`TURNSTILE_SECRET`, ver "Cuentas"). Sin el token, la web lo dice ("Falta el secreto
 FOOTBALL_DATA_TOKEN...") y en cuanto se pone, el siguiente minuto arranca.
 
 Para ver qué pasa: Workers & Pages → `pronosticos-bot` → Deployments (qué
@@ -1117,11 +1121,11 @@ Environment).
   "Compartir, favoritos y app". Con eso se decide lo siguiente, ideas ya
   habladas: un dominio propio (más fácil de recordar, Search Console y la regla
   de límite de peticiones; ojo, `canonical`, `og:url` y `og:image` de
-  `index.html` llevan workers.dev) y, si hay gente que vuelve, cuentas para una
-  porra gratis contra el modelo (entrar con Google o passkey, sin contraseñas;
-  política de privacidad por la Ley 29733; sin dinero ni premios). Hecho en oct
-  2026: el enlace con vista previa, los favoritos, el resumen de la semana,
-  instalarla como app, el sitemap y la marca de las ligas de fiabilidad baja.
+  `index.html` llevan workers.dev) y, si hay gente que vuelve, una porra gratis
+  contra el modelo con las cuentas que ya hay (sin dinero ni premios). Hecho en
+  oct 2026: el enlace con vista previa, los favoritos, el resumen de la semana,
+  instalarla como app, el sitemap, la marca de las ligas de fiabilidad baja y las
+  cuentas (ver "Cuentas"; lo que les falta, en el punto siguiente).
 
 - **Cuentas, la versión siguiente** (ver "Cuentas"): una página de política de
   privacidad (Ley 29733: qué se guarda, ahora también el correo, para qué, los 7 días
