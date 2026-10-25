@@ -4,6 +4,7 @@
 //   - texto que se sale de su caja sin recortarse (scrollWidth > clientWidth);
 //   - piezas de una misma fila que se pisan (la hora, el escudo, los números...);
 //   - errores de JavaScript;
+// que la imagen para historias sale (un PNG de 1080x1920 al menú de compartir),
 // y pasa axe-core (accesibilidad) por la semana y el detalle, en el móvil y en
 // escritorio. Así se vio en oct 2026 que la fecha se metía bajo el escudo y que
 // "Seguir" no cabía en el móvil.
@@ -105,6 +106,22 @@ for (const [ancho, alto] of ANCHOS) {
     }
     if (extra === "buscar") await p.evaluate(() => { busqueda = "a"; render(); });
     if (extra === "abrir") await p.locator(".partido:not(.pendiente) .fila").first().click();
+    if (extra === "abrir" && (ancho === 390 || ancho === 1440)) {
+      // la imagen para historias: lo que llegaría al menú de compartir del sistema
+      await p.evaluate(() => {
+        navigator.canShare = () => true;
+        navigator.share = async ({ files }) => {
+          const b = await createImageBitmap(files[0]);
+          window.__imagen = { tipo: files[0].type, nombre: files[0].name, bytes: files[0].size, w: b.width, h: b.height };
+        };
+      });
+      await p.locator("[data-imagen]").first().click();
+      await p.waitForFunction(() => window.__imagen, null, { timeout: 15000 });
+      const im = await p.evaluate(() => window.__imagen);
+      if (im.tipo !== "image/png" || im.w !== 1080 || im.h !== 1920 || im.bytes < 30000 || !/^pronostico-[a-z0-9-]+\.png$/.test(im.nombre)) {
+        fallo(`${ancho}px: la imagen para historias no es la esperada: ${JSON.stringify(im)}`);
+      }
+    }
     await p.waitForTimeout(200);
     const r = await p.evaluate(revisar);
     for (const x of r.fuera) fallo(`${ancho}px, ${nombre}: se sale ${x}`);

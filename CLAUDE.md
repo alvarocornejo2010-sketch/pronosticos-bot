@@ -91,7 +91,8 @@ suspendería a ambos.
 ni una etiqueta `{{ }}`: Flask la sirve como plantilla (`template_folder=
 "public"`) y Cloudflare como archivo estático, con sus cabeceras en
 `public/_headers`. Es un shell estático con el CSS en línea y el JS en
-`public/app.js` (Flask lo sirve en `/app.js`), que se pinta entero en
+`public/app.js` (Flask lo sirve en `/app.js`; la imagen para historias va aparte,
+en `public/imagen.js`, que se carga con `import()` solo al pulsar "Imagen"), que se pinta entero en
 el cliente sondeando `/api/estado` (cada 15 s mientras hay cálculo en curso, cada
 minuto el resto del tiempo y nada con la pestaña oculta: al volver a ella pide en
 el acto). El sondeo lleva el ETag de la vez anterior y, si nada cambió, el servidor
@@ -434,7 +435,7 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
   llevar datos de la página. Como mucho 3 por visita y 3 por aviso. En el panel,
   "Errores del navegador": si una línea sube, la web falla en algún aparato.
 - **Compartir y favoritos** también se cuentan: veces que se pulsó Compartir
-  (`compartir`, por partido), visitas que llegaron por un enlace `/partido/123`
+  (`compartir`, por partido), imágenes para historias (`imagen`, por partido), visitas que llegaron por un enlace `/partido/123`
   (`enlace`), estrellas puestas (`favorito`) y visitantes que siguen a algún
   equipo (`con_favoritos`). Y la app: instalaciones (`instalada`) y visitantes
   que entraron desde la app instalada (`en_app`, `display-mode: standalone`). En
@@ -486,6 +487,18 @@ hay (es un torneo).
 
 ## Compartir y favoritos (oct 2026)
 
+- **Imagen para historias** (oct 2026): bajo Compartir, el botón "Imagen" hace un
+  PNG de 1080×1920 con el pronóstico (`public/imagen.js`, en un canvas, en el
+  navegador: cero peticiones y cero CPU del Worker). Lleva la liga, la fecha con la
+  hora de Lima, los dos equipos, la frase del veredicto, la barra 1X2 con los mismos
+  enteros y tonos que la web, más de 2.5, ambos marcan y el marcador más probable,
+  y la dirección de la web, todo por encima de los ~200 px de abajo, que en una
+  historia de Instagram tapa la barra de responder. Se comparte con el menú del
+  sistema si deja compartir archivos (`navigator.canShare({files})`: Android,
+  iPhone) y si no, se descarga. Los escudos se piden con CORS; si football-data no
+  lo permite, va el monograma (un escudo sin CORS no se puede exportar del canvas).
+  Los tonos de liga salen de las variables CSS; el Brasileirão, rayado en la web, va
+  en gris. `interfaz.mjs` comprueba que sale un PNG de 1080×1920.
 - **Compartir:** cada partido abierto tiene un botón Compartir (en la cabecera del
   detalle, bajo la hora). En el móvil abre
   el menú del sistema (WhatsApp, Telegram...); si no lo hay, copia el enlace
@@ -1239,7 +1252,7 @@ Environment).
 ## Pruebas automáticas (GitHub Actions, oct 2026)
 
 - `.github/workflows/pruebas.yml`, en cada PR y cada push a `main`, dos checks:
-  - **Paridad Python / Worker**: `node --check` de `worker/*.js`, `public/app.js` y `public/sw.js`,
+  - **Paridad Python / Worker**: `node --check` de `worker/*.js`, `public/app.js`, `public/sw.js` y `public/imagen.js`,
     `python test_paridad.py` ("todo igual"), `node pruebas/semana.mjs` (el resumen
     de la semana del registro y los textos de la tarjeta para compartir) y `node
     pruebas/sw.mjs` (el service worker: "Sin conexión" sin red, la web con red).

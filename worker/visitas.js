@@ -12,6 +12,7 @@
 //   {t: "busqueda"}                  buscó un equipo
 //   {t: "pestana", p: "panorama"}    cambió de pestaña en el móvil
 //   {t: "compartir", id: 123}        pulsó Compartir en un partido
+//   {t: "imagen", id: 123}           sacó la imagen de un partido para historias
 //   {t: "favorito"}                  marcó un equipo con la estrella
 //   {t: "instalada"}                 instaló la web como app
 //   {t: "error", k: "TypeError", l: 1234}   un error de JavaScript en app.js: el
@@ -98,7 +99,7 @@ export function contadores(eventos, propio, hora) {
       if (DISPOSITIVOS.has(e.d)) sumar("dispositivo", e.d);
       sumar("origen", origen(e.o, propio));
       if (e.v === "vuelve" && Number.isSafeInteger(e.hace) && e.hace >= 1) sumar("vuelta", tramoVuelta(e.hace));
-    } else if ((e.t === "partido" || e.t === "compartir") && Number.isSafeInteger(e.id) && e.id > 0) {
+    } else if ((e.t === "partido" || e.t === "compartir" || e.t === "imagen") && Number.isSafeInteger(e.id) && e.id > 0) {
       sumar(e.t, String(e.id));
     } else if (e.t === "favorito" || e.t === "instalada") {
       sumar(e.t, "");
@@ -146,7 +147,7 @@ export async function contar(request, env, almacen, cabeceras, ahora = Date.now(
   const sumas = contadores(eventos, url.hostname, hora.slice(0, 2));
   if (!sumas.length) return nada(cabeceras);
   const db = almacen.db;
-  const sentencias = sumas.map((s) => s.tipo === "partido" || s.tipo === "compartir"
+  const sentencias = sumas.map((s) => s.tipo === "partido" || s.tipo === "compartir" || s.tipo === "imagen"
     ? db.prepare(SUMAR_PARTIDO).bind(fecha, s.tipo, s.clave, s.n, aj.maxVisitasDia, Number(s.clave))
     : db.prepare(SUMAR).bind(fecha, s.tipo, s.clave, s.n, aj.maxVisitasDia));
   // la última, para que todas miren el tope de antes de esta petición
@@ -158,7 +159,7 @@ export async function contar(request, env, almacen, cabeceras, ahora = Date.now(
 // ---------- lo que enseña /visitas ----------
 
 const vacio = () => ({ visitas: 0, visitantes: 0, nuevos: 0, vuelven: 0, partidos: 0, busquedas: 0,
-  compartidos: 0, llegadas: 0, estrellas: 0, con_favoritos: 0, instaladas: 0, en_app: 0 });
+  compartidos: 0, imagenes: 0, llegadas: 0, estrellas: 0, con_favoritos: 0, instaladas: 0, en_app: 0 });
 
 function sumarDias7(dias) {
   const s = vacio();
@@ -173,9 +174,9 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
   const desde30 = sumarDias(hoy, -29), desde7 = sumarDias(hoy, -6);
   const db = almacen.db;
   const [serie, desglose, top] = await almacen.consultar(() => db.batch([
-    db.prepare(`SELECT dia, tipo, CASE WHEN tipo IN ('partido', 'compartir') THEN '' ELSE clave END AS c, SUM(n) AS n
+    db.prepare(`SELECT dia, tipo, CASE WHEN tipo IN ('partido', 'compartir', 'imagen') THEN '' ELSE clave END AS c, SUM(n) AS n
       FROM visitas WHERE dia >= ?1 AND tipo IN ('visitas', 'visitantes', 'partido', 'busqueda', 'escrituras',
-        'compartir', 'enlace', 'favorito', 'con_favoritos', 'instalada', 'en_app')
+        'compartir', 'imagen', 'enlace', 'favorito', 'con_favoritos', 'instalada', 'en_app')
       GROUP BY dia, tipo, c`).bind(desde30),
     db.prepare(`SELECT tipo, clave, SUM(n) AS n FROM visitas
       WHERE dia >= ?1 AND tipo IN ('origen', 'dispositivo', 'vuelta', 'hora', 'liga', 'tabla', 'pestana', 'error')
@@ -196,7 +197,7 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
     porDia.set(d.dia, d);
   }
   const CAMPO = { visitas: "visitas", partido: "partidos", busqueda: "busquedas", escrituras: "escrituras",
-    compartir: "compartidos", enlace: "llegadas", favorito: "estrellas", con_favoritos: "con_favoritos",
+    compartir: "compartidos", imagen: "imagenes", enlace: "llegadas", favorito: "estrellas", con_favoritos: "con_favoritos",
     instalada: "instaladas", en_app: "en_app" };
   for (const f of serie.results) {
     const d = porDia.get(f.dia);
@@ -352,6 +353,7 @@ ${lista("Errores del navegador (tipo:línea de app.js)", r.desglose.error, null)
 <p class="vacia">veces que alguien buscó un equipo esta semana</p></section>
 <section class="tablero"><h2>Compartir, favoritos y app</h2><div class="pares">
 ${par(s.compartidos, "veces que se pulsó Compartir en un partido")}
+${par(s.imagenes, "imágenes de un partido para historias")}
 ${par(s.llegadas, "visitas que llegaron por un enlace compartido")}
 ${par(s.estrellas, "equipos marcados con la estrella")}
 ${par(s.con_favoritos, `visitantes que siguen a algún equipo (${pct(s.con_favoritos, s.visitantes)})`)}
