@@ -54,9 +54,12 @@ mandar([{"t": "partido", "id": uno["id"]}, {"t": "partido", "id": uno["id"]}, {"
         {"t": "busqueda"}, {"t": "pestana", "p": "panorama"}, {"t": "pestana", "p": "otra"}, {"t": "inventado"},
         "texto", None, {"t": "entrada", "v": "nuevo", "o": "evil.example"}, {"t": "entrada", "v": "nuevo"},
         {"t": "compartir", "id": uno["id"]}, {"t": "compartir", "id": 999999999}, {"t": "favorito"},
-        {"t": "instalada"}])
+        {"t": "instalada"}, {"t": "error", "k": "TypeError", "l": 812}, {"t": "error", "k": "Promesa", "l": 0},
+        {"t": "error", "k": "<script>", "l": 1}, {"t": "error", "k": "TypeError", "l": "812"},
+        {"t": "error", "k": "TypeError", "l": 812}, {"t": "error", "k": "RangeError", "l": 5}])
 r = resumen()
 s, d = r["semana"], r["desglose"]
+assert d["error"] == {"TypeError:812": 2, "Promesa:0": 1}, d["error"]   # lista cerrada, y 3 por petición
 assert s["partidos"] == 2 and s["busquedas"] == 1, s
 assert d["liga"] == {"PD": 1} and d["pestana"] == {"panorama": 1}, d
 assert d["origen"] == {"google": 1, "directo": 1, "otro": 1}, d["origen"]   # una sola entrada por petición
@@ -68,7 +71,7 @@ assert (top["id"], top["n"], top["liga"], top["utc"], top["fecha"], top["local"]
     uno["id"], 2, uno["liga_codigo"], uno["utcDate"], fecha, uno.get("local_corto") or uno["local"],
     uno.get("visita_corto") or uno["visita"]), top
 print("eventos: cuentan el partido que existe (abierto o compartido), la liga, la pestaña y la estrella;"
-      " lo inventado no")
+      " los errores del navegador por tipo y línea; lo inventado no")
 
 antes = resumen()["semana"]
 mandar([{"t": "entrada", "v": "nuevo"}], origen="https://otra-web.example")
@@ -94,6 +97,7 @@ csp = pan.headers["Content-Security-Policy"]
 assert pan.headers["Content-Type"].startswith("text/html") and pan.headers["X-Robots-Tag"] == "noindex"
 assert "script-src" not in csp and "default-src 'none'" in csp, csp
 assert "<script" not in html and "Partidos más abiertos" in html and ">2<" in html and "Compartir, favoritos y app" in html
+assert "TypeError:812" in html and "Errores del navegador" in html
 print("panel: con token, en HTML, sin JavaScript y fuera de Google")
 
 # el tope del día: con MAX_VISITAS_DIA=60, unas pocas búsquedas lo alcanzan

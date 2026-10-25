@@ -92,9 +92,15 @@ ni una etiqueta `{{ }}`: Flask la sirve como plantilla (`template_folder=
 "public"`) y Cloudflare como archivo estático, con sus cabeceras en
 `public/_headers`. Es un shell estático con el CSS en línea y el JS en
 `public/app.js` (Flask lo sirve en `/app.js`), que se pinta entero en
-el cliente sondeando `/api/estado` (cada 4s mientras hay cálculo en curso, cada
-30s el resto del tiempo y nada con la pestaña oculta: al volver a ella pide en el
-acto). No hay `static/`, ni build, ni dependencias de JS; de
+el cliente sondeando `/api/estado` (cada 15 s mientras hay cálculo en curso, cada
+minuto el resto del tiempo y nada con la pestaña oculta: al volver a ella pide en
+el acto). El sondeo lleva el ETag de la vez anterior y, si nada cambió, el servidor
+contesta 304 sin cuerpo (`condicional` en `worker/index.js`, `_condicional` en
+`app.py`; también `/api/registro` y `/api/validacion`): antes viajaban ~100 KB (15
+comprimidos) cada 30 s, ~1,8 MB por hora de datos móviles. Con 304 la web repinta
+igual, por lo que depende de la hora (la cuenta atrás, los que ya empezaron, Hoy y
+Mañana): cuesta 11-26 ms en un móvil lento. No hay `static/`, ni build, ni
+dependencias de JS; de
 fuera solo llegan las fuentes Saira y Figtree (Google Fonts, con fallback del
 sistema), los escudos (URLs de football-data.org) y, al crear una cuenta,
 Cloudflare Turnstile (ver "Cuentas"). Al tocar la web se trabaja
@@ -148,6 +154,9 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
   etiquetas con frases). Arriba, los dos equipos frente a frente (escudo,
   nombre entero y "Seguir"; con el panel central de menos de 420px, solo la
   estrella, que el texto no cabía), y en medio la liga, la hora y Compartir. Debajo,
+  el pronóstico en una frase (`htmlVeredicto`: "Favorito claro: X. De cada 10
+  partidos así, gana unos 7"; claro con 60 o más, intermedio de 45 a 59 y parejo
+  por debajo, los tramos del registro, con el entero que enseña la tabla). Luego,
   bloques con título pequeño: Quién gana (una barra repartida 1/X/2, cada tramo
   en el tono de la rampa de su probabilidad, con leyenda), Doble oportunidad
   (tres casillas), Goles esperados (dos barras enfrentadas desde el centro, en
@@ -159,7 +168,13 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
   números viejos) van justo debajo de los equipos. Con el panel central de
   760px o más (container query `centro`), resultado y goles en dos columnas.
   Todos los % son enteros, los mismos que la tabla (`reparto`); "menos de" y
-  "ambos marcan: no" son 100 menos el entero de "más de" y "sí".
+  "ambos marcan: no" son 100 menos el entero de "más de" y "sí". Cada % de los
+  mercados (1X2, doble oportunidad, porterías a cero, más/menos, ambos marcan y
+  marcadores) lleva debajo su **cuota justa** (`cuotaJusta`: 100 / el entero que
+  se enseña, para que cuadre a la vista: 56 % es 1.79), siempre visible, como
+  pidió el dueño del proyecto (oct 2026); "Cómo se calculó" explica qué es (lo que
+  pagaría una apuesta sin el margen de la casa; las casas pagan menos) y que
+  apostar es solo para mayores de 18. El histograma de goles no la lleva.
 - Los % de 1/X/2 se redondean por resto mayor para que sumen 100, y la doble
   oportunidad se suma de esos mismos enteros: lo que se lee, cuadra. Igual el
   histograma de goles; "menos de" y "ambos marcan: no" se restan del número ya
@@ -408,7 +423,14 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
 - **El sondeo, con la pestaña oculta, para** (`bucle` en `app.js`): antes una
   pestaña olvidada pedía `/api/estado` cada 30 s todo el día, hasta 2.880
   peticiones de las 100.000 diarias del plan gratis. El registro en vivo (cada
-  15 min) tampoco se pide con la pestaña oculta.
+  15 min) tampoco se pide con la pestaña oculta. Con la pestaña a la vista, una
+  petición por minuto (ver "Arquitectura").
+- **Errores del navegador** (`error`, clave `tipo:línea`): `app.js` apunta desde
+  su primera línea los errores de JavaScript de sí misma (no los de una extensión)
+  y las promesas rechazadas sin atrapar (`Promesa:0`), solo el tipo (de una lista
+  cerrada; lo demás cuenta como `Error`) y la línea, nada del mensaje, que puede
+  llevar datos de la página. Como mucho 3 por visita y 3 por aviso. En el panel,
+  "Errores del navegador": si una línea sube, la web falla en algún aparato.
 - **Compartir y favoritos** también se cuentan: veces que se pulsó Compartir
   (`compartir`, por partido), visitas que llegaron por un enlace `/partido/123`
   (`enlace`), estrellas puestas (`favorito`) y visitantes que siguen a algún
@@ -679,8 +701,13 @@ una URL pública propia, con la base y los secretos de producción, para siempre
 **Dependencias** (oct 2026, `pip-audit` y `npm audit` a cero): Flask 3.1.3 y
 requests 2.33.1 (los avisos de 3.1.0 y 2.32.3 no afectaban a esta app: no usa
 sesiones ni `.netrc`), wrangler 4.149.0 (la 4.146 arrastraba un `sharp`
-vulnerable, solo en local). Para repasarlo: `pip install pip-audit && pip-audit
--r requirements.txt` y `npm audit`.
+vulnerable, solo en local). El 25 oct `npm audit` ya no daba cero: tres avisos de
+`undici` (dos moderados y uno alto, denegación de servicio y SRI), que llega por
+`wrangler` → `miniflare`. Solo en local (`wrangler dev`), nada en producción; no
+había aún una versión de wrangler que lo arreglara (`npm audit fix --force` la
+bajaba a la 4.35): subir wrangler cuando la haya. Playwright 1.56.1 y axe-core
+4.10.2 solo sirven a las pruebas. Para repasarlo: `pip install pip-audit &&
+pip-audit -r requirements.txt` y `npm audit`.
 
 **Riesgo que queda:** las rutas públicas solo leen, pero cada petición al
 Worker cuenta para las 100.000 diarias del plan gratis. Alguien que las
@@ -1184,14 +1211,23 @@ Environment).
     (`compartir.py`). Que la web es instalable (manifiesto, iconos, service worker,
     CSP) y que `robots.txt` y `sitemap.xml` traen lo que deben (`descubrir.py`). Y
     que las visitas se cuentan bien, que lo inventado no entra y que el tope corta
-    (`visitas.py`, con `MAX_VISITAS_DIA=60`). Y las cuentas, de crear a borrar,
+    (`visitas.py`, con `MAX_VISITAS_DIA=60`). Que `/api/estado`, `/api/registro` y
+    `/api/validacion` dan 304 sin cuerpo con su ETag, también con el `W/` que pone
+    Cloudflare al comprimir, en el Worker y en Flask (`sondeo.py`). Y las cuentas, de crear a borrar,
     con el bloqueo por intentos (también 30 a la vez), la cuenta de la primera
     versión que se pasa a usuario, el correo (crear, entrar, cambiar y quitar),
     Turnstile y los tres topes (`cuentas.py`, con `MAX_CUENTAS_DIA=4`,
     `MAX_INTENTOS_DIA=120`, `MAX_ESCRITURAS_CUENTAS_DIA=600` y el Turnstile de mentira
-    de `api_falsa.py`, `/turnstile/v0/siteverify`, por `TURNSTILE_VERIFICAR`). En
-    GitHub, 1-2 minutos; en local,
-    unos 10.
+    de `api_falsa.py`, `/turnstile/v0/siteverify`, por `TURNSTILE_VERIFICAR`). Y al
+    final, la interfaz en un navegador de verdad (`interfaz.mjs`, Playwright): 10
+    vistas (semana, día, liga, por claros y por reñidos, búsqueda, Mis equipos y el
+    detalle abierto) en 7 anchos de 360 a 1920 px, sin texto que se salga de su caja,
+    sin piezas de una fila que se pisen, sin errores de JavaScript, y axe-core sin
+    nada en la semana y el detalle, en el móvil y en escritorio. Es lo que en oct
+    2026 encontró la fecha bajo el escudo y "Seguir" cortado en el móvil. El job
+    instala Chromium (`npx playwright install --with-deps chromium`); sin red para
+    las fuentes de Google, `FUENTES=carpeta` (con `fuentes.css`, `mapa.txt` y los
+    woff2) las sirve en local. En GitHub, 3-4 minutos; en local, unos 12.
   - Las variables del Worker van con `--var`, que manda sobre `.dev.vars`: el token
     de verdad, si está ahí, no se usa ni sale a ningún sitio.
   - En local, lo mismo: `npm ci`, `pip install -r requirements.txt` y

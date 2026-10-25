@@ -3,6 +3,22 @@
 // si algún día se colara HTML ajeno por un fallo de escapado, un <script> o un
 // onerror= inyectados no se ejecutarían.
 
+// Los errores de la propia web van al panel de visitas (sección VISITAS): solo el
+// tipo y la línea de app.js, nada del mensaje, que puede llevar datos de la página.
+// Se apuntan desde aquí por si algo falla al arrancar; como mucho 3 por visita.
+const erroresWeb = [];
+let erroresApuntados = 0;
+function apuntarError(tipo, linea) {
+  if (erroresApuntados++ < 3) erroresWeb.push({ t: "error", k: tipo, l: linea });
+}
+window.addEventListener("error", (e) => {
+  if (!e.filename || !/\/app\.js(\?|$)/.test(e.filename)) return;   // no los de una extensión del navegador
+  const n = e.error && e.error.name;
+  apuntarError(/^(TypeError|ReferenceError|RangeError|SyntaxError|URIError|EvalError|AggregateError)$/.test(n) ? n : "Error",
+    e.lineno || 0);
+});
+window.addEventListener("unhandledrejection", () => apuntarError("Promesa", 0));
+
 const $ = (id) => document.getElementById(id);
 const app = document.querySelector(".app");
 const vista = $("vista");
@@ -367,14 +383,39 @@ function htmlDetalle(p) {
       + htmlBloque("Ambos marcan", htmlAmbosMarcan(p))
       + ((p.marcadores || []).length ? htmlBloque("Marcadores más probables", htmlMarcadores(p)) : "")
     : "";
-  return '<div class="detalle">' + htmlCabeceraDetalle(p) + avisos
+  return '<div class="detalle">' + htmlCabeceraDetalle(p) + htmlVeredicto(p) + avisos
     + '<div class="det-rejilla' + (goles ? "" : " una") + '"><div class="det-col">' + resultado + '</div>'
     + (goles ? '<div class="det-col">' + goles + '</div>' : "") + '</div>'
     + htmlComoSeCalculo(p, m) + '</div>';
 }
 
+// El pronóstico en una frase, arriba del detalle, en "de cada 10" (se entiende
+// mejor que un %). Los tramos son los del registro, con el mismo entero que la
+// tabla: claro con 60 o más, intermedio de 45 a 59 y parejo por debajo.
+function htmlVeredicto(p) {
+  const n = pctFavorito(p), g = veredictoDe(p).signo;
+  const quien = g === "1" ? cortoDe(p, "local") : g === "2" ? cortoDe(p, "visita") : null;
+  const de10 = Math.round(n / 10);
+  const gana = de10 >= 10 ? "De cada 10 partidos así, los gana casi todos." : "De cada 10 partidos así, gana unos " + de10 + ".";
+  const txt = !quien ? "<b>Partido parejo:</b> lo más probable es el empate, con " + n + " %."
+    : n >= 60 ? "<b>Favorito claro: " + esc(quien) + ".</b> " + gana
+    : n >= 45 ? "<b>Favorito: " + esc(quien) + ",</b> sin ser claro. " + gana
+    : "<b>Partido parejo:</b> nadie llega al 45 %. Lo más probable es que gane " + esc(quien) + ", con " + n + " %.";
+  return '<p class="det-veredicto">' + txt + '</p>';
+}
+
+// La cuota justa de un %: 100 dividido por él, la que pagaría una apuesta si la
+// casa no se quedara margen (las casas pagan menos). Sale del entero que se enseña,
+// para que la cuenta cuadre a la vista: 56 % es 1.79.
+function cuotaJusta(v) { return v >= 1 ? (100 / v).toFixed(2) : "—"; }
+function htmlCuota(v) {
+  return '<small class="cuota" title="Cuota justa: 100 / ' + v + '">cuota ' + cuotaJusta(v) + '</small>';
+}
+
 function htmlBloque(titulo, cuerpo, meta) {
-  return '<section class="det-bloque"><h3>' + esc(titulo) + (meta ? ' <small>' + esc(meta) + '</small>' : "") + '</h3>'
+  // h2, como las cabeceras de grupo: en la búsqueda y en otras listas sin grupos,
+  // un h3 seguiría directamente al h1 de la vista (axe: heading-order)
+  return '<section class="det-bloque"><h2>' + esc(titulo) + (meta ? ' <small>' + esc(meta) + '</small>' : "") + '</h2>'
     + cuerpo + '</section>';
 }
 
@@ -416,7 +457,7 @@ function htmlQuienGana(p) {
   return htmlReparto(partes, "grande")
     + '<div class="rep-ley" aria-hidden="true">' + partes.map(x => '<span class="' + (x.s === g ? "fav" : "") + '">'
       + '<span class="nom"><i style="' + estiloTramo(x.v) + '"></i><span class="k">' + esc(x.nombre) + '</span></span>'
-      + '<b>' + x.v + ' %</b></span>').join("") + '</div>';
+      + '<b>' + x.v + ' %</b>' + htmlCuota(x.v) + '</span>').join("") + '</div>';
 }
 
 // La doble oportunidad, sumada de los mismos enteros que la tabla.
@@ -426,9 +467,11 @@ function htmlDobleOportunidad(p) {
     ["1X", r.l + r.x, "Local o empate"],
     ["X2", r.x + r.v, "Empate o visitante"],
     ["12", r.l + r.v, "Sin empate"],
-  ].map(c => '<span class="cas" style="' + estiloTramo(c[1]) + '" aria-label="' + esc(c[2] + ": " + c[1] + " %") + '">'
+  ].map(c => '<span class="cas" role="group" style="' + estiloTramo(c[1]) + '" aria-label="'
+    + esc(c[2] + ": " + c[1] + " %, cuota justa " + cuotaJusta(c[1])) + '">'
     + '<small aria-hidden="true">' + c[0] + '</small><b aria-hidden="true">' + c[1] + '</b>'
-    + '<span class="que" aria-hidden="true">' + esc(c[2]) + '</span></span>').join("") + '</div>';
+    + '<span class="que" aria-hidden="true">' + esc(c[2]) + '</span>'
+    + '<span aria-hidden="true">' + htmlCuota(c[1]) + '</span></span>').join("") + '</div>';
 }
 
 // Los goles esperados de cada uno, enfrentados desde el centro (no es una
@@ -447,7 +490,8 @@ function htmlPorteriaCero(p) {
   return ["local", "visita"].filter(lado => typeof p["prob_cero_" + lado] === "number").map(lado => {
     const v = Math.round(p["prob_cero_" + lado]);
     return '<div class="cero"><span class="k">' + esc(cortoDe(p, lado)) + ' no encaja</span>'
-      + '<span class="mini" aria-hidden="true"><i style="width:' + v + '%;' + estiloTramo(v) + '"></i></span><b>' + v + ' %</b></div>';
+      + '<span class="mini" aria-hidden="true"><i style="width:' + v + '%;' + estiloTramo(v) + '"></i></span>'
+      + '<span class="cero-v"><b>' + v + ' %</b>' + htmlCuota(v) + '</span></div>';
   }).join("");
 }
 
@@ -456,21 +500,24 @@ function htmlMasMenos(p) {
   return '<div class="lineas"><div class="lin-cab" aria-hidden="true"><span></span><span>más</span><span>menos</span></div>'
     + [["1.5", p.prob_mas_15], ["2.5", p.prob_mas_25], ["3.5", p.prob_mas_35]].filter(l => typeof l[1] === "number").map(l => {
       const mas = Math.round(l[1]);
-      return '<div class="lin"><span class="k">' + l[0] + '</span>'
-        + htmlReparto([{ v: mas, nombre: "Más de " + l[0] }, { v: 100 - mas, nombre: "Menos de " + l[0] }]) + '</div>';
+      return '<div class="lin"><span class="k">' + l[0] + '</span><div>'
+        + htmlReparto([{ v: mas, nombre: "Más de " + l[0] }, { v: 100 - mas, nombre: "Menos de " + l[0] }])
+        + '<div class="lin-cuotas">' + htmlCuota(mas) + htmlCuota(100 - mas) + '</div></div></div>';
     }).join("") + '</div>';
 }
 
 function htmlAmbosMarcan(p) {
   const si = Math.round(p.prob_ambos);
   return htmlReparto([{ v: si, nombre: "Sí" }, { v: 100 - si, nombre: "No" }])
-    + '<div class="rep-ley dos" aria-hidden="true"><span><span class="nom"><span class="k">Sí</span></span><b>' + si + ' %</b></span>'
-    + '<span><span class="nom"><span class="k">No</span></span><b>' + (100 - si) + ' %</b></span></div>';
+    + '<div class="rep-ley dos" aria-hidden="true"><span><span class="nom"><span class="k">Sí</span></span><b>' + si + ' %</b>'
+    + htmlCuota(si) + '</span>'
+    + '<span><span class="nom"><span class="k">No</span></span><b>' + (100 - si) + ' %</b>' + htmlCuota(100 - si) + '</span></div>';
 }
 
 function htmlMarcadores(p) {
   return '<div class="marcs">' + p.marcadores.map((mk, i) => '<span class="marc' + (i === 0 ? " primero" : "") + '">'
-    + '<b>' + mk[0] + "–" + mk[1] + '</b><small>' + Math.round(mk[2]) + ' %</small></span>').join("") + '</div>';
+    + '<b>' + mk[0] + "–" + mk[1] + '</b><small>' + Math.round(mk[2]) + ' %</small>' + htmlCuota(Math.round(mk[2]))
+    + '</span>').join("") + '</div>';
 }
 
 function htmlAvisoMuestra(m) {
@@ -487,9 +534,11 @@ function htmlComoSeCalculo(p, m) {
   const dato = (t, v) => '<div><dt>' + t + '</dt><dd>' + v + '</dd></div>';
   const muestraTxt = (ch ? "En su liga: " : "") + m.l + " partidos del local y " + m.v
     + " del visitante, de esta temporada y la anterior";
-  return '<section class="det-datos"><h3>Cómo se calculó</h3><dl>'
+  return '<section class="det-datos"><h2>Cómo se calculó</h2><dl>'
     + dato("Muestra", muestraTxt)
     + (p.calculado ? dato("Calculado", esc(haceCuanto(p.calculado))) : "")
+    + dato("Cuota justa", "100 dividido por el %: lo que pagaría una apuesta si la casa no se quedara margen."
+      + " Las casas pagan menos. Apostar es solo para mayores de 18 años.")
     + (ch ? dato("Nivel de liga", htmlNivelChampions(p)) : "")
     + (ch && ch.local && ch.local.partidos_cl !== undefined ? dato("En la Champions, frente a lo esperado", htmlHistorialChampions(p)) : "")
     + '</dl>' + (ch ? htmlNotaChampions() : "") + (conGoles(p) ? htmlNotaGoles(p) : "") + '</section>';
@@ -619,7 +668,7 @@ function bloqueGrupo(clave, texto, cuenta, codLiga, clase) {
     id: "g-" + clave,
     huella: texto + "|" + cuenta + "|" + (codLiga || ""),
     clase: "grupo" + (clase ? " " + clase : ""),
-    html: '<span class="g-nom">' + (codLiga === FAV ? htmlInsigniaFav() : codLiga ? htmlInsignia(codLiga) : "")
+    html: '<span class="g-nom" role="heading" aria-level="2">' + (codLiga === FAV ? htmlInsigniaFav() : codLiga ? htmlInsignia(codLiga) : "")
       + '<span class="txt">' + esc(texto) + '</span>'
       + '<span class="cuenta">' + cuenta + " partido" + (cuenta === 1 ? "" : "s") + '</span>'
       + (codLiga && codLiga !== FAV ? htmlMarcaPocoFiable(codLiga, texto) : "") + '</span>'
@@ -1486,6 +1535,7 @@ mqEscritorio.addEventListener("change", () => { rutaPintada = null; render(); })
 const CLAVE_VISITA = "pronosticos.ultima_visita";
 let colaVisitas = [];
 function enviarVisitas() {
+  colaVisitas.push(...erroresWeb.splice(0));
   if (!colaVisitas.length) return;
   const cuerpo = JSON.stringify(colaVisitas);
   colaVisitas = [];
@@ -2022,17 +2072,26 @@ dialogoCuenta.addEventListener("submit", (e) => {
 // SONDEO
 // Con la pestaña oculta no se pregunta: una pestaña olvidada costaba hasta 2.880
 // peticiones al día, y el plan gratis de Cloudflare da 100.000 para todos.
-// Al volver a ella, se pide en el acto.
+// Al volver a ella, se pide en el acto. Los números cambian como mucho una vez por
+// minuto (una pasada del cron), y con la web al día cada 25: se pregunta cada 15 s
+// mientras se calcula y cada minuto el resto del tiempo.
 // ==========================================
-let periodo = 4000;
+let periodo = 15000;
 let estadoPrevio = null;
+let etagEstado = null, etagRegistro = null;
+// Con el ETag de la vez anterior el servidor contesta 304 si nada cambió, y no
+// vuelven a viajar los ~100 KB del estado.
+const pedirSiCambio = (ruta, etag) => fetch(ruta, etag ? { headers: { "If-None-Match": etag } } : {});
 async function refrescar() {
   try {
-    const r = await fetch("/api/estado");
+    const r = await pedirSiCambio("/api/estado", etagEstado);
+    // sin cambios se repinta igual: la cuenta atrás, los que ya empezaron, Hoy y Mañana
+    if (r.status === 304 && datos) { render(); return; }
     if (!r.ok) throw new Error("HTTP " + r.status);   // un 500 no pisa los datos que ya hay
+    etagEstado = r.headers.get("ETag");
     datos = await r.json();
     if (datos.plataforma === "cloudflare") botonCuenta.hidden = false;   // las cuentas solo existen allí
-    periodo = (datos.estado === "actualizando") ? 4000 : 30000;
+    periodo = (datos.estado === "actualizando") ? 15000 : 60000;
     // las medias de liga y el registro en vivo solo cambian cuando termina una pasada
     if (estadoPrevio === "actualizando" && datos.estado !== "actualizando") { cargarLigas(); cargarRegistro(); }
     estadoPrevio = datos.estado;
@@ -2068,8 +2127,9 @@ async function cargarValidacion() {
 // día. En Render no existe (responde no_disponible) y los paneles no lo enseñan.
 async function cargarRegistro() {
   try {
-    const r = await fetch("/api/registro");
-    if (!r.ok) return;
+    const r = await pedirSiCambio("/api/registro", etagRegistro);
+    if (!r.ok) return;   // también el 304: el que ya hay sigue valiendo
+    etagRegistro = r.headers.get("ETag");
     registro = await r.json();
     paneLigas.dataset.huella = "";
     panePan.dataset.huella = "";
