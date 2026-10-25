@@ -13,6 +13,10 @@
 //   {t: "compartir", id: 123}        pulsó Compartir en un partido
 //   {t: "favorito"}                  marcó un equipo con la estrella
 //   {t: "instalada"}                 instaló la web como app
+//   {t: "error", k: "TypeError", l: 1234}   un error de JavaScript en app.js: el
+//                                    tipo y la línea, nada del mensaje (puede llevar
+//                                    datos de la página). Para saber si la web falla
+//                                    en algún aparato. Como mucho 3 por petición.
 // "nuevo", "vuelve" y "repite" los decide el navegador, que guarda solo el día de
 // su última visita: un visitante es un navegador en un día. hace: días desde esa
 // visita. o: el dominio de la página de la que llegó (vacío si no se sabe).
@@ -37,6 +41,10 @@ const BOTS = /[a-z]bot\/|headless|lighthouse|crawl|spider|slurp/i;
 const DISPOSITIVOS = new Set(["movil", "intermedio", "escritorio"]);
 const PESTANAS = new Set(["partidos", "panorama", "ligas"]);
 const CODIGOS = new Set(Object.values(COMPETICIONES));
+// "Promesa": una promesa rechazada que nadie atrapó (sin línea: 0).
+const ERRORES = new Set(["Error", "TypeError", "ReferenceError", "RangeError", "SyntaxError", "URIError",
+  "EvalError", "AggregateError", "Promesa"]);
+const MAX_ERRORES = 3;
 
 // De dónde llega la gente, por el dominio de la página anterior. WhatsApp y las
 // demás apps de mensajería casi nunca lo dicen: lo que llega de ahí cuenta como
@@ -74,7 +82,7 @@ export function contadores(eventos, propio, hora) {
     const s = sumas.get(k);
     if (s) s.n += 1; else sumas.set(k, { tipo, clave, n: 1 });
   };
-  let entrada = false;
+  let entrada = false, errores = 0;
   for (const e of eventos.slice(0, MAX_EVENTOS)) {
     if (!e || typeof e !== "object") continue;
     if (e.t === "entrada" && !entrada) {
@@ -99,6 +107,10 @@ export function contadores(eventos, propio, hora) {
       sumar("busqueda", "");
     } else if (e.t === "pestana" && PESTANAS.has(e.p)) {
       sumar("pestana", e.p);
+    } else if (e.t === "error" && errores < MAX_ERRORES && ERRORES.has(e.k)
+      && Number.isSafeInteger(e.l) && e.l >= 0 && e.l <= 99999) {
+      errores++;
+      sumar("error", e.k + ":" + e.l);
     }
   }
   return [...sumas.values()];
@@ -165,7 +177,7 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
         'compartir', 'enlace', 'favorito', 'con_favoritos', 'instalada', 'en_app')
       GROUP BY dia, tipo, c`).bind(desde30),
     db.prepare(`SELECT tipo, clave, SUM(n) AS n FROM visitas
-      WHERE dia >= ?1 AND tipo IN ('origen', 'dispositivo', 'vuelta', 'hora', 'liga', 'pestana')
+      WHERE dia >= ?1 AND tipo IN ('origen', 'dispositivo', 'vuelta', 'hora', 'liga', 'pestana', 'error')
       GROUP BY tipo, clave`).bind(desde7),
     db.prepare(`SELECT v.clave AS id, SUM(v.n) AS n, p.liga AS liga, p.utc AS utc,
         json_extract(p.base, '$.local') AS local, json_extract(p.base, '$.visita') AS visita,
@@ -194,7 +206,7 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
   for (const d of dias) d.visitantes = d.nuevos + d.vuelven;
 
   const partes = {};
-  for (const t of ["origen", "dispositivo", "vuelta", "hora", "liga", "pestana"]) partes[t] = {};
+  for (const t of ["origen", "dispositivo", "vuelta", "hora", "liga", "pestana", "error"]) partes[t] = {};
   for (const f of desglose.results) partes[f.tipo][f.clave] = f.n;
 
   return {
@@ -333,6 +345,7 @@ ${graficoHoras(r.desglose.hora)}
 ${lista("Ligas que más se abren", r.desglose.liga, NOMBRE_LIGA)}
 <section class="tablero"><h2>Partidos más abiertos</h2>${partidos}</section>
 ${lista("Pestañas en el móvil", r.desglose.pestana, NOMBRES.pestana, ["partidos", "panorama", "ligas"])}
+${lista("Errores del navegador (tipo:línea de app.js)", r.desglose.error, null)}
 <section class="tablero"><h2>Búsquedas</h2><p class="grande">${miles(s.busquedas)}</p>
 <p class="vacia">veces que alguien buscó un equipo esta semana</p></section>
 <section class="tablero"><h2>Compartir, favoritos y app</h2><div class="pares">

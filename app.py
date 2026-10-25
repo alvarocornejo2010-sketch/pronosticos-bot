@@ -1297,9 +1297,16 @@ def token_valido():
     return hmac.compare_digest(request.args.get("token", "").encode(), UPDATE_SECRET.encode())
 
 
+def _condicional(resp):
+    """ETag y 304, como el Worker: la web pregunta cada minuto y casi siempre no
+    cambió nada."""
+    resp.add_etag()
+    return resp.make_conditional(request)
+
+
 @app.route("/api/estado")
 def api_estado():
-    return jsonify(leer_estado())
+    return _condicional(jsonify(leer_estado()))
 
 
 @app.route("/actualizar")
@@ -1344,7 +1351,7 @@ def actualizar():
 def api_validacion():
     """Resultado del backtest del modelo desplegado, liga por liga."""
     import validacion
-    return jsonify(validacion.leer_resultado())
+    return _condicional(jsonify(validacion.leer_resultado()))
 
 
 @app.route("/api/registro")

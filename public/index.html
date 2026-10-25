@@ -643,10 +643,13 @@
   .det-rejilla { display: grid; gap: 0 32px; }
   @container centro (min-width: 760px) { .det-rejilla:not(.una) { grid-template-columns: 1fr 1fr; } }
   .det-col { display: grid; align-content: start; min-width: 0; }
+  .det-veredicto { margin: 14px 0 0; font-size: var(--t-15); line-height: 1.45; color: var(--tinta-2); text-wrap: pretty; }
+  .det-veredicto b { color: var(--tinta); font-weight: 700; }
+  .cuota { font-size: var(--t-12); color: var(--tinta-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .det-bloque { padding: 18px 0 0; min-width: 0; }
-  .det-bloque h3, .det-datos h3 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; font-size: var(--t-12); font-weight: 700;
+  .det-bloque h2, .det-datos h2 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; font-size: var(--t-12); font-weight: 700;
                                   letter-spacing: 0.06em; text-transform: uppercase; color: var(--tinta-3); }
-  .det-bloque h3 small { font-size: var(--t-13); font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--tinta-2); }
+  .det-bloque h2 small { font-size: var(--t-13); font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--tinta-2); }
 
   .reparto { display: flex; gap: 2px; height: 1.75rem; border-radius: var(--r-celda); overflow: hidden; }
   .reparto.grande { height: 2.75rem; }
@@ -674,6 +677,8 @@
   .cas small { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-14); font-weight: 700; opacity: 0.8; }
   .cas b { justify-self: end; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-24); font-weight: 800; line-height: 1;
            font-variant-numeric: tabular-nums; }
+  .cas > span:last-child { grid-column: 1 / -1; margin-top: 2px; }
+  .cas .cuota { font-family: var(--f-txt); font-size: var(--t-12); font-weight: 500; color: inherit; opacity: 0.8; }
   .cas .que { grid-column: 1 / -1; margin-top: 4px; font-size: var(--t-12); line-height: 1.25; opacity: 0.85; text-wrap: balance; }
 
   .xg { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 0 10px; }
@@ -687,7 +692,8 @@
   .xg-ley { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; font-size: var(--t-13); color: var(--tinta-3); }
   .xg-ley span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  .cero { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr) 3rem; align-items: center; gap: 10px; padding: 3px 0; }
+  .cero { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr) 4rem; align-items: center; gap: 10px; padding: 3px 0; }
+  .cero-v { display: flex; flex-direction: column; align-items: flex-end; }
   .cero .k { font-size: var(--t-14); color: var(--tinta-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cero .mini { height: 10px; border-radius: 5px; background: var(--linea); overflow: hidden; }
   .cero .mini i { display: block; height: 100%; border-radius: 5px; background: var(--bg); }
@@ -698,12 +704,14 @@
   .lin, .lin-cab { display: grid; grid-template-columns: 2.25rem minmax(0, 1fr); align-items: center; gap: 10px; }
   .lin-cab { grid-template-columns: 2.25rem 1fr 1fr; font-size: var(--t-12); color: var(--tinta-3); }
   .lin-cab span:last-child { text-align: right; }
-  .lin .k { font-size: var(--t-15); color: var(--tinta-2); }
+  .lin .k { font-size: var(--t-15); color: var(--tinta-2); align-self: start; line-height: 28px; }
+  .lin-cuotas { display: flex; justify-content: space-between; margin-top: 3px; }
 
   .marcs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .marc { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 6px;
           border: 1px solid var(--linea); border-radius: var(--r-control); background: var(--panel); }
   .marc.primero { border-color: var(--tinta-2); }
+  .marc .cuota { font-size: var(--t-12); color: var(--tinta-3); }
   .marc b { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-24); font-weight: 800; line-height: 1;
             font-variant-numeric: tabular-nums; }
   .marc small { font-size: var(--t-13); color: var(--tinta-2); font-variant-numeric: tabular-nums; }
@@ -990,7 +998,7 @@
     <div class="proximos" id="proximos" aria-label="Próximos partidos"></div>
   </header>
 
-  <section class="centro" aria-label="Partidos">
+  <main class="centro" aria-label="Partidos">
     <div class="carril" id="fechas" role="toolbar" aria-label="Días"></div>
     <div class="banda" id="banda" hidden></div>
     <div class="tira-ligas" id="tira-ligas" role="toolbar" aria-label="Ligas"></div>
@@ -1005,8 +1013,8 @@
       <span class="der c-d" data-tip="Doble oportunidad: gana el local o empate">1X</span><span class="der c-d" data-tip="Doble oportunidad: empate o gana el visitante">X2</span><span class="der c-d" data-tip="Doble oportunidad: gana cualquiera de los dos, sin empate">12</span>
       <span class="der c-xg" data-tip="Goles que el modelo espera de cada equipo">Goles esp.</span><span class="der c-g" data-tip="Más de 2.5 goles: 3 o más en el partido">+2.5</span><span class="der c-g" data-tip="Marcan los dos equipos">Ambos</span><span class="der c-m" data-tip="Partidos de liga (esta temporada y la anterior) del equipo con menos. Con menos de 4, el número tira hacia un equipo medio">Muestra</span><span class="c-rep" data-tip="El 1 X 2 en una barra">Reparto</span>
     </div>
-    <main class="vista" id="vista" tabindex="-1"></main>
-  </section>
+    <div class="vista" id="vista" tabindex="-1"></div>
+  </main>
 
   <div class="lateral">
     <aside class="pane-izq" id="pane-ligas" aria-label="Ligas y fiabilidad"></aside>

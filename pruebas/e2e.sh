@@ -71,6 +71,9 @@ curl -s "http://127.0.0.1:$P_API/__stats" | python3 -c "import json,sys; print('
 # la temporada anterior de la Championship trae 5 partidos de playoff: no cuentan
 curl -s "http://127.0.0.1:$P_W/api/ligas" | python3 -c "import json,sys; n = json.load(sys.stdin)['ELC']['ancla_partidos']; print('Championship, temporada anterior:', n, 'partidos de liga'); assert n == 552, n"
 
+echo "== Sondeo (ETag y 304)"
+python3 "$REPO/pruebas/sondeo.py" "$P_W"
+
 echo "== Caducidad"
 python3 "$REPO/pruebas/caducidad.py" "$P_W" "$TMP/d1" | tail -3
 
@@ -88,4 +91,7 @@ python3 "$REPO/pruebas/visitas.py" "$P_W" secreto_de_prueba_123
 
 echo "== Cuentas"
 python3 "$REPO/pruebas/cuentas.py" "$P_W" "$TMP/d1"
+
+echo "== Interfaz (Playwright)"
+node "$REPO/pruebas/interfaz.mjs" "$P_W"
 echo "e2e: OK"

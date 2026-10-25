@@ -55,5 +55,7 @@ jobs:
           cache: npm
       - run: pip install -r requirements.txt
       - run: npm ci
+      - name: Navegador para la revisión de la interfaz
+        run: npx playwright install --with-deps chromium
       - name: API falsa, Flask, wrangler dev y caducidad
         run: bash pruebas/e2e.sh

@@ -45,6 +45,19 @@ const respuesta = (texto, status = 200) => new Response(texto, {
   status, headers: { ...CABECERAS, "Content-Type": "application/json; charset=utf-8" },
 });
 const json = (obj, status = 200) => respuesta(JSON.stringify(obj), status);
+
+// ETag y 304 para los documentos que la web pide una y otra vez: casi siempre no
+// cambió nada, y así no viajan otra vez los ~100 KB de /api/estado. Cloudflare
+// debilita el ETag al comprimir (W/"..."), por eso se compara sin el W/.
+async function condicional(request, texto) {
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(texto)), 0, 12);
+  const etag = '"' + [...hash].map(b => b.toString(16).padStart(2, "0")).join("") + '"';
+  const previos = (request.headers.get("If-None-Match") || "").split(",").map(s => s.trim().replace(/^W\//, ""));
+  if (previos.includes(etag)) return new Response(null, { status: 304, headers: { ...CABECERAS, ETag: etag } });
+  const r = respuesta(texto);
+  r.headers.set("ETag", etag);
+  return r;
+}
 const texto = (cuerpo, tipo) => new Response(cuerpo, { headers: { ...CABECERAS, "Content-Type": tipo } });
 
 const ESTADO_VACIO = { estado: "sin_datos", dias: [], total: 0, pendientes: 0, ultima_actualizacion: null,
@@ -159,12 +172,12 @@ export default {
     const url = new URL(request.url);
     const rutas = {
       "/api/estado": async (almacen) =>
-        respuesta((await almacen.leerDocTexto("estado")) ?? JSON.stringify(ESTADO_VACIO)),
+        condicional(request, (await almacen.leerDocTexto("estado")) ?? JSON.stringify(ESTADO_VACIO)),
       "/api/ligas": async (almacen) => json(await apiLigas(almacen)),
       "/api/validacion": async (almacen) =>
-        respuesta((await almacen.leerDocTexto("validacion")) ?? JSON.stringify(SIN_EJECUTAR)),
+        condicional(request, (await almacen.leerDocTexto("validacion")) ?? JSON.stringify(SIN_EJECUTAR)),
       "/api/registro": async (almacen) =>
-        respuesta((await almacen.leerDocTexto("registro_publico")) ?? JSON.stringify(REGISTRO_VACIO)),
+        condicional(request, (await almacen.leerDocTexto("registro_publico")) ?? JSON.stringify(REGISTRO_VACIO)),
       "/salud": async (almacen) => json(await salud(almacen, env)),
       "/actualizar": (almacen) => actualizar(url, env, almacen),
       "/validar": (almacen) => validar(url, env, almacen),
