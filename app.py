@@ -1273,6 +1273,7 @@ def app_js():
 ARCHIVOS_WEB = {
     "manifest.webmanifest": "application/manifest+json",
     "sw.js": "text/javascript",
+    "imagen.js": "text/javascript",
     "icono-192.png": "image/png",
     "icono-512.png": "image/png",
     "icono-maskable-512.png": "image/png",

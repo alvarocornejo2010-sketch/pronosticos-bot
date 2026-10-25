@@ -303,6 +303,9 @@ const ICONO_ESTRELLA = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hid
   + '" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"></path></svg>';
 const ICONO_ESTRELLA_LLENA = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="' + ESTRELLA
   + '" fill="currentColor" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"></path></svg>';
+const ICONO_IMAGEN = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor"'
+  + ' stroke-width="1.6" stroke-linejoin="round"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="6" cy="6" r="1.3"/>'
+  + '<path d="M2.5 12.5 6.5 8.5l3 3 2-2 2.5 2.5"/></svg>';
 const ICONO_COMPARTIR = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor"'
   + ' stroke-width="1.4"><circle cx="12" cy="3.5" r="2"></circle><circle cx="4" cy="8" r="2"></circle>'
   + '<circle cx="12" cy="12.5" r="2"></circle><path d="M5.8 7l4.4-2.5M5.8 9l4.4 2.5"></path></svg>';
@@ -392,16 +395,19 @@ function htmlDetalle(p) {
 // El pronóstico en una frase, arriba del detalle, en "de cada 10" (se entiende
 // mejor que un %). Los tramos son los del registro, con el mismo entero que la
 // tabla: claro con 60 o más, intermedio de 45 a 59 y parejo por debajo.
-function htmlVeredicto(p) {
+function veredictoTexto(p) {
   const n = pctFavorito(p), g = veredictoDe(p).signo;
   const quien = g === "1" ? cortoDe(p, "local") : g === "2" ? cortoDe(p, "visita") : null;
   const de10 = Math.round(n / 10);
   const gana = de10 >= 10 ? "De cada 10 partidos así, los gana casi todos." : "De cada 10 partidos así, gana unos " + de10 + ".";
-  const txt = !quien ? "<b>Partido parejo:</b> lo más probable es el empate, con " + n + " %."
-    : n >= 60 ? "<b>Favorito claro: " + esc(quien) + ".</b> " + gana
-    : n >= 45 ? "<b>Favorito: " + esc(quien) + ",</b> sin ser claro. " + gana
-    : "<b>Partido parejo:</b> nadie llega al 45 %. Lo más probable es que gane " + esc(quien) + ", con " + n + " %.";
-  return '<p class="det-veredicto">' + txt + '</p>';
+  if (!quien) return { titulo: "Partido parejo", frase: "Lo más probable es el empate, con " + n + " %." };
+  if (n >= 60) return { titulo: "Favorito claro: " + quien, frase: gana };
+  if (n >= 45) return { titulo: "Favorito: " + quien, frase: "Sin ser claro. " + gana };
+  return { titulo: "Partido parejo", frase: "Nadie llega al 45 %. Lo más probable es que gane " + quien + ", con " + n + " %." };
+}
+function htmlVeredicto(p) {
+  const v = veredictoTexto(p);
+  return '<p class="det-veredicto"><b>' + esc(v.titulo) + '.</b> ' + esc(v.frase) + '</p>';
 }
 
 // La cuota justa de un %: 100 dividido por él, la que pagaría una apuesta si la
@@ -433,7 +439,9 @@ function htmlCabeceraDetalle(p) {
   return '<div class="det-cab">' + eq("local")
     + '<div class="det-cuando">' + htmlInsignia(p.liga_codigo) + '<span class="hora">' + esc(p.hora) + '</span>'
     + '<span class="dia">' + esc(p.dia) + " " + esc(fechaCorta(p.fecha)) + '</span>'
-    + '<button class="accion" data-compartir="' + esc(p.id) + '">' + ICONO_COMPARTIR + '<span>Compartir</span></button></div>'
+    + '<button class="accion" data-compartir="' + esc(p.id) + '">' + ICONO_COMPARTIR + '<span>Compartir</span></button>'
+    + '<button class="accion" data-imagen="' + esc(p.id) + '" aria-label="Imagen para historias">' + ICONO_IMAGEN
+    + '<span>Imagen</span></button></div>'
     + eq("visita") + '</div>';
 }
 
@@ -1596,6 +1604,61 @@ async function compartir(id) {
   catch (e) { avisar("Copia este enlace: " + url); }
 }
 
+// La imagen del pronóstico para historias (public/imagen.js, que se carga solo al
+// pulsar): con el menú del sistema si deja compartir archivos (Android, iPhone) y
+// si no, se descarga. Mismos enteros, tonos y frase que el detalle.
+const valorCss = (v, porDefecto) => {
+  const m = /^var\((--[\w-]+)\)$/.exec(v || "");
+  const r = m ? getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim() : v;
+  return /^#[0-9a-f]{3,8}$/i.test(r || "") ? r : porDefecto;
+};
+const sinTildes = (s) => normalizar(s).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30);
+async function imagenPartido(id, boton) {
+  const p = datos && aplanar(datos.dias).find(x => String(x.id) === String(id));
+  if (!p || p.pendiente) return;
+  boton.disabled = true;
+  avisar("Preparando la imagen…");
+  try {
+    const { dibujarImagen } = await import("/imagen.js");
+    const r = reparto(p), v = veredictoTexto(p), L = ligaDe(p.liga_codigo);
+    const dia = NOMBRES_DIA[new Date(p.fecha + "T00:00:00Z").getUTCDay()].slice(0, 3).toLowerCase();
+    const parte = (valor, nombre) => { const t = tramo(valor); return { v: valor, nombre, bg: t.bg, fg: valorCss(t.fg, "#0a120e") }; };
+    const marcador = (p.marcadores || [])[0];
+    const extras = conGoles(p)
+      ? [["Más de 2.5 goles", Math.round(p.prob_mas_25) + " %"], ["Ambos marcan", Math.round(p.prob_ambos) + " %"]]
+        .concat(marcador ? [["Marcador", marcador[0] + "–" + marcador[1]]] : [])
+      : [["Goles esperados", f2(p.xg_local) + "–" + f2(p.xg_visita)]];
+    const blob = await dibujarImagen({
+      liga: p.liga, sigla: L.sigla, tono: L.tono === "none" ? "none" : valorCss(L.tono, "#87968c"), tinta: valorCss(L.tinta, "#0a120e"),
+      cuando: dia + " " + fechaCorta(p.fecha) + " · " + p.hora + ", hora de Lima",
+      local: cortoDe(p, "local"), visita: cortoDe(p, "visita"),
+      iniLocal: cortoDe(p, "local").replace(PREFIJOS, "").charAt(0).toUpperCase(),
+      iniVisita: cortoDe(p, "visita").replace(PREFIJOS, "").charAt(0).toUpperCase(),
+      escudoLocal: p.local_escudo, escudoVisita: p.visita_escudo,
+      veredicto: v.titulo, frase: v.frase,
+      reparto: [parte(r.l, cortoDe(p, "local")), parte(r.x, "Empate"), parte(r.v, cortoDe(p, "visita"))],
+      extras, web: location.host,
+    });
+    const nombre = "pronostico-" + sinTildes(cortoDe(p, "local")) + "-" + sinTildes(cortoDe(p, "visita")) + ".png";
+    const archivo = new File([blob], nombre, { type: "image/png" });
+    contar({ t: "imagen", id: Number(p.id) });
+    if (navigator.canShare && navigator.canShare({ files: [archivo] })) {
+      try { await navigator.share({ files: [archivo], title: cortoDe(p, "local") + " – " + cortoDe(p, "visita") }); avisoEl.hidden = true; return; }
+      catch (e) { if (e && e.name === "AbortError") { avisoEl.hidden = true; return; } }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = nombre;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    avisar("Imagen descargada: súbela a tus historias.");
+  } catch (e) {
+    avisar("No se pudo hacer la imagen.");
+  } finally {
+    boton.disabled = false;
+  }
+}
+
 // El partido de un enlace /partido/123, cuando ya hay datos.
 function abrirEnlazado() {
   const id = Number(partidoEnlazado);
@@ -1629,6 +1692,8 @@ document.addEventListener("click", (e) => {
   if (seguir) { alternarFavorito(seguir.dataset.seguir, seguir); return; }
   const comp = t.closest("[data-compartir]");
   if (comp) { compartir(comp.dataset.compartir); return; }
+  const img = t.closest("[data-imagen]");
+  if (img) { imagenPartido(img.dataset.imagen, img); return; }
 
   const liga = t.closest("[data-liga]");
   if (liga && (liga.classList.contains("liga-fila") || liga.closest(".tira-ligas"))) {
