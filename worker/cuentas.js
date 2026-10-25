@@ -110,7 +110,7 @@ export function mismoSitio(request, url) {
   return !desde || desde === "null" || desde === url.origin;
 }
 
-async function cuerpoJson(request) {
+export async function cuerpoJson(request) {
   if (!(request.headers.get("Content-Type") || "").startsWith("application/json")) return null;
   if (Number(request.headers.get("Content-Length") || 0) > MAX_CUERPO) return null;
   const texto = await request.text();

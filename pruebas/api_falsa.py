@@ -5,9 +5,12 @@ Además de /v4/..., responde a /__stats (peticiones recibidas), /__reset,
 calendario pasan a estar jugados, para el registro en vivo) y
 /__omitir?liga=PD&n=3&veces=1 (calendarios incompletos). Y, por POST, a
 /turnstile/v0/siteverify, un Cloudflare Turnstile de mentira: vale la ficha
-"ficha-buena" (una vez cada una: "ficha-buena-2" es otra), y cualquier otra no.
+"ficha-buena" (una vez cada una: "ficha-buena-2" es otra), y cualquier otra no. Y a
+/push/<id>, un servicio de avisos (Web Push) de mentira: apunta cada aviso (sus
+cabeceras y el cuerpo cifrado, que se ven en /__push) y responde 201, o 410 si el id
+empieza por "gone" (una suscripción que el navegador ya quitó).
 Uso: python pruebas/api_falsa.py PUERTO [limite429]"""
-import hashlib, json, random, re, sys, threading
+import base64, hashlib, json, random, re, sys, threading
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -225,12 +228,21 @@ def responder(ruta, q):
     return 404, {"message": "ruta desconocida"}
 
 FICHAS_USADAS = set()   # Turnstile: cada ficha vale una vez
+AVISOS = []             # lo que llegó al servicio de avisos de mentira
+CABECERAS_PUSH = ("Authorization", "TTL", "Urgency", "Topic", "Content-Encoding", "Content-Type")
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def do_POST(self):
         u = urlparse(self.path)
-        datos = {k: v[0] for k, v in parse_qs(self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()).items()}
+        crudo = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        m = re.fullmatch(r"/push/([\w-]+)", u.path)
+        if m:
+            with CANDADO:
+                AVISOS.append({"id": m.group(1), "cabeceras": {k: self.headers.get(k) for k in CABECERAS_PUSH},
+                               "cuerpo": base64.urlsafe_b64encode(crudo).decode().rstrip("=")})
+            self.send_response(410 if m.group(1).startswith("gone") else 201); self.end_headers(); return
+        datos = {k: v[0] for k, v in parse_qs(crudo.decode()).items()}
         if u.path != "/turnstile/v0/siteverify":
             self.send_response(404); self.end_headers(); return
         ficha = datos.get("response", "")
@@ -256,6 +268,9 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/__omitir":
             OMITIR[q["liga"]] = (int(q.get("n", "3")), int(q.get("veces", "1")))
             self.send_response(200); self.end_headers(); return
+        if u.path == "/__push":
+            cuerpo = json.dumps(AVISOS).encode()
+            self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(cuerpo); return
         if u.path == "/__reset":
             with CANDADO: CONTADOR.clear(); TOTAL[0] = 0
             self.send_response(200); self.end_headers(); return

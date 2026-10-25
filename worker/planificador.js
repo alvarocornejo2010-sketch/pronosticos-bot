@@ -1,7 +1,8 @@
 // El planificador: lo que en app.py son los hilos de fondo. Aquí no hace falta
 // keep-alive (un Worker no se duerme) y el reloj es el cron de Cloudflare, que
 // llama a tick() cada minuto. Cada vez decide si hay algo que hacer: primero
-// actualizar la web, y solo con la web al día, avanzar la validación.
+// actualizar la web, luego los avisos de Mis equipos (avisos.js) si toca, y solo con
+// la web al día, avanzar la validación y, en los minutos libres, las tablas.
 
 import { MAX_INTENTOS_VALIDACION, VERSION_MODELO, ajustes } from "./config.js";
 import { Almacen } from "./almacen.js";
@@ -10,8 +11,10 @@ import { Reloj } from "./tiempo.js";
 import { Contexto, pasada, temporadaActual } from "./actualizacion.js";
 import { pasoValidacion, sentenciasError, sentenciasInicio } from "./validacion.js";
 import { pasoTablas, tocaTablas } from "./tablas.js";
+import { pasoAvisos, tocaAvisos } from "./avisos.js";
 
-const DOCS_CONTROL = ["resumen", "validacion_resumen", "pedido_forzar", "pedido_validar", "tablas_resumen"];
+const DOCS_CONTROL = ["resumen", "validacion_resumen", "pedido_forzar", "pedido_validar", "tablas_resumen",
+  "avisos_resumen"];
 // Un error se reintenta a los 5 minutos, como el tick de app.py, no a cada minuto.
 const MINUTOS_REINTENTO_ERROR = 5;
 // Si una ejecución muere a medias (CPU, despliegue), el candado caduca solo.
@@ -112,6 +115,7 @@ export async function tick(env, { fetchFn = null } = {}) {
   let motivo = pedidoForzar ? "forzada con /actualizar"
     : yaHayToken ? "ya está el token" : tocaActualizar(resumen, aj, ahora);
   if (motivo) tarea = "actualizar";
+  else if ((motivo = tocaAvisos(leer(docs.avisos_resumen), ahora))) tarea = "avisos";
   else if ((motivo = tocaValidar(resumen, valResumen, pedidoValidar, aj, temporadaActual(reloj) - 1))) tarea = "validar";
   // lo menos urgente, en los minutos libres: la tabla de una liga (tablas.js)
   const resumenTablas = leer(docs.tablas_resumen);
@@ -119,7 +123,8 @@ export async function tick(env, { fetchFn = null } = {}) {
   if (ligaTabla) { tarea = "tablas"; motivo = "la tabla de " + ligaTabla; }
   if (!tarea) return { tarea: null };
 
-  if (!env.FOOTBALL_DATA_TOKEN) {
+  // los avisos no usan la API
+  if (!env.FOOTBALL_DATA_TOKEN && tarea !== "avisos") {
     await marcarError(almacen, reloj, FALTA_TOKEN);
     return { tarea, error: FALTA_TOKEN };
   }
@@ -143,6 +148,11 @@ export async function tick(env, { fetchFn = null } = {}) {
   let terminoBien = false;
   let val = valResumen;
   try {
+    if (tarea === "avisos") {
+      const hecho = await pasoAvisos(env, almacen, ajp, docs.avisos_resumen && docs.avisos_resumen.actualizado, ahora);
+      terminoBien = true;
+      return { tarea, motivo, ...hecho, muertes };
+    }
     const ctx = new Contexto({ reloj, cache: await almacen.cargarCache(), api, ajustes: ajp, almacen });
 
     if (tarea === "actualizar") {
@@ -181,9 +191,11 @@ export async function tick(env, { fetchFn = null } = {}) {
       return { tarea, motivo, esperando: e.message, peticiones: api.gastadas };
     }
     const mensaje = String((e && e.message) || e);
-    console.error(`Error en la ${tarea === "actualizar" ? "actualización" : "validación"}: ${mensaje}`);
+    const que = { actualizar: "la actualización", validar: "la validación", tablas: "las tablas", avisos: "los avisos" };
+    console.error(`Error en ${que[tarea]}: ${mensaje}`);
+    // un error de las tablas o de los avisos se reintenta solo: no es de la web ni de la validación
     if (tarea === "actualizar") await marcarError(almacen, reloj, mensaje);
-    else await almacen.escribir(sentenciasError(almacen, mensaje, (val && val.intentos) || 0));
+    else if (tarea === "validar") await almacen.escribir(sentenciasError(almacen, mensaje, (val && val.intentos) || 0));
     return { tarea, motivo, error: mensaje };
   } finally {
     const fin = [almacen.sentenciaSoltarCandado(dueno)];

@@ -116,6 +116,29 @@ export const ESQUEMA = [
      equipo TEXT NOT NULL,
      creado INTEGER NOT NULL,
      PRIMARY KEY (cuenta, equipo)) WITHOUT ROWID`,
+  // Los avisos de Mis equipos (avisos.js): cada navegador suscrito (su dirección en el
+  // servicio de avisos, sus dos claves y los equipos que sigue, en JSON), qué avisos de
+  // cada partido ya se pusieron en cola (para no repetirlos) y la cola de lo que falta
+  // por mandar. Horas en ms.
+  `CREATE TABLE IF NOT EXISTS suscripciones (
+     id       INTEGER PRIMARY KEY,
+     endpoint TEXT NOT NULL UNIQUE,
+     p256dh   TEXT NOT NULL,
+     auth     TEXT NOT NULL,
+     equipos  TEXT NOT NULL,
+     creada   INTEGER NOT NULL,
+     vista    INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS avisos (
+     partido INTEGER NOT NULL,
+     tipo    TEXT NOT NULL,
+     creado  INTEGER NOT NULL,
+     PRIMARY KEY (partido, tipo)) WITHOUT ROWID`,
+  `CREATE TABLE IF NOT EXISTS envios (
+     suscripcion INTEGER NOT NULL,
+     partido     INTEGER NOT NULL,
+     tipo        TEXT NOT NULL,
+     intentos    INTEGER NOT NULL,
+     PRIMARY KEY (suscripcion, partido, tipo)) WITHOUT ROWID`,
 ];
 
 const SIN_TABLA = /no such table/i;

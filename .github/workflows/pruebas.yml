@@ -36,8 +36,10 @@ jobs:
         run: python test_paridad.py
       - name: Resumen de la semana y tarjeta para compartir
         run: node pruebas/semana.mjs
-      - name: Service worker (sin conexión)
+      - name: Service worker (sin conexión y avisos)
         run: node pruebas/sw.mjs
+      - name: Cifrado, firma y hora de los avisos
+        run: node pruebas/push.mjs
 
   punta-a-punta:
     name: Flask contra el Worker

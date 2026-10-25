@@ -1278,6 +1278,7 @@ ARCHIVOS_WEB = {
     "icono-512.png": "image/png",
     "icono-maskable-512.png": "image/png",
     "apple-touch-icon.png": "image/png",
+    "insignia-96.png": "image/png",
     "og.png": "image/png",
 }
 
@@ -1361,6 +1362,13 @@ def api_tabla(codigo):
     (worker/tablas.js): el cron las baja en sus minutos libres y las guarda en D1."""
     return jsonify({"estado": "no_disponible", "liga": codigo,
                     "nota": "La tabla y la proyección funcionan en la versión de Cloudflare."})
+
+
+@app.route("/api/avisos")
+def api_avisos():
+    """Los avisos de Mis equipos solo existen en Cloudflare (worker/avisos.js): los
+    manda su cron. Aquí la web ni ofrece activarlos."""
+    return jsonify({"disponible": False})
 
 
 @app.route("/api/registro")

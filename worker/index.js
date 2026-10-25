@@ -15,6 +15,8 @@
 //   /robots.txt, /sitemap.xml   para los buscadores (buscadores.js)
 //   /api/cuenta[/...] las cuentas básicas: crear, entrar con el código, los equipos
 //                     que sigue, descargar y borrar (cuentas.js)
+//   /api/avisos[/alta|/baja]  los avisos de Mis equipos: la clave VAPID, suscribirse
+//                     con los equipos que sigue y darse de baja (avisos.js)
 //
 // El trabajo de verdad lo hace el cron (planificador.js), una vez por minuto.
 
@@ -30,6 +32,7 @@ import { paginaPartido } from "./compartir.js";
 import { robots, sitemap } from "./buscadores.js";
 import { Cuentas, RUTAS_CUENTA } from "./cuentas.js";
 import { CODIGOS_TABLA } from "./tablas.js";
+import { RUTAS_AVISOS, atenderAvisos } from "./avisos.js";
 
 // Las mismas cabeceras que pone app.py a sus respuestas JSON (la web y app.js
 // llevan las suyas en public/_headers). no-store: el JSON cambia cada pocos
@@ -191,6 +194,7 @@ export default {
       "/sitemap.xml": async (almacen) => texto(await sitemap(almacen, url.origin), "application/xml; charset=utf-8"),
     };
     for (const r of Object.keys(RUTAS_CUENTA)) rutas[r] = (almacen) => new Cuentas(request, env, almacen, CABECERAS).atender();
+    for (const r of Object.keys(RUTAS_AVISOS)) rutas[r] = (almacen) => atenderAvisos(request, env, almacen, CABECERAS);
     const enlace = url.pathname.match(/^\/partido\/(\d{1,12})\/?$/);
     const tabla = url.pathname.match(/^\/api\/tabla\/([A-Z0-9]{2,4})$/);
     const ruta = rutas[url.pathname]
@@ -199,7 +203,8 @@ export default {
         ? condicional(request, (await almacen.leerDocTexto("tabla:" + tabla[1])) ?? JSON.stringify(TABLA_PENDIENTE))
         : json({ error: "no hay tabla de esa liga" }, 404))));
     if (!ruta) return env.ASSETS.fetch(request);   // lo demás: los archivos de public/
-    const metodos = url.pathname === "/api/contar" ? ["POST"] : RUTAS_CUENTA[url.pathname] || ["GET", "HEAD"];
+    const metodos = url.pathname === "/api/contar" ? ["POST"]
+      : RUTAS_CUENTA[url.pathname] || RUTAS_AVISOS[url.pathname] || ["GET", "HEAD"];
     if (!metodos.includes(request.method)) {
       return new Response("Método no permitido", { status: 405, headers: { ...CABECERAS, Allow: metodos.join(", ") } });
     }

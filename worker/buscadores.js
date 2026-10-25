@@ -10,10 +10,11 @@
 import { isoSinMs } from "./registro.js";
 
 export function robots(origen) {
-  return `# La web, los partidos y los datos que pinta sí; las visitas y las rutas con token, no.
+  return `# La web, los partidos y los datos que pinta sí; las visitas, los avisos y las rutas con token, no.
 User-agent: *
 Disallow: /api/contar
 Disallow: /api/visitas
+Disallow: /api/avisos
 Disallow: /visitas
 Disallow: /actualizar
 Disallow: /validar

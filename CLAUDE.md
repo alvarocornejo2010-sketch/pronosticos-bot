@@ -232,7 +232,10 @@ ver "Compartir y favoritos"), y `/robots.txt` y `/sitemap.xml` para los buscador
 en Render, `disponible: false`) y, solo en Cloudflare, `/api/cuenta/crear`,
 `/entrar`, `/equipo`, `/contrasena`, `/correo`, `/usuario`, `/salir`, `/borrar` (POST) y
 `/datos` (ver "Cuentas"). Y `/api/tabla/PD`, la tabla de una liga y lo que le falta
-de temporada (en Render, `no_disponible`; ver "Tabla y proyección").
+de temporada (en Render, `no_disponible`; ver "Tabla y proyección"). Y los avisos de
+Mis equipos: `/api/avisos` (la clave pública VAPID; en Render, `disponible: false`) y,
+solo en Cloudflare, `/api/avisos/alta` y `/api/avisos/baja` (POST; ver "Avisos de Mis
+equipos").
 
 **Efecto secundario de cada deploy:** el disco de Render free es efímero, cada
 deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
@@ -272,7 +275,8 @@ incluidos), `actualizacion.js` (la pasada), `validacion.js`, `metricas.js`
 (football-data con su presupuesto), `tiempo.js` (hora de Lima), `visitas.js`
 (el contador de visitas), `compartir.js` (la tarjeta de `/partido/123`),
 `buscadores.js` (`robots.txt` y `sitemap.xml`), `cuentas.js` (las cuentas),
-`tablas.js` (la tabla de cada liga y lo que le falta) e `index.js` (rutas).
+`tablas.js` (la tabla de cada liga y lo que le falta), `avisos.js` (los avisos de Mis
+equipos), `push.js` (su cifrado y su firma, Web Push) e `index.js` (rutas).
 
 **El ritmo lo marca la CPU.** El plan gratis da 10 ms por ejecución y leer el
 JSON de la API cuesta ~7 ms por MB, así que en vez de una pasada de 40
@@ -284,13 +288,18 @@ temporada entera, ~400 KB) o un ajuste de fuerzas de una liga (`ajustarFuerzas`:
 ~4 ms en un isolate recién creado, que aún no ha compilado nada, y ~0.2 ms ya
 compilado), nunca las dos (`api.pesada`). Lo que no cabe queda pendiente y el
 estado sigue en `actualizando` (no hay `parcial`: el siguiente minuto continúa).
-Medido dentro de `workerd` (el runtime de Cloudflare, en local, D1 incluido, que
-solo con atender `/salud` ya gasta ~3 ms): 3.5 ms de media por pasada y 7.6 como
-mucho; una pasada en un isolate recién creado que rehace las fuerzas de la
-Championship y recalcula sus partidos, 3.7 ms. Llenar la semana entera desde
-vacío: ~31 pasadas (por liga, una para cada temporada y otra para el ajuste).
-Cloudflare tolera que un isolate se pase del límite de vez en cuando, no
-siempre.
+Medido con el perfilador de V8 del isolate del Worker en `wrangler dev`
+(`pruebas/cpu_isolate.mjs`, lo que cuenta Cloudflare: sin el SQLite de la D1 local):
+6-13 ms por pasada con la web al día (media ~8) y hasta ~37 en las de llenarla
+desde cero; las tablas, hasta 20. Es una cota alta: el perfilador pesa y la máquina
+no es la de Cloudflare. En producción no ha muerto ni una pasada desde el 18 oct
+(`muertes` en los Logs y en D1), así que caben, con poco margen: Cloudflare tolera
+que un isolate se pase del límite de vez en cuando, no siempre. **Ojo:** hasta el 25
+oct las pruebas medían otro proceso (el intermediario de `wrangler dev`, ~3 ms haga
+lo que haga el Worker) y de ahí salían los "3.5 ms de media" que decía este archivo:
+no medían nada. Para ver la CPU de verdad en producción: Workers & Pages →
+`pronosticos-bot` → Metrics (CPU time). Llenar la semana entera desde vacío: ~31
+pasadas (por liga, una para cada temporada y otra para el ajuste).
 
 **Para que quepa, casi no se lee JSON.** El calendario va en la tabla
 `partidos`, cada partido con su ficha (nombres, hora, escudos) ya en JSON; las
@@ -307,11 +316,13 @@ a los 90 minutos de cada partido con predicción, ya sumado al registro en
 vivo), `documentos` (`estado` que sirve `/api/estado`, `resumen`, `validacion`,
 `registro` y `registro_publico`, pedidos, temporadas terminadas compactas,
 `temporada:liga:{código}:{año}`, `tabla:{código}` que sirve `/api/tabla/...` y
-`tablas_resumen`, cuándo se bajó cada cosa) y
+`tablas_resumen`, cuándo se bajó cada cosa, y los de los avisos: `vapid`, su par
+de claves, y `avisos_resumen`, cuándo volver a mirar) y
 `candado` (que dos pasadas no se pisen, hora de la última petición, pasadas
-muertas), `visitas` (los contadores de visitas por día, ver "Visitas") y las de
+muertas), `visitas` (los contadores de visitas por día, ver "Visitas"), las de
 las cuentas: `cuentas`, `usuarios`, `correos`, `accesos`, `sesiones` y `favoritos` (ver
-"Cuentas").
+"Cuentas"), y las de los avisos: `suscripciones`, `avisos` y `envios` (ver "Avisos de
+Mis equipos").
 
 **Si una pasada muere** (lo más probable, por CPU) deja el candado puesto; la
 siguiente lo nota y hace la mitad (presupuesto, bytes y cálculos), hasta un
@@ -384,8 +395,9 @@ para no leer las fichas enteras). Lo prueba `pruebas/semana.mjs`.
   el tope de 3 no frenaba nada);
 - `/actualizar?forzar=1` y `/validar` dejan un pedido en D1 que el cron recoge
   en menos de un minuto: una petición web no puede durar lo que una pasada;
-- el registro en vivo (`/api/registro`), las visitas (`/visitas`) y la tabla con
-  su proyección (`/api/tabla/PD`) solo existen aquí.
+- el registro en vivo (`/api/registro`), las visitas (`/visitas`), la tabla con
+  su proyección (`/api/tabla/PD`) y los avisos de Mis equipos (`/api/avisos`) solo
+  existen aquí.
 
 **En local:** `npm install`, copiar `.dev.vars.example` a `.dev.vars`, `npm run
 dev` y lanzar el cron a mano con
@@ -439,7 +451,8 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
   (`enlace`), estrellas puestas (`favorito`) y visitantes que siguen a algún
   equipo (`con_favoritos`). Y la app: instalaciones (`instalada`) y visitantes
   que entraron desde la app instalada (`en_app`, `display-mode: standalone`). En
-  el panel, el tablero "Compartir, favoritos y app".
+  el panel, el tablero "Compartir, favoritos y app". Los avisos los cuenta el Worker,
+  no la web (ver "Avisos de Mis equipos").
 
 ## Tabla y proyección (oct 2026)
 
@@ -525,7 +538,82 @@ hay (es un torneo).
   nombre. La estrella va en blanco: el oro es la probabilidad. Sin cuenta viven solo
   en ese navegador; con cuenta, también en la web (ver "Cuentas"). Con la web abierta
   en dos pestañas, cada una toma al momento las estrellas de la otra (evento
-  `storage`), para no borrarlas al guardar las suyas.
+  `storage`), para no borrarlas al guardar las suyas. Y pueden avisar antes de cada
+  partido (ver "Avisos de Mis equipos").
+
+## Avisos de Mis equipos (oct 2026)
+
+Un aviso del sistema (Web Push) 2 h antes de cada partido de los equipos con estrella,
+con el pronóstico ("Hoy a las 14:00 (hora de Lima) · LaLiga. Real Madrid 48 % · empate
+26 % · Barcelona 26 %."), y otro cuando termina, con el resultado y si acertó el
+favorito ("Final: Real Madrid 2-1 Barcelona"). Si el de antes cae de madrugada en Lima
+(de 23:00 a 6:59), llega a las 22:00 de la noche anterior. Gratis, sin cuenta y sin
+correo; en el iPhone, solo con la web instalada (Safari no los deja de otra forma).
+
+- **En la web** (sección AVISOS de `app.js`): una tarjeta arriba de Mis equipos
+  ("Activar avisos" / "Quitar los avisos", o por qué no se puede: bloqueados,
+  iPhone sin instalar, navegador sin avisos) y una invitación en el detalle de un
+  partido de un equipo que sigues ("Ahora no" la quita para siempre). Al activarlos,
+  el navegador pide permiso y se suscribe con la clave pública VAPID del servidor
+  (`GET /api/avisos`, guardada un día en `pronosticos.avisos_clave` para que el
+  permiso se pida en el mismo clic: Safari lo exige), y manda la suscripción y la
+  lista de equipos a `/api/avisos/alta`. Cada vez que cambian las estrellas (y una
+  vez por semana, para que el servidor sepa que sigue viva) la vuelve a mandar; si
+  la suscripción se perdió o la clave del servidor cambió, se rehace sola.
+  `/api/avisos/baja` la borra (pide la clave `auth` de la suscripción, que solo
+  conocen el navegador y el Worker). `pronosticos.avisos` guarda lo último mandado;
+  sin él, están apagados. Solo en Cloudflare: en Render, `/api/avisos` responde
+  `disponible: false` y la web no los ofrece.
+- **El service worker** (`sw.js`) enseña cada aviso (con `icono-192.png` y la
+  insignia monocroma `insignia-96.png` para la barra de Android) y, al tocarlo, abre
+  la web en ese partido (`/partido/123`), en la pestaña que ya estuviera abierta si
+  la hay. Solo abre direcciones de esta web. Los dos avisos de un partido llevan la
+  misma etiqueta: el del resultado sustituye al de antes.
+- **En el Worker** (`avisos.js`): la tarea `avisos` del cron, con prioridad sobre la
+  validación y las tablas (no sobre la actualización), cuando lo dice
+  `avisos_resumen` (`proximo`: cuándo volver a mirar; `cola`: cuántos faltan). Mira
+  las predicciones de las próximas horas y los resultados de las últimas 24 h de los
+  equipos seguidos, pone en `envios` los avisos que ya tocan (una sola vez por
+  partido y tipo: `avisos`) y manda hasta `MAX_ENVIOS_PASADA` (8) por minuto, los
+  partidos más cercanos primero. Un resultado no llega antes de 2 h 35 después de
+  empezar (`registro.js` lo apunta con 2 h 30 de margen), así que desde entonces se
+  mira cada 10 minutos; si no, cada media hora. Un alta pide mirar en el minuto
+  siguiente. Sin suscripciones, la tarea no corre nunca.
+- **Cómo se manda** (`push.js`, sin dependencias, con WebCrypto): el mensaje se
+  cifra para las claves del navegador (RFC 8291, `aes128gcm`; `pruebas/push.mjs`
+  reproduce byte a byte el ejemplo del apéndice A) y la petición va firmada con
+  VAPID (un JWT ES256 de 12 h, con la dirección de la web de contacto: `URL_WEB`).
+  Cifrar y firmar cuesta ~0,3 ms de CPU por aviso. 201 es que llegó; 404 o 410, que
+  el navegador ya quitó la suscripción (se borra, con su cola); un fallo de red, 429
+  o 5xx se reintenta en el minuto siguiente, hasta 3 veces; lo demás se descarta y
+  va al log. El de antes vale hasta que empieza el partido (`TTL`); el del
+  resultado, un día. Un aviso que se queda sin tiempo en la cola no se manda.
+- **El par VAPID lo crea el Worker** la primera vez que alguien pide
+  `/api/avisos`, y vive en D1 (documento `vapid`, con la privada en JWK): no hay
+  ningún secreto que poner en el panel. Quien lea la base (solo el dueño de la
+  cuenta) podría mandar avisos a los suscritos. Para cambiarlo, borrar `vapid`: las
+  suscripciones de antes dejan de valer y cada navegador se vuelve a suscribir solo
+  al abrir la web.
+- **Solo a los servicios de los navegadores:** la dirección de una suscripción
+  tiene que ser de Google (`fcm.googleapis.com`), Mozilla, Apple (`web.push.apple.com`)
+  o Microsoft (`*.notify.windows.com`) (`endpointValido`); si no, cualquiera podría
+  hacer que el Worker mandara peticiones a la web que quisiera. Y la clave del
+  navegador tiene que ser un punto de la curva P-256. En las pruebas, `PUSH_PRUEBA`
+  deja además el servicio de mentira de `api_falsa.py`.
+- **Topes** (contados en `visitas`): `MAX_SUSCRIPCIONES` (2.000 en total),
+  `MAX_SUSCRIPCIONES_DIA` (300 nuevas al día) y `MAX_ESCRITURAS_AVISOS_DIA` (5.000
+  filas al día por las altas). Una suscripción que no se renueva en 180 días se
+  borra. Cada minuto caben 8 avisos (~480 por hora): para cientos de suscritos con el
+  mismo equipo sobra; si se llegara a miles, subir `MAX_ENVIOS_PASADA` midiendo la CPU.
+  Leer quién sigue a quién recorre todas las suscripciones en cada pasada de avisos
+  (unas pocas por hora): con 2.000, unas 300.000 filas leídas al día de los 5 millones.
+- **Qué se guarda** (`suscripciones`): la dirección del servicio, las dos claves del
+  navegador y los nombres de los equipos, con cuándo se creó y se renovó. Nada de
+  quién es. La política de privacidad tendrá que decirlo.
+- **En el panel de visitas**, el tablero "Avisos de Mis equipos": suscripciones
+  (y cuántas siguen a algún equipo), altas de la semana, avisos mandados antes del
+  partido y con el resultado, los que el servicio no aceptó, los que llegaron tarde y
+  las suscripciones borradas por 404/410 (`push` y `suscripciones` en `visitas`).
 
 ## Cuentas (oct 2026)
 
@@ -677,9 +765,9 @@ es lo que pidió el dueño del proyecto; lo que cueste dinero (mandar correos) e
 - **Instalar como app:** `public/manifest.webmanifest` (nombre, `standalone`,
   colores de la web e iconos 192, 512 y 512 "maskable", más
   `apple-touch-icon.png` para el iPhone; todos del logo Casilla, hechos con
-  Playwright) y `public/sw.js`, un service worker que solo toca las navegaciones:
-  si no hay red, responde una página "Sin conexión" (503) en vez del error del
-  navegador. No guarda nada en caché: la web va con `no-store` y los números
+  Playwright) y `public/sw.js`, un service worker que de las peticiones solo toca
+  las navegaciones: si no hay red, responde una página "Sin conexión" (503) en vez
+  del error del navegador. También enseña los avisos de Mis equipos. No guarda nada en caché: la web va con `no-store` y los números
   cambian cada minuto. Chrome la da por instalable (`Page.getInstallabilityErrors`
   vacío). Cuando el navegador ofrece instalarla (`beforeinstallprompt`: Chrome,
   Edge, Android), sale "Instalar app" en la cabecera ("App" en el móvil, que no
@@ -734,6 +822,8 @@ la cuenta; para que los siguientes no lo lleven: GitHub → Settings → Emails 
 - `TURNSTILE_SECRET`, solo en Cloudflare (tipo Secret, con `TURNSTILE_SITEKEY`,
   que es pública: ver "Cuentas"). Si se filtra, se rota en Cloudflare →
   Turnstile y se cambia en el panel.
+- La clave privada VAPID de los avisos no está en el panel: la crea el Worker y vive
+  en D1 (ver "Avisos de Mis equipos").
 - En local van en `.env` / `.dev.vars`, que `.gitignore` deja fuera
   (`.dev.vars.example` sí se sube: solo lleva ejemplos).
 
@@ -774,8 +864,8 @@ machacara a propósito dejaría `/api/estado` sin servicio hasta la medianoche
 UTC (la web en sí, que es estática, seguiría cargando). En `workers.dev` no hay
 reglas de WAF; con un dominio propio en Cloudflare sí habría una regla de
 límite de peticiones gratis. Las rutas públicas que escriben en D1 son
-`/api/contar` y las de las cuentas, las dos con tope diario (ver "Visitas" y
-"Cuentas"); quien machaque `/api/cuenta/entrar` deja a todos sin poder entrar ese
+`/api/contar`, las de las cuentas y el alta de los avisos, todas con tope diario
+(ver "Visitas", "Cuentas" y "Avisos de Mis equipos"); quien machaque `/api/cuenta/entrar` deja a todos sin poder entrar ese
 día (no sin sus equipos).
 
 ## El modelo (oct 2026)
@@ -1210,11 +1300,13 @@ Environment).
   `index.html` llevan workers.dev) y, si hay gente que vuelve, una porra gratis
   contra el modelo con las cuentas que ya hay (sin dinero ni premios). Hecho en
   oct 2026: el enlace con vista previa, los favoritos, el resumen de la semana,
-  instalarla como app, el sitemap, la marca de las ligas de fiabilidad baja y las
-  cuentas (ver "Cuentas"; lo que les falta, en el punto siguiente).
+  instalarla como app, el sitemap, la marca de las ligas de fiabilidad baja, las
+  cuentas (ver "Cuentas"; lo que les falta, en el punto siguiente) y los avisos de
+  Mis equipos (ver "Avisos de Mis equipos").
 
 - **Cuentas, la versión siguiente** (ver "Cuentas"): una página de política de
-  privacidad (Ley 29733: qué se guarda, ahora también el correo, para qué, los 7 días
+  privacidad (Ley 29733: qué se guarda, ahora también el correo y las suscripciones
+  de los avisos, para qué, los 7 días
   de copias de D1 y cómo pedir o borrar los datos; conviene que la revise alguien que
   sepa de leyes); poner las claves de Turnstile en el panel; verificar el correo y
   recuperar la contraseña con él (Cloudflare Email Service: plan de pago de Workers,
@@ -1254,13 +1346,18 @@ Environment).
 - `.github/workflows/pruebas.yml`, en cada PR y cada push a `main`, dos checks:
   - **Paridad Python / Worker**: `node --check` de `worker/*.js`, `public/app.js`, `public/sw.js` y `public/imagen.js`,
     `python test_paridad.py` ("todo igual"), `node pruebas/semana.mjs` (el resumen
-    de la semana del registro y los textos de la tarjeta para compartir) y `node
-    pruebas/sw.mjs` (el service worker: "Sin conexión" sin red, la web con red).
+    de la semana del registro y los textos de la tarjeta para compartir), `node
+    pruebas/sw.mjs` (el service worker: "Sin conexión" sin red, la web con red, y los
+    avisos: su texto, adónde llevan y la pestaña que abren) y `node pruebas/push.mjs`
+    (el cifrado de los avisos contra el ejemplo de RFC 8291, la firma VAPID, la hora
+    de cada aviso y qué servicios se aceptan).
   - **Flask contra el Worker**: `bash pruebas/e2e.sh`. Levanta la API falsa
     (`pruebas/api_falsa.py`, determinista), corre `app.py` + `validacion.py` contra
     ella (`correr_flask.py`), arranca `wrangler dev --test-scheduled` con una D1
     local y lanza el cron hasta que la web y la validación están listas
-    (`correr_cron.py`, que mide la CPU de workerd por pasada). Exige 0 diferencias
+    (`correr_cron.py`, que mide la CPU del Worker en cada pasada con el perfilador de
+    su isolate, por el inspector de `wrangler dev`: `medir_cpu.py` y `cpu_isolate.mjs`;
+    tope `MAX_MS`, 60 en local, ver "El ritmo lo marca la CPU"). Exige 0 diferencias
     en `/api/estado`, `/api/ligas` y `/api/validacion` (`comparar.py`) y ninguna
     pasada muerta. Después caduca todas las predicciones a la vez y comprueba que
     la web sigue enseñando números mientras se recalculan (`caducidad.py`), y que
@@ -1282,13 +1379,22 @@ Environment).
     versión que se pasa a usuario, el correo (crear, entrar, cambiar y quitar),
     Turnstile y los tres topes (`cuentas.py`, con `MAX_CUENTAS_DIA=4`,
     `MAX_INTENTOS_DIA=120`, `MAX_ESCRITURAS_CUENTAS_DIA=600` y el Turnstile de mentira
-    de `api_falsa.py`, `/turnstile/v0/siteverify`, por `TURNSTILE_VERIFICAR`). Y al
-    final, la interfaz en un navegador de verdad (`interfaz.mjs`, Playwright): 11
-    vistas (semana, día, liga, por claros y por reñidos, búsqueda, Mis equipos, el
-    detalle abierto y la tabla con su proyección) en 7 anchos de 360 a 1920 px, sin
-    texto que se salga de su caja, sin piezas de una fila que se pisen, sin errores
-    de JavaScript, y axe-core sin nada en la semana, el detalle y la tabla, en el
-    móvil y en escritorio. Es lo que en oct
+    de `api_falsa.py`, `/turnstile/v0/siteverify`, por `TURNSTILE_VERIFICAR`). Que los
+    avisos de Mis equipos llegan (`avisos.mjs`, con el servicio de avisos de mentira
+    de `api_falsa.py`, `/push/<id>`, y `AVISO_ANTES_MIN` de dos semanas para que toquen
+    todos los de la semana): cuatro navegadores de mentira se suscriben, cada aviso se
+    descifra con la clave de su navegador y lleva su firma VAPID, sus cabeceras y los
+    enteros de la web; ninguno se repite ni falta; una estrella nueva trae solo sus
+    partidos; el resultado llega una vez; un 410 borra la suscripción; las altas raras
+    no entran; la baja pide `auth`; el panel lo cuenta; y la CPU de cada pasada de
+    avisos. Y al final, la interfaz en un navegador de verdad (`interfaz.mjs`,
+    Playwright): 12 vistas (semana, día, liga, por claros y por reñidos, búsqueda,
+    Mis equipos, el detalle abierto, el de un partido de Mis equipos y la tabla con su
+    proyección) en 7 anchos de 360 a 1920 px, sin texto que se salga de su caja, sin
+    piezas de una fila que se pisen, sin errores de JavaScript, con la tarjeta y la
+    invitación de los avisos (y activarlos y quitarlos contra el Worker, con el
+    servicio de avisos del navegador de mentira), y axe-core sin nada en la semana,
+    Mis equipos, los dos detalles y la tabla, en el móvil y en escritorio. Es lo que en oct
     2026 encontró la fecha bajo el escudo y "Seguir" cortado en el móvil. El job
     instala Chromium (`npx playwright install --with-deps chromium`); sin red para
     las fuentes de Google, `FUENTES=carpeta` (con `fuentes.css`, `mapa.txt` y los

@@ -5,24 +5,15 @@ en sus minutos libres, una liga por minuto, sin pasarse de CPU. Comprueba que
 esperados (los mismos que los partidos de la semana entre esos equipos), con ETag;
 que una tabla que falla (la del Brasileirão, la primera vez) no se pide otra vez en
 cada minuto; y que en Flask responde no_disponible.
-Uso: python pruebas/tablas.py PUERTO_WORKER PUERTO_API MAX_MS"""
-import glob, json, os, subprocess, sys, urllib.error, urllib.request
+Uso: python pruebas/tablas.py PUERTO_WORKER PUERTO_INSPECTOR PUERTO_API MAX_MS"""
+import json, os, sys, urllib.error, urllib.request
 
-W, API = f"http://127.0.0.1:{sys.argv[1]}", f"http://127.0.0.1:{sys.argv[2]}"
-MAX_MS = float(sys.argv[3])
+from medir_cpu import Medidor
+
+W, API = f"http://127.0.0.1:{sys.argv[1]}", f"http://127.0.0.1:{sys.argv[3]}"
+MAX_MS = float(sys.argv[4])
 LIGAS = ["PD", "PL", "FL1", "BL1", "SA", "DED", "PPL", "ELC", "BSA"]
-pid = next(p for p in subprocess.check_output(["pgrep", "-f", "workerd serve"]).decode().split()
-           if f"127.0.0.1:{sys.argv[1]}" in open(f"/proc/{p}/cmdline").read().replace("\0", " "))
-
-
-def cpu_ms():
-    t = 0
-    for f in glob.glob(f"/proc/{pid}/task/*/schedstat"):
-        try:
-            t += int(open(f).read().split()[0])
-        except OSError:
-            pass
-    return t / 1e6
+medidor = Medidor(sys.argv[2])
 
 
 def pedir(ruta, etag=None):
@@ -42,9 +33,7 @@ st, _, cuerpo = pedir("/api/tabla/PD")
 assert st == 200 and json.loads(cuerpo)["estado"] == "sin_datos", cuerpo   # aún no: van después de la validación
 ticks = []
 for i in range(40):
-    a = cpu_ms()
-    urllib.request.urlopen(W + "/cdn-cgi/local/scheduled?cron=*+*+*+*+*").read()
-    ticks.append(round(cpu_ms() - a, 1))
+    ticks.append(medidor.pedir(W + "/cdn-cgi/local/scheduled?cron=*+*+*+*+*")[1])
     if all(tabla(c)["estado"] == "listo" for c in LIGAS[:-1]):
         break
 else:

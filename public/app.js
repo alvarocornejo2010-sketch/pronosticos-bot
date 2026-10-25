@@ -62,6 +62,7 @@ function leerFavoritos() {
 function guardarFavoritos() {
   try { localStorage.setItem(CLAVE_FAVORITOS, JSON.stringify([...favoritos])); }
   catch (e) { /* sin memoria: dura lo que la pestaña */ }
+  equiposCambiados();   // los avisos llevan la lista de equipos (sección AVISOS)
 }
 function esFavorito(p) { return favoritos.has(p.local) || favoritos.has(p.visita); }
 
@@ -312,6 +313,9 @@ const ICONO_COMPARTIR = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hi
 function htmlInsigniaFav(clase) {
   return '<span class="insignia fav' + (clase ? " " + clase : "") + '">' + ICONO_ESTRELLA_LLENA + '</span>';
 }
+const ICONO_CAMPANA = '<svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor"'
+  + ' stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.8A4.2 4.2 0 0 0 3.8 6v2.7L2.4 11.3h11.2l-1.4-2.6V6A4.2 4.2 0 0 0 8 1.8z"/>'
+  + '<path d="M6.4 13.2a1.6 1.6 0 0 0 3.2 0" stroke-linecap="round"/></svg>';
 const ICONO_AVISO = '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">'
   + '<path d="M8 1.5 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"></path>'
   + '<path d="M8 6v3.4M8 11.6v.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path></svg>';
@@ -386,7 +390,7 @@ function htmlDetalle(p) {
       + htmlBloque("Ambos marcan", htmlAmbosMarcan(p))
       + ((p.marcadores || []).length ? htmlBloque("Marcadores más probables", htmlMarcadores(p)) : "")
     : "";
-  return '<div class="detalle">' + htmlCabeceraDetalle(p) + htmlVeredicto(p) + avisos
+  return '<div class="detalle">' + htmlCabeceraDetalle(p) + htmlVeredicto(p) + avisos + htmlInvitacionAvisos(p)
     + '<div class="det-rejilla' + (goles ? "" : " una") + '"><div class="det-col">' + resultado + '</div>'
     + (goles ? '<div class="det-col">' + goles + '</div>' : "") + '</div>'
     + htmlComoSeCalculo(p, m) + '</div>';
@@ -663,7 +667,8 @@ function bloquesDePartidos(partidos, ctx) {
     const abierto = abiertos.has(String(p.id));
     return {
       id: "p-" + p.id,
-      huella: JSON.stringify(p) + "|" + JSON.stringify(ctx) + "|" + abierto + "|" + escudosRotos.size + "|" + versionFav,
+      huella: JSON.stringify(p) + "|" + JSON.stringify(ctx) + "|" + abierto + "|" + escudosRotos.size + "|" + versionFav
+        + "|" + versionAvisos,
       clase: "partido" + (p.pendiente ? " pendiente" : ""),
       conDia: !!ctx.conDia,
       html: htmlFila(p, ctx, abierto),
@@ -915,11 +920,14 @@ function bloquesCentro(todos, ruta) {
         "Abre un partido y toca la estrella de un equipo: sus partidos saldrán aquí y los primeros de cada día."];
       return out;
     }
+    const tarjeta = bloqueAvisos();
     if (!suyos.length) {
       out.vacio = ["Tus equipos no juegan esta semana", "Sigues a " + [...favoritos].join(", ") + "."];
+      out.extra = tarjeta;
       return out;
     }
-    if (orden !== "hora") { out.bloques = bloquesDePartidos(ordenar(suyos), { conDia: true }); return out; }
+    if (tarjeta) out.bloques.push(tarjeta);
+    if (orden !== "hora") { out.bloques.push(...bloquesDePartidos(ordenar(suyos), { conDia: true })); return out; }
     porDias(suyos).forEach(d => {
       out.bloques.push(bloqueGrupo("fav-" + d.fecha, nombreDia(d), d.partidos.length, null, "dia"));
       out.bloques.push.apply(out.bloques, bloquesDePartidos(ordenar(d.partidos), { conDia: false }));
@@ -1509,7 +1517,8 @@ function render() {
   centroEl.classList.toggle("con-dia", c.bloques.some(b => b.conDia));
   limpiarHueco.innerHTML = busqueda ? '<button class="limpiar" id="limpiar">Limpiar búsqueda</button>' : "";
   if (c.vacio) {
-    vista.innerHTML = '<div class="vacio"><h2>' + esc(c.vacio[0]) + '</h2><p>' + esc(c.vacio[1]) + '</p></div>';
+    vista.innerHTML = '<div class="vacio"><h2>' + esc(c.vacio[0]) + '</h2><p>' + esc(c.vacio[1]) + '</p></div>'
+      + (c.extra ? '<div class="' + c.extra.clase + '">' + c.extra.html + '</div>' : "");
   } else {
     pintarBloques(vista, c.bloques);
   }
@@ -1694,6 +1703,8 @@ document.addEventListener("click", (e) => {
   if (comp) { compartir(comp.dataset.compartir); return; }
   const img = t.closest("[data-imagen]");
   if (img) { imagenPartido(img.dataset.imagen, img); return; }
+  const av = t.closest("[data-avisos]");
+  if (av) { accionAvisos(av.dataset.avisos); return; }
 
   const liga = t.closest("[data-liga]");
   if (liga && (liga.classList.contains("liga-fila") || liga.closest(".tira-ligas"))) {
@@ -2329,6 +2340,186 @@ dialogoCuenta.addEventListener("submit", (e) => {
 });
 
 // ==========================================
+// AVISOS
+// Los de Mis equipos (worker/avisos.js): uno 2 h antes de cada partido de los equipos
+// con estrella, con el pronóstico, y otro con el resultado, por el servicio de avisos
+// del navegador (Web Push; los enseña sw.js). Sin cuenta: la suscripción es de este
+// navegador y lleva su lista de equipos, que se vuelve a mandar cuando cambian las
+// estrellas y una vez por semana (así el servidor sabe que sigue viva). Solo en
+// Cloudflare, y donde el navegador sabe: en el iPhone, con la web instalada.
+// ==========================================
+const CLAVE_AVISOS = "pronosticos.avisos";            // { huella, cuando }: lo último mandado; sin él, apagados
+const CLAVE_NO_AVISOS = "pronosticos.avisos_no";      // dijo "Ahora no" a la invitación del detalle
+const CLAVE_VAPID = "pronosticos.avisos_clave";       // { clave, cuando }: la pública del servidor, de hoy
+const RESINCRONIZAR_MS = 7 * 86400000;
+// ? (aún no se sabe, o Render: allí no hay avisos) | pendiente | no_soportado | ios_instalar | bloqueados | apagados
+// | activos
+const avisos = { estado: "?", ocupado: false, mensaje: "" };
+let versionAvisos = 0, sincronia = null;
+
+const deB64u = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+const aB64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const soportaAvisos = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const esIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const enApp = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+
+function repintarAvisos() {
+  versionAvisos++;
+  if (datos) render();
+}
+
+// La clave pública VAPID del servidor, guardada un día en el navegador: así, al pulsar
+// "Activar avisos", ya está y el permiso se pide en el mismo clic (Safari lo exige).
+async function claveServidor() {
+  const g = leerLocal(CLAVE_VAPID, null);
+  if (g && g.clave && Date.now() - g.cuando < 86400000) return g.clave;
+  const d = await (await fetch("/api/avisos")).json();
+  if (!d.disponible || !d.clave) return null;
+  guardarLocal(CLAVE_VAPID, { clave: d.clave, cuando: Date.now() });
+  return d.clave;
+}
+
+async function suscripcionActual() {
+  const reg = await navigator.serviceWorker.getRegistration();
+  return reg ? reg.pushManager.getSubscription() : null;
+}
+
+// La suscripción de este navegador, con la clave de ahora (si el servidor la cambió, la
+// de antes ya no sirve): la que hay, o una nueva si hay permiso.
+async function suscribir(clave) {
+  // ready no termina nunca si el navegador no dejó registrar sw.js (algunas ventanas privadas)
+  const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((_, mal) =>
+    setTimeout(() => mal(new Error("este navegador no deja recibir avisos aquí.")), 10000))]);
+  let sub = await reg.pushManager.getSubscription();
+  const suya = sub && sub.options && sub.options.applicationServerKey;
+  if (sub && suya && aB64u(suya) !== clave) { await sub.unsubscribe(); sub = null; }
+  return sub || reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: deB64u(clave) });
+}
+
+// Manda la suscripción y los equipos si cambiaron (o hace una semana que no).
+async function sincronizar(sub, forzar) {
+  const j = sub.toJSON();
+  const equipos = [...favoritos].sort();
+  const huella = j.endpoint + "|" + equipos.join("|");
+  const antes = leerLocal(CLAVE_AVISOS, null);
+  if (!forzar && antes && antes.huella === huella && Date.now() - antes.cuando < RESINCRONIZAR_MS) return;
+  const r = await fetch("/api/avisos/alta", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, equipos }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "no hubo respuesta; inténtalo otra vez.");
+  guardarLocal(CLAVE_AVISOS, { huella, cuando: Date.now() });
+}
+
+// Al abrir la web en Cloudflare: en qué punto están los avisos de este navegador, y si
+// están activos, que sigan bien (suscripción viva, con la clave de ahora y los equipos
+// de ahora).
+async function prepararAvisos() {
+  if (avisos.estado !== "?") return;
+  avisos.estado = "pendiente";
+  try {
+    if (!soportaAvisos()) avisos.estado = esIOS() && !enApp() ? "ios_instalar" : "no_soportado";
+    else if (Notification.permission === "denied") avisos.estado = "bloqueados";
+    else if (leerLocal(CLAVE_AVISOS, null) && Notification.permission === "granted") {
+      await sincronizar(await suscribir(await claveServidor()), false);
+      avisos.estado = "activos";
+    } else {
+      avisos.estado = "apagados";
+      if (favoritos.size) claveServidor().catch(() => {});   // para que el clic no tenga que esperarla
+    }
+  } catch (e) {
+    // la suscripción se perdió y no se pudo rehacer: se vuelve a activar con el botón
+    try { localStorage.removeItem(CLAVE_AVISOS); } catch (err) { /* sin memoria */ }
+    avisos.estado = "apagados";
+  }
+  repintarAvisos();
+}
+
+// Cambiaron las estrellas: con los avisos activos, los equipos van al servidor (juntos,
+// si se tocan varias seguidas).
+function equiposCambiados() {
+  if (avisos.estado === "apagados" && favoritos.size) claveServidor().catch(() => {});
+  if (avisos.estado !== "activos") return;
+  clearTimeout(sincronia);
+  sincronia = setTimeout(async () => {
+    try { const sub = await suscripcionActual(); if (sub) await sincronizar(sub, false); }
+    catch (e) { /* se reintenta con la próxima estrella o al volver a abrir la web */ }
+  }, 1500);
+}
+
+async function activarAvisos() {
+  const clave = await claveServidor();
+  if (!clave) throw new Error("los avisos no están disponibles ahora mismo.");
+  const permiso = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+  if (permiso !== "granted") { avisos.estado = permiso === "denied" ? "bloqueados" : "apagados"; return; }
+  await sincronizar(await suscribir(clave), true);
+  avisos.estado = "activos";
+  avisar("Avisos activados: te avisamos antes de cada partido de tus equipos y con el resultado.");
+}
+
+async function desactivarAvisos() {
+  const sub = await suscripcionActual();
+  if (sub) {
+    const j = sub.toJSON();
+    const r = await fetch("/api/avisos/baja", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint: j.endpoint, auth: j.keys.auth }) });
+    if (!r.ok) throw new Error("no hubo respuesta; inténtalo otra vez.");
+    await sub.unsubscribe();
+  }
+  try { localStorage.removeItem(CLAVE_AVISOS); } catch (e) { /* sin memoria */ }
+  avisos.estado = "apagados";
+}
+
+async function accionAvisos(que) {
+  if (que === "no") { guardarLocal(CLAVE_NO_AVISOS, true); repintarAvisos(); return; }
+  if (avisos.ocupado) return;
+  avisos.ocupado = true;
+  avisos.mensaje = "";
+  repintarAvisos();
+  try { await (que === "activar" ? activarAvisos() : desactivarAvisos()); }
+  catch (e) { avisos.mensaje = (que === "activar" ? "No se pudieron activar: " : "No se pudieron quitar: ") + (e.message || e); }
+  finally { avisos.ocupado = false; repintarAvisos(); }
+}
+
+const botonAvisos = (que, texto, principal) => '<button class="accion' + (principal ? " principal" : "") + '" data-avisos="'
+  + que + '"' + (avisos.ocupado ? " disabled" : "") + '>' + esc(avisos.ocupado ? "Un momento…" : texto) + '</button>';
+
+// La tarjeta de los avisos, arriba de Mis equipos; null donde no hay avisos (Render).
+function bloqueAvisos() {
+  const e = avisos.estado;
+  if (e === "?" || e === "pendiente") return null;
+  const n = favoritos.size;
+  const textos = {
+    activos: ["Avisos activados en este aparato", "Te avisamos 2 h antes de cada partido de tus " + n
+      + (n === 1 ? " equipo" : " equipos") + ", con el pronóstico, y cuando termina, con el resultado. Si cae de madrugada"
+      + " (hora de Lima), el aviso llega la noche antes.", botonAvisos("desactivar", "Quitar los avisos")],
+    apagados: ["Avisos de tus equipos", "Te avisamos 2 h antes de cada partido de los equipos que sigues, con el"
+      + " pronóstico, y cuando termina, con el resultado. Solo en este aparato; sin cuenta ni correo.",
+      botonAvisos("activar", "Activar avisos", true)],
+    bloqueados: ["Los avisos están bloqueados", "Este navegador tiene bloqueados los avisos de esta web. Para recibirlos,"
+      + " permítelos en los ajustes del sitio (el icono junto a la dirección) y vuelve a esta página.", ""],
+    ios_instalar: ["Avisos en el iPhone", "En el iPhone solo llegan con la web instalada: toca Compartir, luego"
+      + " «Añadir a pantalla de inicio», y ábrela desde ese icono.", ""],
+    no_soportado: ["Avisos", "Este navegador no puede recibir avisos de webs.", ""],
+  };
+  const [titulo, texto, boton] = textos[e];
+  return {
+    id: "avisos", clase: "avisos-tarjeta", huella: e + "|" + n + "|" + avisos.ocupado + "|" + avisos.mensaje,
+    html: ICONO_CAMPANA + '<div><h2>' + esc(titulo) + '</h2><p>' + esc(texto) + '</p>'
+      + (avisos.mensaje ? '<p class="error" role="status">' + esc(avisos.mensaje) + '</p>' : "")
+      + (boton ? '<div class="botones">' + boton + '</div>' : "") + '</div>',
+  };
+}
+
+// En el detalle de un partido de un equipo que sigues, si los avisos están apagados y
+// no dijo "Ahora no".
+function htmlInvitacionAvisos(p) {
+  if (avisos.estado !== "apagados" || !esFavorito(p) || leerLocal(CLAVE_NO_AVISOS, false)) return "";
+  return '<div class="det-avisos">' + ICONO_CAMPANA + '<p>¿Te avisamos 2 h antes de los partidos de tus equipos, y'
+    + ' con el resultado?</p>' + (avisos.mensaje ? '<p class="error" role="status">' + esc(avisos.mensaje) + '</p>' : "")
+    + botonAvisos("activar", "Activar avisos", true) + (avisos.ocupado ? "" : botonAvisos("no", "Ahora no")) + '</div>';
+}
+
+// ==========================================
 // SONDEO
 // Con la pestaña oculta no se pregunta: una pestaña olvidada costaba hasta 2.880
 // peticiones al día, y el plan gratis de Cloudflare da 100.000 para todos.
@@ -2350,7 +2541,7 @@ async function refrescar() {
     if (!r.ok) throw new Error("HTTP " + r.status);   // un 500 no pisa los datos que ya hay
     etagEstado = r.headers.get("ETag");
     datos = await r.json();
-    if (datos.plataforma === "cloudflare") botonCuenta.hidden = false;   // las cuentas solo existen allí
+    if (datos.plataforma === "cloudflare") { botonCuenta.hidden = false; prepararAvisos(); }   // solo existen allí
     periodo = (datos.estado === "actualizando") ? 15000 : 60000;
     // las medias de liga y el registro en vivo solo cambian cuando termina una pasada
     if (estadoPrevio === "actualizando" && datos.estado !== "actualizando") { cargarLigas(); cargarRegistro(); }
