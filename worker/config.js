@@ -31,6 +31,19 @@ export const DIAS_VALIDEZ_LIGA_EQUIPO = 30;
 
 export const HORAS_VALIDEZ_LIGA = 12;
 export const HORAS_VALIDEZ_PREDICCION = 24;
+// La tabla de cada liga (pequeña) se baja cada 12 h y lo que falta de su
+// temporada (una respuesta grande) cada 24 h: ver tablas.js.
+export const HORAS_VALIDEZ_TABLA = 12;
+export const HORAS_VALIDEZ_RESTANTES = 24;
+// Las zonas de la tabla que proyecta la web: [nombre, desde, hasta], con los
+// puestos de abajo en negativo (-3 es el antepenúltimo). Descenso directo: el
+// puesto de promoción (el 16 en las ligas de 18) no cuenta. Reglas de 2025/26.
+const ZONAS_COMUNES = (bajan) => [["Campeón", 1, 1], ["Top 4", 1, 4], ["Descenso", -bajan, -1]];
+export const ZONAS = {
+  PD: ZONAS_COMUNES(3), PL: ZONAS_COMUNES(3), SA: ZONAS_COMUNES(3), BL1: ZONAS_COMUNES(2),
+  FL1: ZONAS_COMUNES(2), DED: ZONAS_COMUNES(2), PPL: ZONAS_COMUNES(2), BSA: ZONAS_COMUNES(4),
+  ELC: [["Campeón", 1, 1], ["Ascenso directo", 1, 2], ["Descenso", -3, -1]],
+};
 export const FACTOR_DIARIO = 0.998;
 export const PSEUDO_GOLES_ATAQUE = 6;
 export const PSEUDO_GOLES_DEFENSA = 8;

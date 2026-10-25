@@ -5,6 +5,7 @@
 //   /api/ligas        qué ancla y qué media usa cada liga
 //   /api/validacion   el resultado del backtest
 //   /api/registro     el registro en vivo: lo publicado contra lo que pasó
+//   /api/tabla/PD     la tabla de una liga y lo que le falta, para la proyección (tablas.js)
 //   /salud            estado de un vistazo
 //   /actualizar?token=...&forzar=1   rehacer la pasada sin esperar
 //   /validar?token=...[&temporada=N] lanzar el backtest
@@ -28,6 +29,7 @@ import { contar, resumenVisitas, htmlVisitas } from "./visitas.js";
 import { paginaPartido } from "./compartir.js";
 import { robots, sitemap } from "./buscadores.js";
 import { Cuentas, RUTAS_CUENTA } from "./cuentas.js";
+import { CODIGOS_TABLA } from "./tablas.js";
 
 // Las mismas cabeceras que pone app.py a sus respuestas JSON (la web y app.js
 // llevan las suyas en public/_headers). no-store: el JSON cambia cada pocos
@@ -60,6 +62,7 @@ async function condicional(request, texto) {
 }
 const texto = (cuerpo, tipo) => new Response(cuerpo, { headers: { ...CABECERAS, "Content-Type": tipo } });
 
+const TABLA_PENDIENTE = { estado: "sin_datos", nota: "La tabla de esta liga se baja en los minutos libres del cron: vuelve en un rato." };
 const ESTADO_VACIO = { estado: "sin_datos", dias: [], total: 0, pendientes: 0, ultima_actualizacion: null,
   plataforma: "cloudflare" };
 
@@ -189,8 +192,12 @@ export default {
     };
     for (const r of Object.keys(RUTAS_CUENTA)) rutas[r] = (almacen) => new Cuentas(request, env, almacen, CABECERAS).atender();
     const enlace = url.pathname.match(/^\/partido\/(\d{1,12})\/?$/);
+    const tabla = url.pathname.match(/^\/api\/tabla\/([A-Z0-9]{2,4})$/);
     const ruta = rutas[url.pathname]
-      || (enlace && ((almacen) => paginaPartido(request, env, almacen, Number(enlace[1]))));
+      || (enlace && ((almacen) => paginaPartido(request, env, almacen, Number(enlace[1]))))
+      || (tabla && (async (almacen) => (CODIGOS_TABLA.includes(tabla[1])
+        ? condicional(request, (await almacen.leerDocTexto("tabla:" + tabla[1])) ?? JSON.stringify(TABLA_PENDIENTE))
+        : json({ error: "no hay tabla de esa liga" }, 404))));
     if (!ruta) return env.ASSETS.fetch(request);   // lo demás: los archivos de public/
     const metodos = url.pathname === "/api/contar" ? ["POST"] : RUTAS_CUENTA[url.pathname] || ["GET", "HEAD"];
     if (!metodos.includes(request.method)) {

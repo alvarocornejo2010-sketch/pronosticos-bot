@@ -689,6 +689,7 @@ function bloqueGrupo(clave, texto, cuenta, codLiga, clase) {
 function decodificar(s) { try { return decodeURIComponent(s); } catch (e) { return s; } }
 function leerRuta() {
   const t = (location.hash || "#/").replace(/^#\/?/, "").split("/").filter(Boolean);
+  if (t[0] === "liga" && t[1] && t[2] === "tabla") return { vista: "liga", liga: decodificar(t[1]), fecha: null, tabla: true };
   if (t[0] === "liga" && t[1]) return { vista: "liga", liga: decodificar(t[1]), fecha: t[2] || null };
   if (t[0] === "dia" && t[1]) return { vista: "dia", fecha: t[1] };
   if (t[0] === "semana") return { vista: "semana" };
@@ -703,6 +704,177 @@ function irA(hash) {
 }
 
 function primerDia(todos) { const d = porDias(todos); return d.length ? d[0].fecha : ""; }
+
+// ==========================================
+// TABLA Y PROYECCIÓN (#/liga/PD/tabla)
+// La clasificación de la liga (football-data) y lo que le falta de temporada, con
+// los goles esperados de cada partido según el modelo (/api/tabla/PD, que monta
+// worker/tablas.js en los minutos libres del cron; solo en Cloudflare). La
+// temporada se simula aquí, en el navegador: SIMULACIONES veces, cada partido con
+// dos Poisson de sus goles esperados. De ahí, cuántas veces acaba cada equipo
+// campeón, en la zona de arriba o en el descenso, y sus puntos medios. Semilla fija:
+// los mismos datos dan los mismos números en cada visita.
+// ==========================================
+const SIMULACIONES = 4000;
+const POR_TANDA = 500;   // simulaciones por tanda: entre tanda y tanda, la página responde
+const tablas = new Map();   // código → { doc, etag, pedida, cargando, error, sim, hechas }
+const ZONA_CORTA = { "Campeón": "Camp.", "Descenso": "Desc.", "Ascenso directo": "Asc." };
+const ICONO_TABLA = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor"'
+  + ' stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16M9 4v16"/></svg>';
+
+async function cargarTabla(cod) {
+  const t = tablas.get(cod) || {};
+  tablas.set(cod, t);
+  t.cargando = true;
+  t.pedida = Date.now();
+  try {
+    const r = await pedirSiCambio("/api/tabla/" + encodeURIComponent(cod), t.etag);
+    if (r.status !== 304) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      t.etag = r.headers.get("ETag");
+      t.doc = await r.json();
+      t.sim = null;
+      t.error = null;
+      if (t.doc.estado === "listo") simularPorTandas(cod, t);
+    }
+  } catch (e) {
+    t.error = "No se pudo cargar la tabla. Se reintenta en un rato.";
+  }
+  t.cargando = false;
+  render();
+}
+
+// Generador con semilla (mulberry32): rápido y reproducible.
+function azar(semilla) {
+  let a = semilla >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let x = Math.imul(a ^ (a >>> 15), 1 | a);
+    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function semillaDe(texto) {
+  let h = 2166136261;
+  for (let i = 0; i < texto.length; i++) h = Math.imul(h ^ texto.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+// Las acumuladas de Poisson hasta 10 goles: un sorteo es buscar dónde cae u.
+function acumuladaPoisson(lambda) {
+  const a = new Float64Array(11);
+  let p = Math.exp(-lambda), s = p;
+  a[0] = s;
+  for (let k = 1; k <= 10; k++) { p *= lambda / k; s += p; a[k] = s; }
+  a[10] = 1;
+  return a;
+}
+function sortear(acum, u) { let k = 0; while (u > acum[k]) k++; return k; }
+
+function simularPorTandas(cod, t) {
+  const doc = t.doc, eq = doc.equipos, n = eq.length;
+  const partidos = doc.restantes.map(([i, j, xl, xv]) => [i, j, acumuladaPoisson(xl), acumuladaPoisson(xv)]);
+  const sim = { puestos: eq.map(() => new Float64Array(n)), puntos: new Float64Array(n), hechas: 0,
+    rnd: azar(semillaDe(cod + "|" + doc.tabla_actualizada + "|" + doc.restantes_actualizados)) };
+  t.sim = sim;
+  const pts = new Float64Array(n), dg = new Float64Array(n), gf = new Float64Array(n);
+  const orden = eq.map((_, i) => i);
+  const tanda = () => {
+    if (t.sim !== sim) return;   // llegó una tabla nueva: esta simulación ya no vale
+    for (let s = 0; s < POR_TANDA && sim.hechas < SIMULACIONES; s++, sim.hechas++) {
+      for (let i = 0; i < n; i++) { pts[i] = eq[i].pts; dg[i] = eq[i].gf - eq[i].gc; gf[i] = eq[i].gf; }
+      for (const [i, j, al, av] of partidos) {
+        const gl = sortear(al, sim.rnd()), gv = sortear(av, sim.rnd());
+        dg[i] += gl - gv; dg[j] += gv - gl; gf[i] += gl; gf[j] += gv;
+        if (gl > gv) pts[i] += 3; else if (gl < gv) pts[j] += 3; else { pts[i] += 1; pts[j] += 1; }
+      }
+      // en empate a puntos, la diferencia de goles y luego los goles a favor
+      orden.sort((a, b) => pts[b] - pts[a] || dg[b] - dg[a] || gf[b] - gf[a] || eq[a].pos - eq[b].pos);
+      for (let k = 0; k < n; k++) sim.puestos[orden[k]][k] += 1;
+      for (let i = 0; i < n; i++) sim.puntos[i] += pts[i];
+    }
+    if (sim.hechas >= SIMULACIONES && leerRuta().tabla) contar({ t: "tabla", c: cod });
+    render();
+    if (sim.hechas < SIMULACIONES) setTimeout(tanda, 0);
+  };
+  setTimeout(tanda, 0);
+}
+
+// Una zona ([nombre, desde, hasta], los de abajo en negativo) en puestos 1..n.
+function puestosDe(z, n) {
+  const p = (v) => (v < 0 ? n + v + 1 : v);
+  return [p(z[1]), p(z[2])];
+}
+function pctZona(sim, i, z, n) {
+  const [a, b] = puestosDe(z, n);
+  let s = 0;
+  for (let k = a - 1; k <= b - 1; k++) s += sim.puestos[i][k];
+  return (100 * s) / sim.hechas;
+}
+function textoPct(v) {
+  if (v === 0) return "—";
+  if (v < 1) return "<1";
+  if (v > 99 && v < 100) return ">99";
+  return String(Math.round(v));
+}
+function celdaPct(v) {
+  const txt = textoPct(v);
+  return '<td class="tz">' + (txt === "—" ? '<span class="nada">—</span>'
+    : '<span class="v" style="' + estiloTramo(Math.round(v)) + '">' + txt + '</span>') + '</td>';
+}
+
+function pintarTabla(cod) {
+  const t = tablas.get(cod);
+  if (!t || (!t.cargando && Date.now() - t.pedida > 10 * 60000)) cargarTabla(cod);
+  const html = htmlTabla(cod, t);
+  if (vista.dataset.huella === html) return;
+  vista.dataset.huella = html;
+  vista.innerHTML = html;
+}
+
+function htmlTabla(cod, t) {
+  const caja = (titulo, texto) => '<div class="vacio"><h2>' + esc(titulo) + '</h2><p>' + esc(texto) + '</p></div>';
+  if (!t || (!t.doc && !t.error)) return caja("Cargando la tabla…", "Un momento.");
+  if (!t.doc) return caja("Sin tabla por ahora", t.error);
+  const doc = t.doc;
+  if (doc.estado === "no_disponible") return caja("Sin tabla aquí", "La tabla y la proyección funcionan en la versión de Cloudflare.");
+  if (doc.estado !== "listo") return caja("La tabla aún no está", doc.nota || "Vuelve en un rato.");
+  const eq = doc.equipos, n = eq.length, sim = t.sim, listo = sim && sim.hechas >= SIMULACIONES;
+  const zonas = doc.zonas || [];
+  const cab = '<thead><tr><th scope="col" class="pos"><abbr title="Puesto">#</abbr></th><th scope="col" class="eq">Equipo</th>'
+    + '<th scope="col" class="n c-pj"><abbr title="Partidos jugados">PJ</abbr></th>'
+    + '<th scope="col" class="n c-dg"><abbr title="Diferencia de goles">DG</abbr></th>'
+    + '<th scope="col" class="n"><abbr title="Puntos">Pts</abbr></th>'
+    + '<th scope="col" class="n proy"><abbr title="Puntos al final de la temporada, de media en las simulaciones">Proy.</abbr></th>'
+    + zonas.map(z => '<th scope="col" class="n tz"><abbr title="' + esc("% de las temporadas simuladas en que acaba en " + z[0].toLowerCase()
+      + " (puestos " + puestosDe(z, n).join(" a ") + ")") + '"><span class="largo">' + esc(z[0]) + '</span><span class="corto">'
+      + esc(ZONA_CORTA[z[0]] || z[0]) + '</span></abbr></th>').join("")
+    + '</tr></thead>';
+  // una raya bajo el último puesto de cada zona de arriba y sobre el primero de las de abajo
+  const rayas = new Set();
+  for (const z of zonas.slice(1)) { const [a, b] = puestosDe(z, n); if (a === 1) rayas.add(b); else rayas.add(a - 1); }
+  const filas = eq.map((e, i) => {
+    const nombre = e.corto || e.nombre;
+    return '<tr' + (rayas.has(e.pos) ? ' class="raya"' : "") + '><td class="pos num">' + e.pos + '</td>'
+      + '<th scope="row" class="eq"><span class="eq-in">' + htmlEscudo(e.escudo, nombre) + '<span class="nom">' + esc(nombre) + '</span>'
+      + (favoritos.has(e.nombre) ? '<span class="sigo" role="img" aria-label="Lo sigues">' + ICONO_ESTRELLA_LLENA + '</span>' : "") + '</span></th>'
+      + '<td class="n c-pj num">' + e.pj + '</td><td class="n c-dg num">' + (e.gf - e.gc > 0 ? "+" : "") + (e.gf - e.gc) + '</td>'
+      + '<td class="n num"><b>' + e.pts + '</b></td>'
+      + (listo ? '<td class="n proy num">' + Math.round(sim.puntos[i] / sim.hechas) + '</td>' + zonas.map(z => celdaPct(pctZona(sim, i, z, n))).join("")
+        : '<td class="n proy">…</td>' + zonas.map(() => '<td class="tz"><span class="nada">…</span></td>').join(""))
+      + '</tr>';
+  }).join("");
+  const cuando = doc.tabla_actualizada ? "Clasificación de football-data, " + haceCuanto(doc.tabla_actualizada) + "." : "";
+  const estado = listo ? "" : '<p class="tabla-sim" role="status">Simulando la temporada… ' + Math.round(100 * (sim ? sim.hechas : 0) / SIMULACIONES) + ' %</p>';
+  return '<div class="tabla-vista">' + estado
+    + '<div class="tabla-desliza"><table class="tabla-liga"><caption class="oculto">Tabla de ' + esc(doc.nombre || cod)
+    + ' con la proyección de la temporada</caption>' + cab + '<tbody>' + filas + '</tbody></table></div>'
+    + '<p class="tabla-nota">' + esc(cuando) + ' Proyección: la temporada que falta (' + doc.restantes.length
+    + ' partidos) jugada ' + String(SIMULACIONES).replace(/\B(?=(\d{3})+$)/g, ".") + ' veces, cada partido con los goles esperados del modelo, como los de la semana.'
+    + ' En empate a puntos, cuenta la diferencia de goles y después los goles a favor (algunas ligas desempatan antes por los enfrentamientos directos).'
+    + ' Cada equipo juega como dicen sus fuerzas de hoy: fichajes, lesiones o un cambio de entrenador tardan en notarse.'
+    + (zonas.some(z => z[0] === "Descenso") ? ' Descenso es el directo: el puesto de promoción, donde lo hay, no cuenta.' : "")
+    + (POCO_FIABLES[cod] ? " " + esc(textoPocoFiable(cod, doc.nombre)) : "") + '</p></div>';
+}
 
 // ==========================================
 // CONTENIDO DEL CENTRO
@@ -821,7 +993,7 @@ function pintarFechas(todos, ruta) {
     base = "#/liga/" + encodeURIComponent(ruta.liga) + "/";
     todoHash = "#/liga/" + encodeURIComponent(ruta.liga);
     todoTexto = "Todas";
-    sel = ruta.fecha || "";
+    sel = ruta.tabla ? "tabla" : ruta.fecha || "";
   } else if (ruta.vista === "semana") sel = "";
   else if (ruta.vista === "dia") sel = ruta.fecha;
   else if (ruta.vista === "inicio") sel = mqEscritorio.matches ? "" : primerDia(todos);
@@ -834,6 +1006,12 @@ function pintarFechas(todos, ruta) {
     + '<span class="cuantos num">' + conjunto.length + '</span>'
     + '<span class="fecha num">' + dias.length + '<small>' + (dias.length === 1 ? "día" : "días") + '</small></span>'
     + htmlForma(conjunto) + '</button>'
+    + (ruta.vista === "liga" && LIGAS[ruta.liga] && !LIGAS[ruta.liga].copa
+      ? '<button class="dia-celda tabla-celda" data-hash="#/liga/' + esc(encodeURIComponent(ruta.liga)) + '/tabla"'
+        + ' aria-current="' + (sel === "tabla") + '" aria-label="Tabla y proyección de la temporada">'
+        + '<span class="dow">Tabla</span><span class="fecha">' + ICONO_TABLA + '</span>'
+        + '<span class="que">y proyección</span></button>'
+      : "")
     + dias.map(d => {
       const p = partes(d.fecha);
       return '<button class="dia-celda" data-hash="' + esc(base + d.fecha) + '" aria-current="' + (sel === d.fecha) + '"'
@@ -1294,12 +1472,27 @@ function render() {
   const clave = JSON.stringify(ruta) + "|" + orden + "|" + (busqueda ? "b" : "") + "|" + mqEscritorio.matches;
   const reconstruir = clave !== rutaPintada;
   rutaPintada = clave;
-  if (reconstruir) { vista.innerHTML = ""; vista.scrollTop = 0; }
+  if (reconstruir) { vista.innerHTML = ""; vista.dataset.huella = ""; vista.scrollTop = 0; }
 
   pintarFechas(todos, ruta);
   pintarTiraLigas(todos, ruta);
   pintarOrden();
 
+  const enTabla = ruta.vista === "liga" && ruta.tabla && !busqueda;
+  centroEl.classList.toggle("en-tabla", enTabla);
+  if (enTabla) {
+    const suya = todos.find(p => (p.liga_codigo || p.liga) === ruta.liga);
+    const t = tablas.get(ruta.liga);
+    const nombre = (t && t.doc && t.doc.nombre) || (suya ? suya.liga : ruta.liga);
+    tituloEl.innerHTML = esc(nombre) + '<small>Tabla y proyección</small>';
+    centroEl.classList.remove("mezcla", "con-dia");
+    limpiarHueco.innerHTML = "";
+    pintarTabla(ruta.liga);
+    pintarLigasPane(todos, ruta);
+    pintarPanorama(todos, ruta);
+    pintarProximos(todos);
+    return;
+  }
   const c = bloquesCentro(todos, ruta);
   tituloEl.innerHTML = esc(c.titulo) + (c.sub ? '<small>' + esc(c.sub) + '</small>' : "");
   centroEl.classList.toggle("mezcla", !!c.mezcla);

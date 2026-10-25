@@ -1354,6 +1354,14 @@ def api_validacion():
     return _condicional(jsonify(validacion.leer_resultado()))
 
 
+@app.route("/api/tabla/<codigo>")
+def api_tabla(codigo):
+    """La tabla y la proyección de la temporada solo existen en Cloudflare
+    (worker/tablas.js): el cron las baja en sus minutos libres y las guarda en D1."""
+    return jsonify({"estado": "no_disponible", "liga": codigo,
+                    "nota": "La tabla y la proyección funcionan en la versión de Cloudflare."})
+
+
 @app.route("/api/registro")
 def api_registro():
     """El registro en vivo (lo publicado contra lo que pasó) solo existe en

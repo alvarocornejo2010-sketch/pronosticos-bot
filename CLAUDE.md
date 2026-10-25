@@ -181,7 +181,7 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
   redondeado. La casilla de los próximos y la de los más claros usan el mismo
   entero que la tabla (`pctFavorito`).
 - Rutas por hash: `#/`, `#/semana`, `#/dia/2026-10-10`, `#/liga/PD`,
-  `#/liga/PD/2026-10-10`, `#/favoritos`. `#/` es toda la semana en escritorio y
+  `#/liga/PD/2026-10-10`, `#/liga/PD/tabla` (ver "Tabla y proyección"), `#/favoritos`. `#/` es toda la semana en escritorio y
   el primer día en móvil. Y una sin hash, `/partido/123`, para compartir (ver
   "Compartir y favoritos").
 - Tipografía: Saira (marca, títulos y todos los números) y Figtree (nombres y
@@ -230,7 +230,8 @@ ver "Compartir y favoritos"), y `/robots.txt` y `/sitemap.xml` para los buscador
 (ver "Instalable y buscadores"). Y las cuentas: `/api/cuenta` (la de la sesión;
 en Render, `disponible: false`) y, solo en Cloudflare, `/api/cuenta/crear`,
 `/entrar`, `/equipo`, `/contrasena`, `/correo`, `/usuario`, `/salir`, `/borrar` (POST) y
-`/datos` (ver "Cuentas").
+`/datos` (ver "Cuentas"). Y `/api/tabla/PD`, la tabla de una liga y lo que le falta
+de temporada (en Render, `no_disponible`; ver "Tabla y proyección").
 
 **Efecto secundario de cada deploy:** el disco de Render free es efímero, cada
 deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
@@ -269,8 +270,8 @@ incluidos), `actualizacion.js` (la pasada), `validacion.js`, `metricas.js`
 (el registro en vivo), `planificador.js` (el cron), `almacen.js` (D1), `api.js`
 (football-data con su presupuesto), `tiempo.js` (hora de Lima), `visitas.js`
 (el contador de visitas), `compartir.js` (la tarjeta de `/partido/123`),
-`buscadores.js` (`robots.txt` y `sitemap.xml`), `cuentas.js` (las cuentas) e
-`index.js` (rutas).
+`buscadores.js` (`robots.txt` y `sitemap.xml`), `cuentas.js` (las cuentas),
+`tablas.js` (la tabla de cada liga y lo que le falta) e `index.js` (rutas).
 
 **El ritmo lo marca la CPU.** El plan gratis da 10 ms por ejecución y leer el
 JSON de la API cuesta ~7 ms por MB, así que en vez de una pasada de 40
@@ -298,13 +299,14 @@ secciones como `cache.json`) se lee fila a fila solo cuando se usa.
 
 **Tablas de D1** (se crean solas si faltan, `ESQUEMA` en `almacen.js`):
 `cache` (secciones `ligas`, `priors`, `partidos_liga` con los partidos de cada
-liga de las dos temporadas, compactos, `fuerzas`, `calendario` y
-`liga_equipo`), `partidos`, `predicciones` (la última publicada de cada partido; no se
+liga de las dos temporadas, compactos, `fuerzas`, `calendario`,
+`liga_equipo` y `tablas`, la clasificación y lo que falta de cada liga), `partidos`, `predicciones` (la última publicada de cada partido; no se
 borra al empezar el partido: es lo que dijo la web), `resultados` (el marcador
 a los 90 minutos de cada partido con predicción, ya sumado al registro en
 vivo), `documentos` (`estado` que sirve `/api/estado`, `resumen`, `validacion`,
 `registro` y `registro_publico`, pedidos, temporadas terminadas compactas,
-`temporada:liga:{código}:{año}`) y
+`temporada:liga:{código}:{año}`, `tabla:{código}` que sirve `/api/tabla/...` y
+`tablas_resumen`, cuándo se bajó cada cosa) y
 `candado` (que dos pasadas no se pisen, hora de la última petición, pasadas
 muertas), `visitas` (los contadores de visitas por día, ver "Visitas") y las de
 las cuentas: `cuentas`, `usuarios`, `correos`, `accesos`, `sesiones` y `favoritos` (ver
@@ -381,8 +383,8 @@ para no leer las fichas enteras). Lo prueba `pruebas/semana.mjs`.
   el tope de 3 no frenaba nada);
 - `/actualizar?forzar=1` y `/validar` dejan un pedido en D1 que el cron recoge
   en menos de un minuto: una petición web no puede durar lo que una pasada;
-- el registro en vivo (`/api/registro`) y las visitas (`/visitas`) solo existen
-  aquí.
+- el registro en vivo (`/api/registro`), las visitas (`/visitas`) y la tabla con
+  su proyección (`/api/tabla/PD`) solo existen aquí.
 
 **En local:** `npm install`, copiar `.dev.vars.example` a `.dev.vars`, `npm run
 dev` y lanzar el cron a mano con
@@ -437,6 +439,50 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
   equipo (`con_favoritos`). Y la app: instalaciones (`instalada`) y visitantes
   que entraron desde la app instalada (`en_app`, `display-mode: standalone`). En
   el panel, el tablero "Compartir, favoritos y app".
+
+## Tabla y proyección (oct 2026)
+
+En cada liga, una tarjeta "Tabla" en la tira de días (justo después de "Todas")
+lleva a `#/liga/PD/tabla`: la clasificación de football-data y, por equipo, sus
+puntos al final de la temporada (de media) y en cuántas de las temporadas
+simuladas acaba campeón, entre los cuatro primeros (en la Championship, en el
+ascenso directo, los dos primeros) y en el descenso directo. Para la Champions no
+hay (es un torneo).
+
+- **El servidor** (`worker/tablas.js`) baja, por liga, la tabla
+  (`/competitions/PD/standings`, unos KB) cada 12 h y lo que falta de la temporada
+  (`/matches?status=SCHEDULED,TIMED,POSTPONED`, una respuesta grande) cada 24 h,
+  y monta el documento `tabla:PD`: la tabla y cada partido que falta con sus goles
+  esperados, de `calcularXgPartido` con las mismas fuerzas y la misma media de liga
+  que los partidos de la semana (`tablas.py` comprueba que coinciden). Entra lo que
+  falta y no había empezado 2 h 30 antes de bajar la tabla (lo que estaba en juego
+  no está en ella), y los aplazados; los playoffs no (`soloLiga`). Es lo menos
+  urgente: va en un paso propio del cron, `tablas`, solo en los minutos en que no
+  toca ni actualizar ni validar y con la web al día, una liga y una petición por
+  minuto (`tocaTablas`, `pasoTablas`; lo lee del documento `tablas_resumen`, uno
+  más en los que el planificador lee cada minuto). Una tabla que falla no se vuelve
+  a pedir hasta pasada una hora. Unas 27 peticiones al día. Desde cero, unos 18
+  minutos libres para las 9 ligas.
+- **La web** la simula (`simularPorTandas`, sección TABLA de `app.js`): 4.000
+  temporadas, cada partido con dos Poisson de sus goles esperados, de 500 en 500
+  para que la página responda (en un móvil, menos de medio segundo con 300
+  partidos). Semilla fija (mulberry32 con la liga y las fechas de la tabla): los
+  mismos datos dan los mismos números en cada visita. En empate a puntos cuenta la
+  diferencia de goles y luego los goles a favor; algunas ligas desempatan antes por
+  los enfrentamientos directos (lo dice la nota). Las zonas, en `ZONAS`
+  (`worker/config.js`, reglas de 2025/26): bajan 3 en LaLiga, la Premier, la Serie A
+  y la Championship, 2 directos en la Bundesliga, la Ligue 1, la Eredivisie y la
+  Primeira (el 16 juega la promoción, no cuenta) y 4 en el Brasileirão. **Si cambia
+  el reglamento de una liga, cambiarlas ahí.**
+- Los % van en la escala de probabilidad de la web (oro), "<1" por debajo de 1 y
+  "—" si no pasa nunca. Con el panel central estrecho, sin PJ ni DG y con las
+  cabeceras abreviadas. Es una `<table>` de verdad, con `caption` y títulos de
+  columna con su explicación (`abbr`).
+- **Lo que no sabe:** cada equipo juega lo que le queda como dicen sus fuerzas de
+  hoy, sin que cambien por el camino; las simulaciones no varían la fuerza de un
+  equipo, así que la proyección es algo más segura de sí misma de lo que debería.
+  No se ha medido contra temporadas pasadas (`afinar_liga.py` tendría con qué).
+- Se cuenta en las visitas (`tabla`, por liga): "Tablas que más se abren".
 
 ## Compartir y favoritos (oct 2026)
 
@@ -1211,7 +1257,12 @@ Environment).
     (`compartir.py`). Que la web es instalable (manifiesto, iconos, service worker,
     CSP) y que `robots.txt` y `sitemap.xml` traen lo que deben (`descubrir.py`). Y
     que las visitas se cuentan bien, que lo inventado no entra y que el tope corta
-    (`visitas.py`, con `MAX_VISITAS_DIA=60`). Que `/api/estado`, `/api/registro` y
+    (`visitas.py`, con `MAX_VISITAS_DIA=60`). Que el cron baja en sus minutos libres
+    la tabla de cada liga y lo que le falta, sin pasarse de CPU, que los goles
+    esperados de lo que falta son los de los partidos de la semana entre esos
+    equipos, que una tabla que falla no se pide cada minuto y que Flask responde
+    `no_disponible` (`tablas.py`, con `/standings` y lo que falta en la API falsa;
+    la primera tabla del Brasileirão da 500). Que `/api/estado`, `/api/registro` y
     `/api/validacion` dan 304 sin cuerpo con su ETag, también con el `W/` que pone
     Cloudflare al comprimir, en el Worker y en Flask (`sondeo.py`). Y las cuentas, de crear a borrar,
     con el bloqueo por intentos (también 30 a la vez), la cuenta de la primera
@@ -1219,11 +1270,12 @@ Environment).
     Turnstile y los tres topes (`cuentas.py`, con `MAX_CUENTAS_DIA=4`,
     `MAX_INTENTOS_DIA=120`, `MAX_ESCRITURAS_CUENTAS_DIA=600` y el Turnstile de mentira
     de `api_falsa.py`, `/turnstile/v0/siteverify`, por `TURNSTILE_VERIFICAR`). Y al
-    final, la interfaz en un navegador de verdad (`interfaz.mjs`, Playwright): 10
-    vistas (semana, día, liga, por claros y por reñidos, búsqueda, Mis equipos y el
-    detalle abierto) en 7 anchos de 360 a 1920 px, sin texto que se salga de su caja,
-    sin piezas de una fila que se pisen, sin errores de JavaScript, y axe-core sin
-    nada en la semana y el detalle, en el móvil y en escritorio. Es lo que en oct
+    final, la interfaz en un navegador de verdad (`interfaz.mjs`, Playwright): 11
+    vistas (semana, día, liga, por claros y por reñidos, búsqueda, Mis equipos, el
+    detalle abierto y la tabla con su proyección) en 7 anchos de 360 a 1920 px, sin
+    texto que se salga de su caja, sin piezas de una fila que se pisen, sin errores
+    de JavaScript, y axe-core sin nada en la semana, el detalle y la tabla, en el
+    móvil y en escritorio. Es lo que en oct
     2026 encontró la fecha bajo el escudo y "Seguir" cortado en el móvil. El job
     instala Chromium (`npx playwright install --with-deps chromium`); sin red para
     las fuentes de Google, `FUENTES=carpeta` (con `fuentes.css`, `mapa.txt` y los

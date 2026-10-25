@@ -9,8 +9,9 @@ import { ClienteAPI, SinPresupuesto } from "./api.js";
 import { Reloj } from "./tiempo.js";
 import { Contexto, pasada, temporadaActual } from "./actualizacion.js";
 import { pasoValidacion, sentenciasError, sentenciasInicio } from "./validacion.js";
+import { pasoTablas, tocaTablas } from "./tablas.js";
 
-const DOCS_CONTROL = ["resumen", "validacion_resumen", "pedido_forzar", "pedido_validar"];
+const DOCS_CONTROL = ["resumen", "validacion_resumen", "pedido_forzar", "pedido_validar", "tablas_resumen"];
 // Un error se reintenta a los 5 minutos, como el tick de app.py, no a cada minuto.
 const MINUTOS_REINTENTO_ERROR = 5;
 // Si una ejecución muere a medias (CPU, despliegue), el candado caduca solo.
@@ -112,6 +113,10 @@ export async function tick(env, { fetchFn = null } = {}) {
     : yaHayToken ? "ya está el token" : tocaActualizar(resumen, aj, ahora);
   if (motivo) tarea = "actualizar";
   else if ((motivo = tocaValidar(resumen, valResumen, pedidoValidar, aj, temporadaActual(reloj) - 1))) tarea = "validar";
+  // lo menos urgente, en los minutos libres: la tabla de una liga (tablas.js)
+  const resumenTablas = leer(docs.tablas_resumen);
+  const ligaTabla = tarea ? null : tocaTablas(resumen, resumenTablas, ahora);
+  if (ligaTabla) { tarea = "tablas"; motivo = "la tabla de " + ligaTabla; }
   if (!tarea) return { tarea: null };
 
   if (!env.FOOTBALL_DATA_TOKEN) {
@@ -146,6 +151,12 @@ export async function tick(env, { fetchFn = null } = {}) {
       const final = await pasada(ctx, almacen, Boolean(pedidoForzar));
       terminoBien = true;
       return { tarea, motivo, estado: final, peticiones: api.gastadas, kb: Math.round(api.bytes / 1024), muertes };
+    }
+
+    if (tarea === "tablas") {
+      const hecho = await pasoTablas(ctx, almacen, ligaTabla, resumenTablas);
+      terminoBien = true;
+      return { tarea, motivo, hecho, peticiones: api.gastadas, kb: Math.round(api.bytes / 1024), muertes };
     }
 
     if (!val || val.estado !== "calculando" || deOtroModelo(val)) {

@@ -233,7 +233,7 @@ const porFecha = (a, b) => {
 // mitad de la CPU): lo que no cabe espera al minuto siguiente. En frío, recién
 // creado el isolate, un ajuste de la Championship cuesta unos 4 ms; ya
 // compilado, unos 0.2.
-async function obtenerFuerzasLiga(ctx, codigo) {
+export async function obtenerFuerzasLiga(ctx, codigo) {
   const promedio = await obtenerPromedioLiga(ctx, codigo);
   const season = temporadaActual(ctx.reloj, codigo);
   const previa = listaVigente(ctx, codigo + ":previa", season - 1) || {};
@@ -330,7 +330,7 @@ export function etiquetaDeDia(fecha, hoy) {
 }
 
 // URL del escudo solo si es https: va a un <img src> en la web.
-const escudo = (equipo) => {
+export const escudo = (equipo) => {
   const url = (equipo && equipo.crest) || "";
   return url.startsWith("https://") ? url : null;
 };
