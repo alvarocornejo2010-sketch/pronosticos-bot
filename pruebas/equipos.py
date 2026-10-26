@@ -30,22 +30,26 @@ partidos = [{**p, "fecha": d["fecha"]} for d in estado["dias"] for p in d["parti
 assert all(isinstance(p["local_id"], int) and isinstance(p["visita_id"], int) for p in partidos), "fichas sin el id de sus equipos"
 tabla = json.loads(pedir("/api/tabla/PD")[2])
 ids = {e["id"] for e in tabla["equipos"]}
-# un equipo de LaLiga que juega esta semana con pronóstico, y uno de sus partidos de visita
-p = next(p for p in partidos if p["liga_codigo"] == "PD" and not p.get("pendiente") and p["visita_id"] in ids)
-eid, nombre = p["visita_id"], p["visita"]
-print(f"fichas: los {len(partidos)} partidos llevan el id de sus equipos")
-
-# su partido "terminó" 2-1 y la web lo había publicado antes: lo que dijo, contra lo que pasó
 base = [f for f in glob.glob(D1 + "/**/*.sqlite", recursive=True) if "D1DatabaseObject" in f and "metadata" not in f]
 assert len(base) == 1, base
 db = sqlite3.connect(base[0])
 assert {"predicciones_por_local", "predicciones_por_visita"} <= {
     f[0] for f in db.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+fuerzas = json.loads(db.execute("SELECT valor FROM cache WHERE seccion = 'fuerzas' AND clave = 'PD'").fetchone()[0])
+lista = json.loads(db.execute("SELECT valor FROM cache WHERE seccion = 'partidos_liga' AND clave = 'PD:actual'").fetchone()[0])
+# un equipo de LaLiga que juega esta semana con pronóstico, y uno de sus partidos de visita; con 5
+# partidos jugados o más, para ver que la forma son los 5 últimos (en la API falsa, el Girona tiene
+# 4 y el Sevilla 3, y cuál juega primero depende del día)
+jugados = lambda e: sum(e in (x[1], x[2]) for x in lista["partidos"])
+p = next(p for p in partidos if p["liga_codigo"] == "PD" and not p.get("pendiente") and p["visita_id"] in ids
+         and jugados(p["visita_id"]) >= 5)
+eid, nombre = p["visita_id"], p["visita"]
+print(f"fichas: los {len(partidos)} partidos llevan el id de sus equipos")
+
+# su partido "terminó" 2-1 y la web lo había publicado antes: lo que dijo, contra lo que pasó
 db.execute("INSERT OR REPLACE INTO resultados (id, liga, utc, gl, gv, contado, liquidado) VALUES (?, 'PD', ?, 2, 1, 1, 0)",
            (p["id"], p["utcDate"]))
 db.commit()
-fuerzas = json.loads(db.execute("SELECT valor FROM cache WHERE seccion = 'fuerzas' AND clave = 'PD'").fetchone()[0])
-lista = json.loads(db.execute("SELECT valor FROM cache WHERE seccion = 'partidos_liga' AND clave = 'PD:actual'").fetchone()[0])
 
 ruta = f"/api/equipo/{eid}"
 st, cab, cuerpo = pedir(ruta)
