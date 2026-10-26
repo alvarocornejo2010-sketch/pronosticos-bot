@@ -1507,7 +1507,8 @@ function pintarLigasPane(todos, ruta) {
     + '<span class="insignia grande todas">' + ICONO_TODAS + '</span><span class="nom">Todas las ligas</span>'
     + '<span class="stats">' + ligas.length + (ligas.length === 1 ? " competición" : " competiciones") + ' esta semana</span>'
     + '<span class="n">' + todos.length + '</span></button>'
-    + filaFav + filas + '</div></section>' + htmlFiabilidad();
+    + filaFav + filas + '</div></section>' + htmlFiabilidad()
+    + '<p class="pie-izq">Datos de football-data.org · <a href="/privacidad">Privacidad</a></p>';
   if (paneLigas.dataset.huella === html) return;
   paneLigas.dataset.huella = html;
   paneLigas.innerHTML = html;
@@ -1655,7 +1656,8 @@ function pintarEstado() {
     seg += '<span><b>' + datos.requests_gastadas + '</b> peticiones en la última pasada</span>';
   }
   if (datos.ultima_actualizacion) seg += '<span>Actualizado ' + esc(haceCuanto(datos.ultima_actualizacion)) + '</span>';
-  seg += '<span class="der">Datos de football-data.org</span><span><kbd>/</kbd> buscar</span>';
+  seg += '<span class="der">Datos de football-data.org</span><span><a href="/privacidad">Privacidad</a></span>'
+    + '<span><kbd>/</kbd> buscar</span>';
   estadoBarra.dataset.modo = modo;
   if (estadoBarra.dataset.huella !== seg) { estadoBarra.dataset.huella = seg; estadoBarra.innerHTML = seg; }
 
@@ -2293,8 +2295,11 @@ const CAMPO_CORREO = (etiqueta, valor, ayuda) => campo("correo", etiqueta, "emai
   ' autocapitalize="none" spellcheck="false" maxlength="254"' + (valor ? ' value="' + esc(valor) + '"' : ""), ayuda);
 const AYUDA_CORREO = "Para entrar también con él y, más adelante, recuperar la contraseña. Por ahora no te mandamos nada.";
 const ERROR_CUENTA = '<p class="error" role="alert" hidden></p>';
+// La política de privacidad (public/privacidad.html), enlazada donde se guarda algo.
+const ENLACE_PRIVACIDAD = '<a class="privacidad" href="/privacidad">Qué se guarda</a>';
 const NOTA_DATOS = '<p class="nota">Qué guardamos: tu usuario, tu contraseña cifrada (tu navegador la cifra antes de'
-  + ' enviarla), tu correo si lo pones y los equipos que sigues. Ni nombre ni IP. Puedes borrarlo todo cuando quieras.</p>';
+  + ' enviarla), tu correo si lo pones y los equipos que sigues. Ni nombre ni IP. Puedes borrarlo todo cuando quieras.'
+  + ' <a href="/privacidad">Política de privacidad</a>.</p>';
 // crear: con correo (opcional) y el recuadro de Turnstile; usuario: la cuenta de la primera versión
 const FORM_USUARIO = (form, boton) => '<form data-cuenta-form="' + form + '" novalidate>'
   + CAMPO_USUARIO() + (form === "crear" ? CAMPO_CORREO("Correo (opcional)", "", AYUDA_CORREO) : "")
@@ -2757,7 +2762,8 @@ function bloqueAvisos() {
   const [titulo, texto, boton] = textos[e];
   return {
     id: "avisos", clase: "avisos-tarjeta", huella: e + "|" + n + "|" + avisos.ocupado + "|" + avisos.mensaje,
-    html: ICONO_CAMPANA + '<div><h2>' + esc(titulo) + '</h2><p>' + esc(texto) + '</p>'
+    html: ICONO_CAMPANA + '<div><h2>' + esc(titulo) + '</h2><p>' + esc(texto)
+      + (e === "activos" || e === "apagados" ? ' ' + ENLACE_PRIVACIDAD : "") + '</p>'
       + (avisos.mensaje ? '<p class="error" role="status">' + esc(avisos.mensaje) + '</p>' : "")
       + (boton ? '<div class="botones">' + boton + '</div>' : "") + '</div>',
   };
@@ -2818,8 +2824,17 @@ async function accionCalendario(que) {
   calendario.ocupado = true;
   calendario.mensaje = "";
   render();
-  try { await mandarCalendario(null); }
-  catch (e) { calendario.mensaje = "No se pudo crear: " + (e.message || e); }
+  try {
+    if (que === "quitar") {
+      const r = await fetch("/api/calendario", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clave: cal.clave, borrar: true }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "no hubo respuesta; inténtalo otra vez.");
+      try { localStorage.removeItem(CLAVE_CALENDARIO); } catch (e) { /* sin memoria */ }
+      avisar("Calendario quitado: su dirección ya no funciona. Bórralo también de tu aplicación de calendario.");
+    } else {
+      await mandarCalendario(null);
+    }
+  } catch (e) { calendario.mensaje = (que === "quitar" ? "No se pudo quitar: " : "No se pudo crear: ") + (e.message || e); }
   finally { calendario.ocupado = false; render(); }
 }
 
@@ -2837,7 +2852,8 @@ function bloqueCalendario() {
     botones = '<a class="accion principal" href="https://calendar.google.com/calendar/render?cid=' + encodeURIComponent(webcal)
       + '" target="_blank" rel="noopener">Google Calendar</a>'
       + '<a class="accion" href="' + esc(webcal) + '">iPhone, Mac u Outlook</a>'
-      + '<button class="accion" data-calendario="copiar">Copiar el enlace</button>';
+      + '<button class="accion" data-calendario="copiar">Copiar el enlace</button>'
+      + '<button class="accion" data-calendario="quitar"' + (calendario.ocupado ? " disabled" : "") + '>Quitar el calendario</button>';
   } else {
     titulo = "Tus partidos en tu calendario";
     texto = "Los partidos de tus equipos, con el pronóstico, en Google Calendar, el iPhone u Outlook. Se pone al día"
@@ -2847,7 +2863,7 @@ function bloqueCalendario() {
   }
   return {
     id: "calendario", clase: "avisos-tarjeta", huella: (cal && cal.clave) + "|" + n + "|" + calendario.ocupado + "|" + calendario.mensaje,
-    html: ICONO_CALENDARIO + '<div><h2>' + esc(titulo) + '</h2><p>' + esc(texto) + '</p>'
+    html: ICONO_CALENDARIO + '<div><h2>' + esc(titulo) + '</h2><p>' + esc(texto) + ' ' + ENLACE_PRIVACIDAD + '</p>'
       + (calendario.mensaje ? '<p class="error" role="status">' + esc(calendario.mensaje) + '</p>' : "")
       + '<div class="botones">' + botones + '</div></div>',
   };

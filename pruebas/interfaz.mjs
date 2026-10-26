@@ -7,7 +7,8 @@
 // que la imagen para historias sale (un PNG de 1080x1920 al menú de compartir), que
 // Mis equipos ofrece los avisos (y que activarlos y quitarlos funciona contra el Worker,
 // con el servicio de avisos del navegador de mentira: sin red, Chromium no puede
-// suscribirse), que crear el calendario de Mis equipos da sus enlaces, que el detalle de
+// suscribirse), que crear el calendario de Mis equipos da sus enlaces (y quitarlo, que su
+// dirección deje de funcionar), que la página de privacidad se lee en todos los anchos, que el detalle de
 // un partido de un equipo seguido propone los avisos, que sus nombres enlazan con la
 // página de cada equipo y que «Cómo gana» trae sus cuatro casillas, y pasa axe-core (accesibilidad) por la
 // semana, Mis equipos, el detalle, la tabla y la página de un equipo, en el móvil y en
@@ -179,6 +180,10 @@ for (const [ancho, alto] of ANCHOS) {
       const webcal = await p.locator('#calendario a[href^="webcal://"]').getAttribute("href");
       const ics = await fetch(webcal.replace(/^webcal:/, "http:"));
       if (ics.status !== 200 || !(await ics.text()).startsWith("BEGIN:VCALENDAR")) fallo(`${ancho}px: el calendario creado no se sirve`);
+      // y se quita: la tarjeta vuelve a ofrecerlo y su dirección deja de funcionar
+      await p.locator("[data-calendario=quitar]").click();
+      await p.locator("[data-calendario=crear]").waitFor({ timeout: 15000 });
+      if ((await fetch(webcal.replace(/^webcal:/, "http:"))).status !== 404) fallo(`${ancho}px: el calendario quitado se sigue sirviendo`);
     }
     if (extra === "abrir" && (ancho === 390 || ancho === 1440)) {
       // la imagen para historias: lo que llegaría al menú de compartir del sistema
@@ -207,9 +212,22 @@ for (const [ancho, alto] of ANCHOS) {
       for (const x of v) fallo(`${ancho}px, ${nombre}: accesibilidad ${x}`);
     }
   }
+  // la política de privacidad: una página aparte, sin JavaScript, enlazada desde la web
+  await p.goto(W + "/privacidad");
+  await p.waitForSelector("h1");
+  await p.evaluate(() => document.fonts.ready);
+  const r = await p.evaluate(revisar);
+  for (const x of r.fuera) fallo(`${ancho}px, privacidad: se sale ${x}`);
+  if (await p.evaluate(() => document.documentElement.scrollWidth > innerWidth)) fallo(`${ancho}px, privacidad: la página se sale de ancho`);
+  if (ancho === 390 || ancho === 1440) {
+    await p.evaluate(AXE);
+    const v = await p.evaluate(async () => (await axe.run(document, { resultTypes: ["violations"] })).violations
+      .map((x) => `${x.impact} ${x.id} (${x.nodes.length}): ${x.nodes[0].target.join(" ")}`));
+    for (const x of v) fallo(`${ancho}px, privacidad: accesibilidad ${x}`);
+  }
   for (const e of errores) fallo(`${ancho}px: error de JavaScript: ${e}`);
   await ctx.close();
 }
 await navegador.close();
-console.log(`interfaz: ${VISTAS.length} vistas × ${ANCHOS.length} anchos, axe en ${AXE_EN.size}: ${fallos ? fallos + " fallos" : "todo bien"}`);
+console.log(`interfaz: ${VISTAS.length} vistas y la privacidad × ${ANCHOS.length} anchos, axe en ${AXE_EN.size + 2}: ${fallos ? fallos + " fallos" : "todo bien"}`);
 process.exit(fallos ? 1 : 0);

@@ -1048,6 +1048,11 @@
   .estado-barra .medidor { width: 100px; height: 5px; background: var(--linea-viva); border-radius: 3px; overflow: hidden; }
   .estado-barra .medidor i { display: block; height: 100%; background: var(--tinta-2); }
   .estado-barra .err { color: var(--tinta); }
+  /* los enlaces a la política de privacidad, en tinta y subrayados (el oro es la probabilidad) */
+  .estado-barra a, .pie-izq a, .nota a, a.privacidad { color: var(--tinta-2); text-decoration: underline;
+    text-underline-offset: 2px; }
+  .estado-barra a:hover, .pie-izq a:hover, .nota a:hover, a.privacidad:hover { color: var(--tinta); }
+  .pie-izq { margin: 4px 6px 8px; color: var(--tinta-3); font-size: var(--t-12); }
   .estado-barra .err svg { color: var(--critico); }
 
   /* ---------------- pestañas (móvil) ---------------- */

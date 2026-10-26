@@ -1,7 +1,8 @@
 """Lo que hace la web instalable y lo que leen los buscadores: el manifiesto, el
 service worker y los iconos se sirven con su tipo; la CSP de la página los deja
-cargar; robots.txt apunta al sitemap; y el sitemap lista la portada y los partidos
-por jugar (worker/buscadores.js), con las direcciones del origen de la petición.
+cargar; robots.txt apunta al sitemap; el sitemap lista la portada y los partidos
+por jugar (worker/buscadores.js), con las direcciones del origen de la petición; y la
+política de privacidad (/privacidad) se sirve, con la CSP de la web y sin JavaScript.
 Se corre contra el Worker local ya lleno (lo deja así e2e.sh).
 Uso: python pruebas/descubrir.py PUERTO_WORKER"""
 import json, sys, time, urllib.request
@@ -51,4 +52,12 @@ partidos = {l for l in locs[1:] if "/equipo/" not in l}
 assert partidos == por_jugar, (len(partidos), len(por_jugar), partidos ^ por_jugar)
 print(f"buscadores: robots.txt apunta al sitemap; el sitemap trae la portada, los {len(por_jugar)} partidos por jugar"
       f" y {len(locs) - 1 - len(partidos)} equipos")
+
+cab, pag = pedir("/privacidad")
+pag = pag.decode()
+assert cab["Content-Type"].startswith("text/html") and "script-src 'self'" in cab["Content-Security-Policy"], cab
+assert "<script" not in pag and "Ley N.º 29733" in pag and "<h1>Privacidad</h1>" in pag
+assert '<link rel="canonical" href="https://pronosticos-bot.alvarocornejo2010.workers.dev/privacidad">' in pag
+assert '<a href="/privacidad">' in pedir("/app.js")[1].decode()   # la web la enlaza
+print("privacidad: /privacidad, con la CSP de la web y sin JavaScript; la web la enlaza")
 print("descubrir: OK")

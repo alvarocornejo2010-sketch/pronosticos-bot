@@ -1303,6 +1303,13 @@ def partido(id_partido):
     return render_template("index.html")
 
 
+@app.route("/privacidad")
+def privacidad():
+    """La política de privacidad: una página estática de public/ (en Cloudflare la
+    sirven los archivos estáticos, sin pasar por el Worker)."""
+    return send_from_directory(app.template_folder, "privacidad.html", mimetype="text/html")
+
+
 @app.route("/app.js")
 def app_js():
     return send_from_directory(app.template_folder, "app.js", mimetype="text/javascript")

@@ -4,7 +4,7 @@ equipos y da una clave; /calendario/<clave>.ics es un iCalendar bien formado (CR
 líneas de 75 octetos como mucho, texto escapado) con un evento por partido de esos
 equipos, con su hora, su pronóstico (los enteros de la web) y, al terminar, su resultado;
 cambiar los equipos con la misma clave cambia los eventos; una clave que ya no está se
-vuelve a crear; lo raro no entra; el tope de calendarios nuevos corta; el panel lo cuenta;
+vuelve a crear; quitarlo lo borra en el acto; lo raro no entra; el tope de calendarios nuevos corta; el panel lo cuenta;
 robots.txt lo deja fuera; y Flask no lo tiene. Y la CPU de leerlo.
 Uso: python pruebas/ics.py PUERTO_WORKER PUERTO_INSPECTOR DIR_D1 UPDATE_SECRET MAX_MS"""
 import calendar, glob, json, re, sqlite3, sys, time, urllib.error, urllib.request
@@ -15,8 +15,13 @@ W, D1, SECRETO, MAX_MS = f"http://127.0.0.1:{sys.argv[1]}", sys.argv[3], sys.arg
 medidor = Medidor(sys.argv[2])
 
 
+IPS = iter(range(1, 10**6))   # cada petición, desde su IP: el freno por IP lo prueba cuentas.py
+
+
 def pedir(ruta, cuerpo=None, origen=None, metodo=None):
+    n = next(IPS)
     cab = {"Content-Type": "application/json"} if cuerpo is not None else {}
+    cab["CF-Connecting-IP"] = f"10.8.{n // 250}.{n % 250 + 1}"
     if origen:
         cab["Origin"] = origen
     datos = None if cuerpo is None else (cuerpo if isinstance(cuerpo, bytes) else json.dumps(cuerpo).encode())
@@ -175,6 +180,14 @@ assert pedir("/api/calendario", {"clave": clave, "equipos": [A, B]})[0] == 200  
 filas = db.execute("SELECT count(*) FROM calendarios").fetchone()[0]
 assert visitas()["calendarios"] == {"total": filas, "nuevos": 5, "usados": filas}, (visitas()["calendarios"], filas)
 print("tope: a los 5 calendarios nuevos del día, 429 (cambiar uno que ya hay sigue funcionando); el panel lo cuenta")
+
+# quitarlo: la dirección deja de funcionar en el acto, aunque se haya llegado a los topes
+st, _, cuerpo = pedir("/api/calendario", {"clave": clave, "borrar": True})
+assert st == 200 and json.loads(cuerpo) == {"ok": True, "borrado": True}, (st, cuerpo)
+assert pedir(d["ruta"])[0] == 404 and db.execute("SELECT count(*) FROM calendarios WHERE clave = ?", (clave,)).fetchone()[0] == 0
+assert json.loads(pedir("/api/calendario", {"clave": clave, "borrar": True})[2]) == {"ok": True, "borrado": False}
+assert pedir("/api/calendario", {"borrar": True})[0] == 400
+print("quitar el calendario: la dirección da 404 en el acto")
 
 assert "Disallow: /calendario/" in pedir("/robots.txt")[2].decode()
 db.close()
