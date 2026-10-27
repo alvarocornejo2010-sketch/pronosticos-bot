@@ -11,8 +11,12 @@
 // Para no leer cientos de fichas en cada pasada (10 ms de CPU), las cuentas se
 // llevan sumadas en un documento (registro) y lo que sirve /api/registro va ya
 // montado aparte (registro_publico): leerlo es una fila, la pida quien la pida.
+//
+// Además del total y de cada liga, cada versión del modelo lleva sus cuentas
+// (versiones): cuando cambia VERSION_MODELO, las de la nueva empiezan de cero y se
+// ve si acierta más o menos que la de antes.
 
-import { COMPETICIONES } from "./config.js";
+import { COMPETICIONES, VERSION_MODELO } from "./config.js";
 import { calcularPoisson, mercadosDeGoles, redondear } from "./modelo.js";
 import { Acumulador, Binario, MERCADOS, resultado, resumenMercado } from "./metricas.js";
 import { enterosQueSuman } from "./compartir.js";
@@ -83,6 +87,35 @@ class Cuenta {
   }
 }
 
+// La base "equipo medio" de un partido: el 1X2 y los mercados de dos equipos medios
+// con la media de liga de la ficha. memo: para rehacer cientos sin repetir las cuentas
+// de las mismas medias.
+function baseDe(ml, mv, memo = null) {
+  const k = ml + "|" + mv;
+  if (memo && memo.has(k)) return memo.get(k);
+  const pb = calcularPoisson(redondear(ml, 2), redondear(mv, 2));
+  const b = { p: [pb.prob_local / 100, pb.prob_empate / 100, pb.prob_visita / 100],
+    goles: mercadosDeGoles(ml, mv, { avg_local: ml, avg_visita: mv }) };
+  if (memo) memo.set(k, b);
+  return b;
+}
+
+// Un partido terminado (m: el marcador a los 90 minutos) en unas cuentas.
+function sumar(cuentas, ficha, m, b) {
+  const y = resultado(m);
+  const p = [ficha.prob_local / 100, ficha.prob_empate / 100, ficha.prob_visita / 100];
+  for (const c of cuentas) {
+    c.modelo.add(p, y);
+    c.base.add(b.p, y);
+    for (const k in MERCADOS) {
+      const [clave, ocurre] = MERCADOS[k];
+      const si = ocurre(m) ? 1 : 0;
+      c.mercados[k][0].add(ficha[clave] / 100, si);
+      c.mercados[k][1].add(b.goles[clave] / 100, si);
+    }
+  }
+}
+
 export class Registro {
   constructor(g = null) {
     this.desde = g ? g.desde : null;
@@ -96,6 +129,24 @@ export class Registro {
     // esperaban sus propias probabilidades, y el fallo del favorito más claro.
     // null: un registro de antes, que hay que rehacer (rehacerDias).
     this.dias = g ? (g.dias ?? null) : {};
+    // {versión: {desde, desde_fecha, hasta, total}}: las cuentas de cada versión del
+    // modelo. Las de un registro de antes se rehacen por partes (rehacerVersiones), y
+    // mientras tanto (rehaciendo: por dónde va, [liquidado, id]) ni se publican ni
+    // suman los partidos nuevos: los lee una parte siguiente.
+    this.versiones = Object.fromEntries(Object.entries((g && g.versiones) || {}).map(([v, x]) =>
+      [v, { desde: x.desde, desde_fecha: x.desde_fecha, hasta: x.hasta, total: new Cuenta(x.total) }]));
+    this.rehaciendo = g ? (g.versiones ? g.rehaciendo ?? null : [0, 0]) : null;
+  }
+
+  // Las cuentas de la versión del modelo con que se calculó la ficha (una de antes de
+  // guardarla cuenta como la 1, como en la validación).
+  version(ficha, local) {
+    const x = (this.versiones[String(ficha.version_modelo ?? 1)] ??=
+      { desde: null, desde_fecha: null, hasta: null, total: new Cuenta() });
+    const utc = ficha.utcDate;
+    if (!x.desde || utc < x.desde) { x.desde = utc; x.desde_fecha = local.fecha; }
+    if (!x.hasta || utc > x.hasta) x.hasta = utc;
+    return x.total;
   }
 
   anotarDia(e) {
@@ -121,24 +172,10 @@ export class Registro {
   // minutos. La base usa la media de liga con la que se calculó la ficha
   // (media_local/visita); una ficha de antes de guardarla, la de ahora.
   anotar(ficha, gl, gv, media, local) {
-    const m = { gl, gv };
-    const y = resultado(m);
     const ml = ficha.media_local ?? media.avg_local, mv = ficha.media_visita ?? media.avg_visita;
-    const p = [ficha.prob_local / 100, ficha.prob_empate / 100, ficha.prob_visita / 100];
-    const pb = calcularPoisson(redondear(ml, 2), redondear(mv, 2));
-    const base = [pb.prob_local / 100, pb.prob_empate / 100, pb.prob_visita / 100];
-    const gb = mercadosDeGoles(ml, mv, { avg_local: ml, avg_visita: mv });
-    const codigo = ficha.liga_codigo;
-    for (const c of [(this.ligas[codigo] ??= new Cuenta()), this.total]) {
-      c.modelo.add(p, y);
-      c.base.add(base, y);
-      for (const k in MERCADOS) {
-        const [clave, ocurre] = MERCADOS[k];
-        const si = ocurre(m) ? 1 : 0;
-        c.mercados[k][0].add(ficha[clave] / 100, si);
-        c.mercados[k][1].add(gb[clave] / 100, si);
-      }
-    }
+    const cuentas = [(this.ligas[ficha.liga_codigo] ??= new Cuenta()), this.total];
+    if (!this.rehaciendo) cuentas.push(this.version(ficha, local));
+    sumar(cuentas, ficha, { gl, gv }, baseDe(ml, mv));
     const utc = ficha.utcDate;
     if (!this.desde || utc < this.desde) { this.desde = utc; this.desde_fecha = local.fecha; }
     if (!this.hasta || utc > this.hasta) this.hasta = utc;
@@ -169,12 +206,21 @@ export class Registro {
       ultimos: this.ultimos.slice(0, 12),
       // los últimos 14 días, de más viejo a más nuevo: la web suma los de su semana
       semana: Object.keys(this.dias || {}).sort().slice(-14).map((fecha) => ({ fecha, ...this.dias[fecha] })),
+      // cada versión del modelo, la más nueva primero (nada mientras se rehacen)
+      version_actual: VERSION_MODELO,
+      versiones: this.rehaciendo ? [] : Object.keys(this.versiones).sort((a, b) => b - a).map((v) => {
+        const x = this.versiones[v], r = x.total.resumen(null);
+        return { version: Number(v), desde: x.desde, desde_fecha: x.desde_fecha, hasta: x.hasta, partidos: r.partidos,
+          skill_score: r.skill_score, aporta_valor: r.aporta_valor, acierto: r.modelo.acierto,
+          mercados: Object.fromEntries(Object.entries(r.mercados).map(([k, mk]) =>
+            [k, { skill_score: mk.skill_score, aporta_valor: mk.aporta_valor, acierto: mk.modelo.acierto }])) };
+      }),
     };
   }
 
   toJSON() {
     return { desde: this.desde, desde_fecha: this.desde_fecha, hasta: this.hasta, total: this.total, ligas: this.ligas,
-      ultimos: this.ultimos, dias: this.dias };
+      ultimos: this.ultimos, dias: this.dias, versiones: this.versiones, rehaciendo: this.rehaciendo };
   }
 }
 
@@ -193,6 +239,36 @@ export async function rehacerDias(registro, almacen, reloj, ahora) {
     for (const c of CAMPOS_PARTIDO) ficha[c] = f["c_" + c];
     registro.anotarDia(entradaDe(ficha, f.gl, f.gv, reloj.local(Date.parse(f.utc))));
   }
+}
+
+// Las cuentas por versión de un registro de antes se rehacen con lo ya liquidado, por
+// partes: la base de cada partido cuesta CPU (~0.1 ms) y una pasada solo tiene 10 ms.
+// Cada pasada que liquida suma los PARTE_VERSIONES siguientes en el orden en que se
+// liquidaron, así que lo que se liquide mientras tanto lo lee una parte siguiente y
+// no se cuenta dos veces. Una ficha sin la media de liga con que se calculó no tiene
+// base y no entra. Las cuentas del total y de las ligas no se tocan.
+export const PARTE_VERSIONES = 10;
+const CAMPOS_VERSION = ["liga_codigo", "prob_local", "prob_empate", "prob_visita", "media_local", "media_visita",
+  "version_modelo", ...Object.values(MERCADOS).map(([clave]) => clave)];
+
+export async function rehacerVersiones(registro, almacen, reloj, parte = PARTE_VERSIONES) {
+  const [liq, id] = registro.rehaciendo;
+  const db = almacen.db;
+  const cols = CAMPOS_VERSION.map((c) => `json_extract(p.ficha, '$.${c}') AS c_${c}`).join(", ");
+  const r = await almacen.consultar(() => db.prepare(
+    `SELECT r.gl, r.gv, r.liquidado, r.id, p.utc, ${cols} FROM resultados r JOIN predicciones p ON p.id = r.id
+     WHERE r.contado = 1 AND (r.liquidado > ?1 OR (r.liquidado = ?1 AND r.id > ?2))
+     ORDER BY r.liquidado, r.id LIMIT ?3`).bind(liq, id, parte).all());
+  const memo = new Map();
+  for (const f of r.results) {
+    if (f.c_media_local == null || f.c_media_visita == null) continue;
+    const ficha = { utcDate: f.utc };
+    for (const c of CAMPOS_VERSION) ficha[c] = f["c_" + c];
+    sumar([registro.version(ficha, reloj.local(Date.parse(f.utc)))], ficha, { gl: f.gl, gv: f.gv },
+      baseDe(ficha.media_local, ficha.media_visita, memo));
+  }
+  const ultimo = r.results[r.results.length - 1];
+  registro.rehaciendo = r.results.length < parte ? null : [ultimo.liquidado, ultimo.id];
 }
 
 // Los marcadores que bajó obtenerPromedioLiga en esta pasada ({codigo: {goles,
@@ -221,6 +297,11 @@ export async function liquidar(ctx, almacen) {
       if (!registro) {
         registro = new Registro(await almacen.leerDoc("registro"));
         if (registro.dias === null) await rehacerDias(registro, almacen, ctx.reloj, ahora);
+        // antes de los de esta pasada, que aún no están en resultados: si con esta parte
+        // termina, ya entran en su versión; si no, los leerá otra parte
+        if (registro.rehaciendo) {
+          await rehacerVersiones(registro, almacen, ctx.reloj, Math.max(3, Math.round(PARTE_VERSIONES * (ctx.aj.escala ?? 1))));
+        }
       }
       registro.anotar(ficha, g[0], g[1], r.media, ctx.reloj.local(Date.parse(ficha.utcDate)));
     }

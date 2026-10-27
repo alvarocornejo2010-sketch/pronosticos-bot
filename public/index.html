@@ -789,12 +789,12 @@
   .casillas.dos .cas small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cas { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 8px; padding: 9px 12px 10px;
          border-radius: var(--r-control); background: var(--bg); color: var(--fg); min-width: 0; }
-  .cas small { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-14); font-weight: 700; opacity: 0.8; }
+  .cas small { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-14); font-weight: 700; opacity: var(--op, 0.8); }
   .cas b { justify-self: end; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-24); font-weight: 800; line-height: 1;
            font-variant-numeric: tabular-nums; }
   .cas > span:last-child { grid-column: 1 / -1; margin-top: 2px; }
-  .cas .cuota { font-family: var(--f-txt); font-size: var(--t-12); font-weight: 500; color: inherit; opacity: 0.8; }
-  .cas .que { grid-column: 1 / -1; margin-top: 4px; font-size: var(--t-12); line-height: 1.25; opacity: 0.85; text-wrap: balance; }
+  .cas .cuota { font-family: var(--f-txt); font-size: var(--t-12); font-weight: 500; color: inherit; opacity: var(--op, 0.8); }
+  .cas .que { grid-column: 1 / -1; margin-top: 4px; font-size: var(--t-12); line-height: 1.25; opacity: var(--op, 0.85); text-wrap: balance; }
 
   .xg { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 0 10px; }
   .xg > b { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-24); font-weight: 800; }
@@ -959,6 +959,11 @@
   .fiab-cab { display: grid; grid-template-columns: 2.75rem minmax(0, 1fr) 3rem 2.75rem; gap: 0 10px;
               font-size: var(--t-13); color: var(--tinta-3); padding-bottom: 6px; border-bottom: 1px solid var(--linea); }
   .fiab-cab span:nth-child(3), .fiab-cab span:nth-child(4) { text-align: right; }
+  .fiab-versiones { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--linea); }
+  .fiab-v-cab { margin: 0 0 2px; font-size: var(--t-13); color: var(--tinta-3); }
+  .fiab.fiab-v { grid-template-columns: minmax(0, 1fr) 3rem 2.75rem; padding: 5px 0; }
+  .fiab-v b { font-weight: 600; color: var(--tinta-2); }
+  .fiab-v .meta { display: block; font-size: var(--t-13); color: var(--tinta-3); }
   .m-fiab .segmentos { margin: 0 0 12px; width: max-content; max-width: 100%; }
   .m-fiab .segmentos + .segmentos { margin-top: -4px; }
 

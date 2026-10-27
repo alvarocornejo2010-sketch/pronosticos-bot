@@ -199,7 +199,12 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
   tres primeros tramos y oscura en el resto, todas ≥ 4.8:1. La rampa anterior
   (arena oliva) no pasaba ese validador: dos tramos casi iguales, el más bajo a
   1.15:1 del fondo y 53° de tono. El blanco marca lo seleccionado (día, liga,
-  orden).
+  orden). En las casillas, la etiqueta, qué es y la cuota justa van más apagadas
+  (`opacity` 0.8 y 0.85), salvo en los tramos de 30 y 40 (`op: 1` en `RAMPA`, `--op`):
+  ahí bajaban a 3.75-4.3:1, por debajo del 4.5 del texto pequeño. Lo encontró axe el 27
+  oct con una doble oportunidad de 40 y pico: dependía de los datos del día, así que
+  `interfaz.mjs` pasa ahora una casilla de cada tramo. **Si se toca la rampa o esas
+  opacidades, volver a mirarlo.**
 - Ligas: la Champions va primera, con una insignia de contorno (UCL): es un
   torneo y no gasta un tono. Las ligas llevan insignia con la sigla dentro (ESP,
   ENG, FRA, ALE, ITA, NED, POR, EN2, BRA) y el tono de la liga de fondo; tinta oscura o blanca según el tono, todas
@@ -283,7 +288,8 @@ incluidos), `actualizacion.js` (la pasada), `validacion.js`, `metricas.js`
 `buscadores.js` (`robots.txt` y `sitemap.xml`), `cuentas.js` (las cuentas),
 `tablas.js` (la tabla de cada liga y lo que le falta), `avisos.js` (los avisos de Mis
 equipos), `push.js` (su cifrado y su firma, Web Push), `equipos.js` (la página de cada
-equipo), `calendario.js` (el calendario `.ics` de Mis equipos) e `index.js` (rutas).
+equipo), `calendario.js` (el calendario `.ics` de Mis equipos), `limpieza.js` (la limpieza
+del día: sesiones y calendarios caducados) e `index.js` (rutas).
 
 **El ritmo lo marca la CPU.** El plan gratis da 10 ms por ejecución y leer el
 JSON de la API cuesta ~7 ms por MB, así que en vez de una pasada de 40
@@ -326,8 +332,9 @@ a los 90 minutos de cada partido con predicción, ya sumado al registro en
 vivo), `documentos` (`estado` que sirve `/api/estado`, `resumen`, `validacion`,
 `registro` y `registro_publico`, pedidos, temporadas terminadas compactas,
 `temporada:liga:{código}:{año}`, `tabla:{código}` que sirve `/api/tabla/...` y
-`tablas_resumen`, cuándo se bajó cada cosa, y los de los avisos: `vapid`, su par
-de claves, y `avisos_resumen`, cuándo volver a mirar) y
+`tablas_resumen`, cuándo se bajó cada cosa, los de los avisos: `vapid`, su par
+de claves, y `avisos_resumen`, cuándo volver a mirar, y `limpieza`, cuándo se hizo la
+del día y qué borró) y
 `candado` (que dos pasadas no se pisen, hora de la última petición, pasadas
 muertas), `visitas` (los contadores de visitas por día, ver "Visitas"), las de
 las cuentas: `cuentas`, `usuarios`, `correos`, `accesos`, `sesiones` y `favoritos` (ver
@@ -380,6 +387,20 @@ con el entero que enseña la web: un favorito que sale con 60 es claro) y el fal
 del favorito más claro. Un registro de antes (sin `dias`) se rehace
 una vez con `resultados` y la ficha publicada (`rehacerDias`, con `json_extract`
 para no leer las fichas enteras). Lo prueba `pruebas/semana.mjs`.
+
+Y las cuentas de **cada versión del modelo** (`versiones`, oct 2026): cada ficha lleva
+su `version_modelo`, y cada partido suma también a la suya (una de antes de guardarla
+cuenta como la 1). Cuando cambia `VERSION_MODELO`, la nueva empieza de cero y se ve si
+acierta más o menos que la de antes. `/api/registro` las da en `versiones` (la más nueva
+primero, con desde cuándo, partidos, skill, acierto y los mercados) y `version_actual`;
+la web, en Fiabilidad medida → En vivo, las pone debajo de las ligas ("Por versión del
+modelo", con la columna de skill y la de acierto del mercado elegido), solo si hay más de
+una. Un registro de antes (sin `versiones`) las rehace con `resultados` y las fichas, **por
+partes** (`rehacerVersiones`, `PARTE_VERSIONES` = 10 por pasada que liquida, menos si las
+pasadas mueren): la base "equipo medio" de cada partido cuesta ~0,1 ms y los 145 del 27 oct
+de una vez eran ~10 ms. Van en el orden en que se liquidaron (`resultados.liquidado`), así
+que lo que se liquida mientras tanto lo lee una parte siguiente, sin contarse dos veces; y
+hasta que termina, `versiones` sale vacío. El total y las ligas no se tocan.
 
 **Cambios respecto a `app.py`** (ninguno toca el modelo):
 - un 429 de la API no se calcula a ciegas: el partido espera al minuto
@@ -696,8 +717,9 @@ tenga ve y cambia esa lista de equipos, nada más.
   alta o un cambio de equipos, una fila.
 - **Topes** (contados en `visitas`): `MAX_CALENDARIOS` (5.000 en total),
   `MAX_CALENDARIOS_DIA` (300 nuevos al día) y `MAX_ESCRITURAS_CALENDARIOS_DIA` (3.000 filas
-  al día por altas y cambios). Uno que ningún calendario pide en 120 días se borra (al
-  crear otro); si la web lo vuelve a mandar con su clave, se crea de nuevo con la misma, y
+  al día por altas y cambios). Uno que ningún calendario pide en 120 días se borra (en la
+  limpieza del día del cron, `limpieza.js`, y al crear otro); si la web lo vuelve a mandar
+  con su clave, se crea de nuevo con la misma, y
   la dirección que la persona tenía suscrita sigue valiendo.
 - **Qué se guarda** (`calendarios`): la clave, los nombres de los equipos y cuándo se creó
   y se pidió por última vez. Nada de quién es (lo dice la política de privacidad).
@@ -793,7 +815,11 @@ es lo que pidió el dueño del proyecto; lo que cueste dinero (mandar correos) e
 - **La sesión** es una cookie `sesion` (HttpOnly, Secure, SameSite=Lax; 180 días
   que se renuevan al usarla) con un token al azar; en D1 solo va su SHA-256.
   Cambiar la contraseña cierra las sesiones de los demás aparatos. Cada cuenta
-  guarda sus 20 sesiones más recientes. Las rutas que escriben exigen JSON y venir
+  guarda sus 20 sesiones más recientes. Una de 180 días sin usarse se borra al intentar
+  usarla y, si nadie lo intenta, en la limpieza del día (`limpieza.js`): una vez al día,
+  en un minuto libre del cron (sin la API ni el candado), dos `DELETE`, uno para las
+  sesiones y otro para los calendarios de 120 días; lo que hizo queda en el documento
+  `limpieza`, y un fallo se reintenta al día siguiente. Las rutas que escriben exigen JSON y venir
   de la propia web (`mismoSitio`, la misma comprobación que `/api/contar`), y cada
   una va por su nombre: una que no existe da 404. El botón sale con `plataforma:
   "cloudflare"` en `/api/estado`, y `/api/cuenta` solo se pide si ese navegador
@@ -979,9 +1005,13 @@ requests 2.33.1 (los avisos de 3.1.0 y 2.32.3 no afectaban a esta app: no usa
 sesiones ni `.netrc`), wrangler 4.149.0 (la 4.146 arrastraba un `sharp`
 vulnerable, solo en local). El 25 oct `npm audit` ya no daba cero: tres avisos de
 `undici` (dos moderados y uno alto, denegación de servicio y SRI), que llega por
-`wrangler` → `miniflare`. Solo en local (`wrangler dev`), nada en producción; no
-había aún una versión de wrangler que lo arreglara (`npm audit fix --force` la
-bajaba a la 4.35): subir wrangler cuando la haya. Playwright 1.56.1 y axe-core
+`wrangler` → `miniflare`. Solo en local (`wrangler dev`), nada en producción. Lo
+arregla wrangler 4.153.0, publicada el 26 oct 2026 (`npm audit` da vulnerables de la
+4.36.0 a la 4.152.0): **subirla hacia el 9 nov**, con dos semanas de vida. No antes
+porque es lo que corre Workers Builds para desplegar `main`, con las credenciales de la
+cuenta de Cloudflare: una versión recién publicada es la que más riesgo tiene de venir
+rota o alterada, y el aviso no toca producción. Fijarla exacta en `package.json`, `npm
+install` y `bash pruebas/e2e.sh`. Playwright 1.56.1 y axe-core
 4.10.2 solo sirven a las pruebas. Para repasarlo: `pip install pip-audit &&
 pip-audit -r requirements.txt` y `npm audit`.
 
@@ -1485,17 +1515,14 @@ Environment).
   recuperar la contraseña con él (Cloudflare Email Service: plan de pago de Workers,
   US$5 al mes con 3.000 correos, y un dominio propio en Cloudflare, que además daría
   Search Console y la regla de límite por IP); y, si la gente las usa, entrar con
-  passkey (huella o cara) como otro tipo de acceso. Las sesiones de 180 días sin uso solo se borran
-  cuando alguien intenta usarlas (y cada cuenta guarda 20 como mucho): si se
-  acumulan, limpiarlas en el cron.
+  passkey (huella o cara) como otro tipo de acceso.
 
 - **Leer el registro en vivo cuando crezca** (en marcha desde oct 2026, ver
   "El registro en vivo"). Con unos pocos partidos por liga es ruido; con una
   temporada (unos 300 por liga) ya se puede comparar con el backtest de
   `/api/validacion`, y es lo único que puede afinar `RHO_EMPATES` con datos
-  propios. Cada ficha guarda con qué versión del modelo se calculó
-  (`version_modelo`), pero el registro las suma todas juntas: cuando cambie el
-  modelo, separarlas.
+  propios. Desde el 27 oct 2026 lleva además las cuentas de cada versión del modelo
+  (ver "El registro en vivo"): el 27 oct, 54 partidos del modelo 2, 79 del 3 y 12 del 4.
 - **Champions:** ya junta liga nacional, nivel de liga e historial en la
   Champions, medido con cuatro temporadas (ver "Champions: cómo se predice").
   Cada verano, añadir la temporada que termina a `TEMPORADAS_CL` en
@@ -1519,7 +1546,8 @@ Environment).
 - `.github/workflows/pruebas.yml`, en cada PR y cada push a `main`, dos checks:
   - **Paridad Python / Worker**: `node --check` de `worker/*.js`, `public/app.js`, `public/sw.js` y `public/imagen.js`,
     `python test_paridad.py` ("todo igual"), `node pruebas/semana.mjs` (el resumen
-    de la semana del registro y los textos de la tarjeta para compartir), `node
+    de la semana del registro, sus cuentas por versión del modelo, también rehechas por
+    partes, y los textos de la tarjeta para compartir), `node
     pruebas/sw.mjs` (el service worker: "Sin conexión" sin red, la web con red, y los
     avisos: su texto, adónde llevan y la pestaña que abren) y `node pruebas/push.mjs`
     (el cifrado de los avisos contra el ejemplo de RFC 8291, la firma VAPID, la hora
@@ -1571,7 +1599,10 @@ Environment).
     con un evento por partido de sus equipos, su hora y su pronóstico, y el resultado al
     terminar; que cambiar los equipos con la misma clave cambia los eventos, que una clave
     borrada vuelve, que quitarlo lo borra en el acto, que lo raro no entra y que el tope de nuevos corta (`ics.py`, con
-    `MAX_CALENDARIOS_DIA=5`; va después de la interfaz, que también crea uno). Y la
+    `MAX_CALENDARIOS_DIA=5`; va después de la interfaz, que también crea uno). Que la
+    limpieza del día borra en un minuto libre del cron las sesiones de más de 180 días y
+    los calendarios de más de 120, deja los demás y no se repite antes de un día
+    (`limpieza.py`). Y la
     interfaz en un navegador de verdad (`interfaz.mjs`,
     Playwright): 13 vistas (semana, día, liga, por claros y por reñidos, búsqueda,
     Mis equipos, el detalle abierto, el de un partido de Mis equipos, la tabla con su
@@ -1579,7 +1610,9 @@ Environment).
     piezas de una fila que se pisen, sin errores de JavaScript, con la tarjeta y la
     invitación de los avisos (y activarlos y quitarlos contra el Worker, con el
     servicio de avisos del navegador de mentira), crear el calendario y sus enlaces (y quitarlo), la página de
-    privacidad en los 7 anchos (con axe en 390 y 1440), los nombres del detalle enlazando con
+    privacidad en los 7 anchos (con axe en 390 y 1440), Fiabilidad medida → En vivo con tres
+    versiones del modelo (con un registro de mentira; axe en 390 y 1440), una casilla de cada tramo
+    de la rampa (el contraste, con axe en 390 y 1440), los nombres del detalle enlazando con
     la página de su equipo, y axe-core sin nada en la semana,
     Mis equipos, los dos detalles, la tabla y la página de un equipo, en el móvil y en escritorio. Es lo que en oct
     2026 encontró la fecha bajo el escudo y "Seguir" cortado en el móvil. El job

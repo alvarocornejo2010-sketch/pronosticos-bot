@@ -137,11 +137,14 @@ function htmlInsignia(cod, clase) {
 // luminosidad monótona, validada con el script de dataviz. Tinta blanca en los
 // tres primeros y oscura en el resto (todas >= 4.8:1). El tramo se decide con el
 // entero que se enseña, para que una celda que dice 60 caiga en 60-70.
+// op: la opacidad del texto secundario de una casilla (la etiqueta, qué es y la cuota
+// justa; 0.8 si no se dice). En los tramos de 30 y de 40 la tinta va entera: con 0.8
+// bajaba a 3.8 y 4.0:1, por debajo del 4.5 que pide el texto pequeño (axe, oct 2026).
 const RAMPA = [
   { min: 0,  bg: "#594d39", fg: "#ffffff" },
   { min: 20, bg: "#705d3e", fg: "#ffffff" },
-  { min: 30, bg: "#876e42", fg: "#ffffff" },
-  { min: 40, bg: "#a18047", fg: "var(--oscura)" },
+  { min: 30, bg: "#876e42", fg: "#ffffff", op: 1 },
+  { min: 40, bg: "#a18047", fg: "var(--oscura)", op: 1 },
   { min: 50, bg: "#ba934a", fg: "var(--oscura)" },
   { min: 60, bg: "#d4a64c", fg: "var(--oscura)" },
   { min: 70, bg: "#ebbb4c", fg: "var(--oscura)" },
@@ -152,7 +155,7 @@ function tramo(v) {
   for (const r of RAMPA) if (v >= r.min) t = r;
   return t;
 }
-function estiloTramo(v) { const t = tramo(v); return "--bg:" + t.bg + ";--fg:" + t.fg; }
+function estiloTramo(v) { const t = tramo(v); return "--bg:" + t.bg + ";--fg:" + t.fg + (t.op ? ";--op:" + t.op : ""); }
 
 // ==========================================
 // UTILIDADES
@@ -1334,6 +1337,25 @@ function medidaFiab(fuente, c, mercado) {
              + " %, pasó en el " + Math.round(mk.modelo.real) + " %\n" + mk.modelo.n + " partidos" };
 }
 
+/** El registro en vivo de cada versión del modelo (registro.versiones, la más nueva
+ *  primero): con cada cambio del modelo sus números empiezan de cero, y así se ve si el
+ *  de ahora acierta más o menos que el de antes. Con una sola versión no dice nada más. */
+function htmlVersionesFiab(mercado) {
+  const vs = (registro && registro.versiones) || [];
+  if (vs.length < 2) return "";
+  return '<div class="fiab-versiones"><p class="fiab-v-cab">Por versión del modelo</p>' + vs.map(v => {
+    const m = mercado === "1x2" ? v : (v.mercados || {})[mercado];
+    if (!m) return "";
+    const ahora = v.version === registro.version_actual;
+    const meta = (v.desde_fecha ? "desde el " + fechaCorta(v.desde_fecha) + " · " : "")
+      + v.partidos + (v.partidos === 1 ? " partido" : " partidos");
+    return '<div class="fiab fiab-v"><span>Modelo ' + esc(String(v.version)) + (ahora ? ' <b>(el de ahora)</b>' : "")
+      + '<span class="meta">' + esc(meta) + '</span></span>'
+      + '<span class="val">' + (m.skill_score > 0 ? "+" : "") + esc(String(m.skill_score)) + '</span>'
+      + '<span class="acierto">' + (m.acierto !== undefined ? Math.round(m.acierto) + " %" : "—") + '</span></div>';
+  }).join("") + '</div>';
+}
+
 function htmlFiabilidad() {
   const hayVal = validacionLista(), hayReg = registroListo();
   if (!hayVal && !hayReg) {
@@ -1376,10 +1398,12 @@ function htmlFiabilidad() {
           + '<span class="val">' + (m.skill > 0 ? "+" : "") + m.skill + '</span>'
           + '<span class="acierto">' + acierto + '</span></div>';
       }).join("")
+    + (enVivo ? htmlVersionesFiab(mercadoFiab) : "")
     + '<p class="nota">' + (enVivo
         ? 'Lo que publicó esta web antes de cada partido, contra el resultado real'
           + (registro.desde_fecha ? ', desde el ' + esc(fechaLarga(registro.desde_fecha)) : "")
           + '. Skill frente a la base "equipo medio". Con pocos partidos por liga es sobre todo ruido: la temporada pasada mide cientos.'
+          + ((registro.versiones || []).length > 1 ? ' Cada vez que cambia el modelo, sus números empiezan de cero.' : "")
         : mercadoFiab === "1x2"
         ? 'Skill score: cuánto Brier le quita el modelo a la base "equipo medio". 0 es no aportar nada.'
         : 'Skill score frente a la base "equipo medio" en este mercado. Con solo resultados, los mercados de goles'

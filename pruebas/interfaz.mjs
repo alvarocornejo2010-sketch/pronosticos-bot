@@ -8,7 +8,8 @@
 // Mis equipos ofrece los avisos (y que activarlos y quitarlos funciona contra el Worker,
 // con el servicio de avisos del navegador de mentira: sin red, Chromium no puede
 // suscribirse), que crear el calendario de Mis equipos da sus enlaces (y quitarlo, que su
-// dirección deje de funcionar), que la página de privacidad se lee en todos los anchos, que el detalle de
+// dirección deje de funcionar), que la página de privacidad se lee en todos los anchos, que
+// Fiabilidad medida, En vivo, trae una fila por versión del modelo, que el detalle de
 // un partido de un equipo seguido propone los avisos, que sus nombres enlazan con la
 // página de cada equipo y que «Cómo gana» trae sus cuatro casillas, y pasa axe-core (accesibilidad) por la
 // semana, Mis equipos, el detalle, la tabla y la página de un equipo, en el móvil y en
@@ -93,7 +94,7 @@ function revisar() {
       t: Math.min(...rs.map((r) => r.top)), b: Math.max(...rs.map((r) => r.bottom)) } : null;
   };
   const pisadas = [];
-  for (const fila of document.querySelectorAll(".fila, .prox, .claro, .res, .dia-celda, .liga-fila, .det-cab, .tabla-liga tr, .eq-cab, .eq-fz")) {
+  for (const fila of document.querySelectorAll(".fila, .prox, .claro, .res, .dia-celda, .liga-fila, .det-cab, .tabla-liga tr, .eq-cab, .eq-fz, .fiab-v")) {
     const hijos = [...fila.children].filter((h) => getComputedStyle(h).display !== "none" && getComputedStyle(h).visibility !== "hidden");
     const cajas = hijos.map(caja);
     for (let i = 0; i < hijos.length; i++) for (let j = i + 1; j < hijos.length; j++) {
@@ -212,6 +213,57 @@ for (const [ancho, alto] of ANCHOS) {
       for (const x of v) fallo(`${ancho}px, ${nombre}: accesibilidad ${x}`);
     }
   }
+  // Fiabilidad medida, En vivo, con tres versiones del modelo. El registro es de mentira:
+  // aquí ningún partido termina (nadie llama a /__jugar), así que sale vacío. Las ligas,
+  // de la validación, que tiene la misma forma.
+  const val = await (await fetch(W + "/api/validacion")).json();
+  const versiones = [[4, "2026-10-25", 12, -3.4, 50], [3, "2026-10-23", 79, 8.1, 55.6], [2, "2026-10-18", 1, 10.2, 57.4]]
+    .map(([version, desde_fecha, partidos, skill_score, acierto]) => ({ version, desde_fecha, partidos, skill_score, acierto,
+      mercados: { mas_25: { skill_score: 1.2, acierto: 54.1 }, ambos: { skill_score: -0.4, acierto: 51 } } }));
+  const falso = { ...val, estado: "listo", plataforma: "cloudflare", partidos: 92, desde_fecha: "2026-10-18", ultimos: [],
+    semana: [], version_actual: 4, versiones };
+  await p.route("**/api/registro", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify(falso) }));
+  await p.goto("about:blank");
+  await p.goto(W + "/#/semana");
+  await p.waitForSelector(".fila", { timeout: 15000 });
+  await p.waitForFunction(() => registro && (registro.versiones || []).length === 3, null, { timeout: 15000 });
+  await p.evaluate(() => { fuenteFiab = "registro"; render(); });
+  const lig = p.locator('.pestanas button[data-p="ligas"]');
+  if (await lig.isVisible()) await lig.click();
+  await p.evaluate(() => document.fonts.ready);
+  const filas = await p.locator(".m-fiab .fiab-versiones .fiab-v").allInnerTexts();
+  if (filas.length !== 3 || !/Modelo 4 \(el de ahora\)/.test(filas[0]) || !/desde el 18 oct · 1 partido\b/.test(filas[2])
+      || !/-3\.4/.test(filas[0])) {
+    fallo(`${ancho}px: Fiabilidad medida, En vivo, no trae sus versiones del modelo: ${JSON.stringify(filas)}`);
+  }
+  const rf = await p.evaluate(revisar);
+  for (const x of rf.fuera) fallo(`${ancho}px, versiones del modelo: se sale ${x}`);
+  for (const x of rf.pisadas) fallo(`${ancho}px, versiones del modelo: se pisan ${x}`);
+  if (ancho === 390 || ancho === 1440) {
+    await p.evaluate(AXE);
+    const v = await p.evaluate(async () => (await axe.run(document.querySelector(".m-fiab"), { resultTypes: ["violations"] })).violations
+      .map((x) => `${x.impact} ${x.id} (${x.nodes.length}): ${x.nodes[0].target.join(" ")}`));
+    for (const x of v) fallo(`${ancho}px, versiones del modelo: accesibilidad ${x}`);
+    // una casilla en cada tramo de la rampa: que el contraste de su texto no dependa de
+    // qué probabilidades traen los datos del día (el 27 oct, una doble oportunidad de 40 y
+    // pico no llegaba al 4.5:1 con la etiqueta y la cuota a 0.8 de opacidad)
+    const t = await p.evaluate(async () => {
+      const caja = document.createElement("div");
+      caja.className = "casillas";
+      caja.id = "prueba-tramos";
+      caja.innerHTML = [5, 25, 35, 45, 55, 65, 75, 85].map((x) => '<span class="cas" role="group" aria-label="Prueba ' + x
+        + '" style="' + estiloTramo(x) + '"><small>1X</small><b>' + x + '</b><span class="que">Local o empate</span><span>'
+        + htmlCuota(x) + '</span></span>').join("");
+      document.querySelector(".m-fiab").prepend(caja);
+      const r = (await axe.run("#prueba-tramos", { runOnly: ["color-contrast"], resultTypes: ["violations"] })).violations
+        .flatMap((x) => x.nodes.map((n) => n.target.join(" ") + ": " + (n.any[0] || {}).message));
+      caja.remove();
+      return r;
+    });
+    for (const x of t) fallo(`${ancho}px, casillas de la rampa: contraste ${x}`);
+  }
+  await p.unroute("**/api/registro");
+
   // la política de privacidad: una página aparte, sin JavaScript, enlazada desde la web
   await p.goto(W + "/privacidad");
   await p.waitForSelector("h1");

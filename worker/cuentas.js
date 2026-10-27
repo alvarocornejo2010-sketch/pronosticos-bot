@@ -25,7 +25,7 @@ import { ajustes } from "./config.js";
 import { Reloj } from "./tiempo.js";
 
 const ALFABETO = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";   // Crockford: sin I, L, O ni U
-const DIAS_SESION = 180;
+export const DIAS_SESION = 180;
 const MS_DIA = 86400000;
 export const MAX_EQUIPOS = 60;                        // los mismos que guarda la web
 const MAX_NOMBRE = 80;

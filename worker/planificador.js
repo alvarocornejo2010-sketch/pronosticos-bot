@@ -2,7 +2,8 @@
 // keep-alive (un Worker no se duerme) y el reloj es el cron de Cloudflare, que
 // llama a tick() cada minuto. Cada vez decide si hay algo que hacer: primero
 // actualizar la web, luego los avisos de Mis equipos (avisos.js) si toca, y solo con
-// la web al día, avanzar la validación y, en los minutos libres, las tablas.
+// la web al día, avanzar la validación y, en los minutos libres, las tablas y, una vez
+// al día, la limpieza (limpieza.js).
 
 import { MAX_INTENTOS_VALIDACION, VERSION_MODELO, ajustes } from "./config.js";
 import { Almacen } from "./almacen.js";
@@ -12,9 +13,10 @@ import { Contexto, pasada, temporadaActual } from "./actualizacion.js";
 import { pasoValidacion, sentenciasError, sentenciasInicio } from "./validacion.js";
 import { pasoTablas, tocaTablas } from "./tablas.js";
 import { pasoAvisos, tocaAvisos } from "./avisos.js";
+import { limpiar, tocaLimpieza } from "./limpieza.js";
 
 const DOCS_CONTROL = ["resumen", "validacion_resumen", "pedido_forzar", "pedido_validar", "tablas_resumen",
-  "avisos_resumen"];
+  "avisos_resumen", "limpieza"];
 // Un error se reintenta a los 5 minutos, como el tick de app.py, no a cada minuto.
 const MINUTOS_REINTENTO_ERROR = 5;
 // Si una ejecución muere a medias (CPU, despliegue), el candado caduca solo.
@@ -121,7 +123,11 @@ export async function tick(env, { fetchFn = null } = {}) {
   const resumenTablas = leer(docs.tablas_resumen);
   const ligaTabla = tarea ? null : tocaTablas(resumen, resumenTablas, ahora);
   if (ligaTabla) { tarea = "tablas"; motivo = "la tabla de " + ligaTabla; }
+  if (!tarea && (motivo = tocaLimpieza(docs.limpieza, ahora))) tarea = "limpieza";
   if (!tarea) return { tarea: null };
+
+  // la limpieza no usa la API ni el candado: dos DELETE que no pisan a nadie
+  if (tarea === "limpieza") return { tarea, motivo, ...(await limpiar(almacen, ahora)) };
 
   // los avisos no usan la API
   if (!env.FOOTBALL_DATA_TOKEN && tarea !== "avisos") {
