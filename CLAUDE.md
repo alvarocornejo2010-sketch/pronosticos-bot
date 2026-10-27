@@ -851,9 +851,10 @@ es lo que pidió el dueño del proyecto; lo que cueste dinero (mandar correos) e
   ahora le harían falta 10 horas o muchas IP. No cuesta escrituras ni dinero: la IP es la
   clave del contador, que Cloudflare guarda un minuto en cada uno de sus sitios (cuenta
   aproximado, por sitio). Sin el binding (o si falla) no frena: los topes del día siguen.
-  **Por confirmar en producción** que el plan gratis lo acepta: la documentación no lo
-  limita a un plan; si no, el despliegue fallaría y se quitaría el bloque de
-  `wrangler.jsonc`. En `wrangler dev` funciona igual, y la IP es la cabecera
+  El plan gratis lo acepta: el despliegue del 26 oct 2026 salió con el binding y el cron
+  siguió igual (que frene de verdad en producción no se ha probado desde fuera: seis
+  entradas con la contraseña mal en un minuto, y la sexta tendría que decir "espera un
+  minuto"). En `wrangler dev` funciona igual, y la IP es la cabecera
   `CF-Connecting-IP` que mande el cliente: `cuentas.py` e `ics.py` mandan una distinta en
   cada petición (como gente distinta) y prueban el freno con una repetida.
 - **Solo en Cloudflare:** en Render, `/api/cuenta` responde `disponible: false` y
@@ -1479,8 +1480,8 @@ Environment).
 - **Cuentas, la versión siguiente** (ver "Cuentas"): que alguien que sepa de leyes
   revise `/privacidad` (hecha en oct 2026, ver "Privacidad"): si hace falta inscribir el
   banco de datos en el Registro Nacional de Protección de Datos Personales y que figuren
-  el nombre y un contacto del responsable (hoy no, por decisión del dueño); confirmar que
-  el freno por IP despliega en el plan gratis; poner las claves de Turnstile en el panel; verificar el correo y
+  el nombre y un contacto del responsable (hoy no, por decisión del dueño); poner las
+  claves de Turnstile en el panel; verificar el correo y
   recuperar la contraseña con él (Cloudflare Email Service: plan de pago de Workers,
   US$5 al mes con 3.000 correos, y un dominio propio en Cloudflare, que además daría
   Search Console y la regla de límite por IP); y, si la gente las usa, entrar con
