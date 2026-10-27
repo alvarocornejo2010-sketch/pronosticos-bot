@@ -2,7 +2,7 @@
 // la tarjeta para compartir (worker/compartir.js), sin red ni D1.
 // Uso: node pruebas/semana.mjs
 import assert from "node:assert/strict";
-import { Registro, rehacerDias, favoritoDe, DIAS_RESUMEN } from "../worker/registro.js";
+import { Registro, rehacerDias, rehacerVersiones, favoritoDe, DIAS_RESUMEN } from "../worker/registro.js";
 import { enterosQueSuman, textosPartido, etiquetasOg, paginaPartido } from "../worker/compartir.js";
 import { Reloj } from "../worker/tiempo.js";
 
@@ -72,6 +72,63 @@ assert.match(consulta.sql, /r\.contado = 1/);
 assert.equal(consulta.a[0], "2026-10-02T12:00:00Z");
 assert.deepEqual(viejo.dias["2026-10-21"].tramos, { claros: [1, 1, 0.755] });
 console.log("un registro de antes se rehace con resultados y predicciones");
+
+// cada versión del modelo con sus cuentas: las fichas llevan su versión y su media
+const media = { media_local: 1.52, media_visita: 1.18 };
+const fv = (utc, v, pl, px, pv) => ficha(utc, pl, px, pv, { ...media, version_modelo: v, prob_mas_25: 40 + v, prob_ambos: 55 - v });
+const jugados = [
+  [fv("2026-10-18T15:00:00Z", 2, 60, 25, 15), 2, 0], [fv("2026-10-19T15:00:00Z", 2, 30, 30, 40), 0, 0],
+  [fv("2026-10-23T15:00:00Z", 3, 50, 25, 25), 1, 2], [fv("2026-10-24T15:00:00Z", 3, 70, 20, 10), 3, 1],
+  [fv("2026-10-25T20:00:00Z", 4, 45, 28, 27), 1, 1], [fv("2026-10-26T15:00:00Z", 4, 64, 22, 14), 2, 1],
+  [fv("2026-10-26T17:00:00Z", 4, 35, 30, 35), 0, 1],
+];
+const nuevo = new Registro(null);
+for (const [f, gl, gv] of jugados) anotar(nuevo, f, gl, gv);
+let pv = nuevo.publico("2026-10-27T00:00:00Z");
+assert.equal(pv.version_actual, 4);
+assert.deepEqual(pv.versiones.map((x) => [x.version, x.partidos, x.desde_fecha]), [[4, 3, "2026-10-25"], [3, 2, "2026-10-23"], [2, 2, "2026-10-18"]]);
+assert.equal(pv.versiones.reduce((s, x) => s + x.partidos, 0), pv.partidos);
+assert.ok(pv.versiones.every((x) => typeof x.skill_score === "number" && "mas_25" in x.mercados && "ambos" in x.mercados));
+// sin versión en la ficha: la 1, como en la validación
+const sinV = new Registro(null);
+anotar(sinV, ficha("2026-10-20T15:00:00Z", 50, 30, 20), 1, 0);
+assert.deepEqual(Object.keys(sinV.versiones), ["1"]);
+// lo guardado y vuelto a leer da lo mismo
+assert.deepEqual(new Registro(JSON.parse(JSON.stringify(nuevo))).publico("x").versiones, pv.versiones);
+console.log("versiones: cada una con sus partidos, su skill y desde cuándo; la de ahora primero");
+
+// un registro de antes (sin versiones) las rehace por partes, en el orden en que se liquidó
+// cada partido, y mientras tanto ni las publica ni suma ahí los nuevos: los lee una parte siguiente
+const liquidados = jugados.slice(0, 6).map(([f, gl, gv], i) => ({ gl, gv, liquidado: 1000 + (i < 3 ? 0 : i), id: f.id, utc: f.utcDate,
+  ...Object.fromEntries(Object.entries(f).map(([k, v]) => ["c_" + k, v])) }));
+const tabla = [...liquidados];
+const almacenV = {
+  db: { prepare: (sql) => ({ bind: (liq, id, parte) => ({ all: async () => ({ results: tabla
+    .filter((x) => x.liquidado > liq || (x.liquidado === liq && x.id > id))
+    .sort((a, b) => a.liquidado - b.liquidado || a.id - b.id).slice(0, parte) }) }) }) },
+  consultar: (fn) => fn(),
+};
+const antes = new Registro({ desde: null, desde_fecha: null, hasta: null, total: null, ligas: {}, ultimos: [], dias: {} });
+assert.deepEqual(antes.rehaciendo, [0, 0]);
+for (const [f, gl, gv] of jugados.slice(0, 6)) anotar(antes, f, gl, gv);   // lo que ya contaba antes
+assert.deepEqual(antes.versiones, {});
+await rehacerVersiones(antes, almacenV, reloj, 4);
+assert.deepEqual(antes.rehaciendo, [1003, liquidados[3].id]);
+assert.deepEqual(antes.publico("x").versiones, []);
+// un partido que se liquida a medias: no se suma a su versión ahora...
+const [f7, gl7, gv7] = jugados[6];
+anotar(antes, f7, gl7, gv7);
+assert.equal(Object.values(antes.versiones).reduce((s, x) => s + x.total.modelo.n, 0), 4);
+tabla.push({ gl: gl7, gv: gv7, liquidado: 2000, id: f7.id, utc: f7.utcDate,
+  ...Object.fromEntries(Object.entries(f7).map(([k, v]) => ["c_" + k, v])) });
+// ...sino en la parte siguiente (guardado y vuelto a leer, como en otra pasada), que
+// termina porque trae menos de 4: las mismas cuentas que si se hubieran sumado una a una
+const siguiente = new Registro(JSON.parse(JSON.stringify(antes)));
+assert.deepEqual(siguiente.rehaciendo, antes.rehaciendo);
+await rehacerVersiones(siguiente, almacenV, reloj, 4);
+assert.equal(siguiente.rehaciendo, null);
+assert.deepEqual(siguiente.publico("x").versiones, pv.versiones);
+console.log("un registro de antes rehace sus versiones por partes y no cuenta nada dos veces");
 
 // la tarjeta: los mismos enteros que la web, y todo escapado
 assert.deepEqual(enterosQueSuman([54.4, 23.4, 22.2]), [55, 23, 22]);

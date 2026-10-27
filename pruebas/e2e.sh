@@ -119,4 +119,7 @@ node "$REPO/pruebas/interfaz.mjs" "$P_W" "$P_API"
 echo "== Calendario de Mis equipos"
 python3 "$REPO/pruebas/ics.py" "$P_W" "$P_INS" "$TMP/d1" secreto_de_prueba_123 "$MAX_MS"
 (cd "$REPO" && FOOTBALL_DATA_TOKEN=sin_uso UPDATE_SECRET=calendario_dummy_secret python3 -c "import app; r = app.app.test_client().post('/api/calendario', json={}); assert r.status_code == 404 and r.get_json() == {'disponible': False}, r; print('Flask: /api/calendario no existe')")
+
+echo "== Limpieza del día"
+python3 "$REPO/pruebas/limpieza.py" "$P_W" "$TMP/d1"
 echo "e2e: OK"

@@ -22,7 +22,7 @@ import { mensajeAviso } from "./avisos.js";
 const MS_HORA = 3600000, MS_DIA = 24 * MS_HORA;
 const DIAS_ATRAS = 7;             // los partidos de la última semana, con su resultado
 const DURACION_MS = 2 * MS_HORA;  // lo que ocupa cada partido en el calendario
-const DIAS_SIN_USO = 120;         // un calendario que nadie pide en 4 meses se borra
+export const DIAS_SIN_USO = 120;  // un calendario que nadie pide en 4 meses se borra
 const GASTO_ALTA = 3;             // filas que escribe un alta, por lo alto
 const CLAVE = /^[a-z2-7]{26}$/;   // 128 bits en base32, en minúsculas
 

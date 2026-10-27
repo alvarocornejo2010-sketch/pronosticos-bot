@@ -1334,6 +1334,25 @@ function medidaFiab(fuente, c, mercado) {
              + " %, pasó en el " + Math.round(mk.modelo.real) + " %\n" + mk.modelo.n + " partidos" };
 }
 
+/** El registro en vivo de cada versión del modelo (registro.versiones, la más nueva
+ *  primero): con cada cambio del modelo sus números empiezan de cero, y así se ve si el
+ *  de ahora acierta más o menos que el de antes. Con una sola versión no dice nada más. */
+function htmlVersionesFiab(mercado) {
+  const vs = (registro && registro.versiones) || [];
+  if (vs.length < 2) return "";
+  return '<div class="fiab-versiones"><p class="fiab-v-cab">Por versión del modelo</p>' + vs.map(v => {
+    const m = mercado === "1x2" ? v : (v.mercados || {})[mercado];
+    if (!m) return "";
+    const ahora = v.version === registro.version_actual;
+    const meta = (v.desde_fecha ? "desde el " + fechaCorta(v.desde_fecha) + " · " : "")
+      + v.partidos + (v.partidos === 1 ? " partido" : " partidos");
+    return '<div class="fiab fiab-v"><span>Modelo ' + esc(String(v.version)) + (ahora ? ' <b>(el de ahora)</b>' : "")
+      + '<span class="meta">' + esc(meta) + '</span></span>'
+      + '<span class="val">' + (m.skill_score > 0 ? "+" : "") + esc(String(m.skill_score)) + '</span>'
+      + '<span class="acierto">' + (m.acierto !== undefined ? Math.round(m.acierto) + " %" : "—") + '</span></div>';
+  }).join("") + '</div>';
+}
+
 function htmlFiabilidad() {
   const hayVal = validacionLista(), hayReg = registroListo();
   if (!hayVal && !hayReg) {
@@ -1376,10 +1395,12 @@ function htmlFiabilidad() {
           + '<span class="val">' + (m.skill > 0 ? "+" : "") + m.skill + '</span>'
           + '<span class="acierto">' + acierto + '</span></div>';
       }).join("")
+    + (enVivo ? htmlVersionesFiab(mercadoFiab) : "")
     + '<p class="nota">' + (enVivo
         ? 'Lo que publicó esta web antes de cada partido, contra el resultado real'
           + (registro.desde_fecha ? ', desde el ' + esc(fechaLarga(registro.desde_fecha)) : "")
           + '. Skill frente a la base "equipo medio". Con pocos partidos por liga es sobre todo ruido: la temporada pasada mide cientos.'
+          + ((registro.versiones || []).length > 1 ? ' Cada vez que cambia el modelo, sus números empiezan de cero.' : "")
         : mercadoFiab === "1x2"
         ? 'Skill score: cuánto Brier le quita el modelo a la base "equipo medio". 0 es no aportar nada.'
         : 'Skill score frente a la base "equipo medio" en este mercado. Con solo resultados, los mercados de goles'
