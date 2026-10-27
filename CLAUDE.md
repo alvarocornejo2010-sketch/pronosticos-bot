@@ -199,7 +199,12 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
   tres primeros tramos y oscura en el resto, todas ≥ 4.8:1. La rampa anterior
   (arena oliva) no pasaba ese validador: dos tramos casi iguales, el más bajo a
   1.15:1 del fondo y 53° de tono. El blanco marca lo seleccionado (día, liga,
-  orden).
+  orden). En las casillas, la etiqueta, qué es y la cuota justa van más apagadas
+  (`opacity` 0.8 y 0.85), salvo en los tramos de 30 y 40 (`op: 1` en `RAMPA`, `--op`):
+  ahí bajaban a 3.75-4.3:1, por debajo del 4.5 del texto pequeño. Lo encontró axe el 27
+  oct con una doble oportunidad de 40 y pico: dependía de los datos del día, así que
+  `interfaz.mjs` pasa ahora una casilla de cada tramo. **Si se toca la rampa o esas
+  opacidades, volver a mirarlo.**
 - Ligas: la Champions va primera, con una insignia de contorno (UCL): es un
   torneo y no gasta un tono. Las ligas llevan insignia con la sigla dentro (ESP,
   ENG, FRA, ALE, ITA, NED, POR, EN2, BRA) y el tono de la liga de fondo; tinta oscura o blanca según el tono, todas
@@ -1606,7 +1611,8 @@ Environment).
     invitación de los avisos (y activarlos y quitarlos contra el Worker, con el
     servicio de avisos del navegador de mentira), crear el calendario y sus enlaces (y quitarlo), la página de
     privacidad en los 7 anchos (con axe en 390 y 1440), Fiabilidad medida → En vivo con tres
-    versiones del modelo (con un registro de mentira; axe en 390 y 1440), los nombres del detalle enlazando con
+    versiones del modelo (con un registro de mentira; axe en 390 y 1440), una casilla de cada tramo
+    de la rampa (el contraste, con axe en 390 y 1440), los nombres del detalle enlazando con
     la página de su equipo, y axe-core sin nada en la semana,
     Mis equipos, los dos detalles, la tabla y la página de un equipo, en el móvil y en escritorio. Es lo que en oct
     2026 encontró la fecha bajo el escudo y "Seguir" cortado en el móvil. El job

@@ -789,12 +789,12 @@
   .casillas.dos .cas small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cas { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 8px; padding: 9px 12px 10px;
          border-radius: var(--r-control); background: var(--bg); color: var(--fg); min-width: 0; }
-  .cas small { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-14); font-weight: 700; opacity: 0.8; }
+  .cas small { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-14); font-weight: 700; opacity: var(--op, 0.8); }
   .cas b { justify-self: end; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-24); font-weight: 800; line-height: 1;
            font-variant-numeric: tabular-nums; }
   .cas > span:last-child { grid-column: 1 / -1; margin-top: 2px; }
-  .cas .cuota { font-family: var(--f-txt); font-size: var(--t-12); font-weight: 500; color: inherit; opacity: 0.8; }
-  .cas .que { grid-column: 1 / -1; margin-top: 4px; font-size: var(--t-12); line-height: 1.25; opacity: 0.85; text-wrap: balance; }
+  .cas .cuota { font-family: var(--f-txt); font-size: var(--t-12); font-weight: 500; color: inherit; opacity: var(--op, 0.8); }
+  .cas .que { grid-column: 1 / -1; margin-top: 4px; font-size: var(--t-12); line-height: 1.25; opacity: var(--op, 0.85); text-wrap: balance; }
 
   .xg { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 0 10px; }
   .xg > b { font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-24); font-weight: 800; }

@@ -137,11 +137,14 @@ function htmlInsignia(cod, clase) {
 // luminosidad monótona, validada con el script de dataviz. Tinta blanca en los
 // tres primeros y oscura en el resto (todas >= 4.8:1). El tramo se decide con el
 // entero que se enseña, para que una celda que dice 60 caiga en 60-70.
+// op: la opacidad del texto secundario de una casilla (la etiqueta, qué es y la cuota
+// justa; 0.8 si no se dice). En los tramos de 30 y de 40 la tinta va entera: con 0.8
+// bajaba a 3.8 y 4.0:1, por debajo del 4.5 que pide el texto pequeño (axe, oct 2026).
 const RAMPA = [
   { min: 0,  bg: "#594d39", fg: "#ffffff" },
   { min: 20, bg: "#705d3e", fg: "#ffffff" },
-  { min: 30, bg: "#876e42", fg: "#ffffff" },
-  { min: 40, bg: "#a18047", fg: "var(--oscura)" },
+  { min: 30, bg: "#876e42", fg: "#ffffff", op: 1 },
+  { min: 40, bg: "#a18047", fg: "var(--oscura)", op: 1 },
   { min: 50, bg: "#ba934a", fg: "var(--oscura)" },
   { min: 60, bg: "#d4a64c", fg: "var(--oscura)" },
   { min: 70, bg: "#ebbb4c", fg: "var(--oscura)" },
@@ -152,7 +155,7 @@ function tramo(v) {
   for (const r of RAMPA) if (v >= r.min) t = r;
   return t;
 }
-function estiloTramo(v) { const t = tramo(v); return "--bg:" + t.bg + ";--fg:" + t.fg; }
+function estiloTramo(v) { const t = tramo(v); return "--bg:" + t.bg + ";--fg:" + t.fg + (t.op ? ";--op:" + t.op : ""); }
 
 // ==========================================
 // UTILIDADES

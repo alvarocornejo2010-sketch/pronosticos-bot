@@ -213,14 +213,16 @@ for (const [ancho, alto] of ANCHOS) {
       for (const x of v) fallo(`${ancho}px, ${nombre}: accesibilidad ${x}`);
     }
   }
-  // Fiabilidad medida, En vivo, con tres versiones del modelo (el registro de verdad, con
-  // las versiones de mentira: en la API falsa todo es del modelo de ahora)
-  const real = await (await fetch(W + "/api/registro")).json();
+  // Fiabilidad medida, En vivo, con tres versiones del modelo. El registro es de mentira:
+  // aquí ningún partido termina (nadie llama a /__jugar), así que sale vacío. Las ligas,
+  // de la validación, que tiene la misma forma.
+  const val = await (await fetch(W + "/api/validacion")).json();
   const versiones = [[4, "2026-10-25", 12, -3.4, 50], [3, "2026-10-23", 79, 8.1, 55.6], [2, "2026-10-18", 1, 10.2, 57.4]]
     .map(([version, desde_fecha, partidos, skill_score, acierto]) => ({ version, desde_fecha, partidos, skill_score, acierto,
       mercados: { mas_25: { skill_score: 1.2, acierto: 54.1 }, ambos: { skill_score: -0.4, acierto: 51 } } }));
-  await p.route("**/api/registro", (r) => r.fulfill({ contentType: "application/json",
-    body: JSON.stringify({ ...real, version_actual: 4, versiones }) }));
+  const falso = { ...val, estado: "listo", plataforma: "cloudflare", partidos: 92, desde_fecha: "2026-10-18", ultimos: [],
+    semana: [], version_actual: 4, versiones };
+  await p.route("**/api/registro", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify(falso) }));
   await p.goto("about:blank");
   await p.goto(W + "/#/semana");
   await p.waitForSelector(".fila", { timeout: 15000 });
@@ -242,6 +244,23 @@ for (const [ancho, alto] of ANCHOS) {
     const v = await p.evaluate(async () => (await axe.run(document.querySelector(".m-fiab"), { resultTypes: ["violations"] })).violations
       .map((x) => `${x.impact} ${x.id} (${x.nodes.length}): ${x.nodes[0].target.join(" ")}`));
     for (const x of v) fallo(`${ancho}px, versiones del modelo: accesibilidad ${x}`);
+    // una casilla en cada tramo de la rampa: que el contraste de su texto no dependa de
+    // qué probabilidades traen los datos del día (el 27 oct, una doble oportunidad de 40 y
+    // pico no llegaba al 4.5:1 con la etiqueta y la cuota a 0.8 de opacidad)
+    const t = await p.evaluate(async () => {
+      const caja = document.createElement("div");
+      caja.className = "casillas";
+      caja.id = "prueba-tramos";
+      caja.innerHTML = [5, 25, 35, 45, 55, 65, 75, 85].map((x) => '<span class="cas" role="group" aria-label="Prueba ' + x
+        + '" style="' + estiloTramo(x) + '"><small>1X</small><b>' + x + '</b><span class="que">Local o empate</span><span>'
+        + htmlCuota(x) + '</span></span>').join("");
+      document.querySelector(".m-fiab").prepend(caja);
+      const r = (await axe.run("#prueba-tramos", { runOnly: ["color-contrast"], resultTypes: ["violations"] })).violations
+        .flatMap((x) => x.nodes.map((n) => n.target.join(" ") + ": " + (n.any[0] || {}).message));
+      caja.remove();
+      return r;
+    });
+    for (const x of t) fallo(`${ancho}px, casillas de la rampa: contraste ${x}`);
   }
   await p.unroute("**/api/registro");
 
