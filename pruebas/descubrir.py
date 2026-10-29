@@ -1,11 +1,12 @@
 """Lo que hace la web instalable y lo que leen los buscadores: el manifiesto, el
 service worker y los iconos se sirven con su tipo; la CSP de la página los deja
-cargar; robots.txt apunta al sitemap; el sitemap lista la portada y los partidos
-por jugar (worker/buscadores.js), con las direcciones del origen de la petición; y la
+cargar; robots.txt apunta al sitemap; el sitemap lista la portada, las ligas y los
+partidos por jugar (worker/buscadores.js), con las direcciones del origen de la petición;
+la portada enlaza con la página de cada liga sin JavaScript; y la
 política de privacidad (/privacidad) se sirve, con la CSP de la web y sin JavaScript.
 Se corre contra el Worker local ya lleno (lo deja así e2e.sh).
 Uso: python pruebas/descubrir.py PUERTO_WORKER"""
-import json, sys, time, urllib.request
+import json, re, sys, time, urllib.request
 import xml.etree.ElementTree as ET
 
 W = f"http://127.0.0.1:{sys.argv[1]}"
@@ -47,11 +48,19 @@ estado = json.load(urllib.request.urlopen(W + "/api/estado"))
 ahora = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 por_jugar = {f"{W}/partido/{p['id']}" for d in estado["dias"] for p in d["partidos"] if p["utcDate"] > ahora}
 assert locs[0] == W + "/" and len(locs) == len(set(locs)), locs[:3]
+CODIGOS = {"CL", "PD", "PL", "FL1", "BL1", "SA", "DED", "PPL", "ELC", "BSA"}
+assert {l for l in locs if "/liga/" in l} == {f"{W}/liga/{c}" for c in CODIGOS}
 # los equipos de las tablas también van (los mira equipos.py)
-partidos = {l for l in locs[1:] if "/equipo/" not in l}
+partidos = {l for l in locs[1:] if "/equipo/" not in l and "/liga/" not in l}
 assert partidos == por_jugar, (len(partidos), len(por_jugar), partidos ^ por_jugar)
-print(f"buscadores: robots.txt apunta al sitemap; el sitemap trae la portada, los {len(por_jugar)} partidos por jugar"
-      f" y {len(locs) - 1 - len(partidos)} equipos")
+print(f"buscadores: robots.txt apunta al sitemap; el sitemap trae la portada, las 10 ligas, los {len(por_jugar)} partidos"
+      f" por jugar y {len(locs) - 11 - len(partidos)} equipos")
+# la portada, sin JavaScript: qué es la web y un enlace a cada liga
+_, portada = pedir("/")
+portada = portada.decode()
+assert "<title>Pronósticos de fútbol: 1 X 2 y goles</title>" in portada
+assert set(re.findall(r'<li><a href="/liga/([A-Z0-9]+)">', portada)) == CODIGOS
+print("portada: un enlace a la página de cada liga, para quien no ejecuta JavaScript")
 
 cab, pag = pedir("/privacidad")
 pag = pag.decode()

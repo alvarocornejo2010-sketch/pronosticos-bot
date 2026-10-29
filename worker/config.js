@@ -55,6 +55,11 @@ export const DEFENSA_DESCENDIDO = 0.85;
 export const VERSION_MODELO = 4;   // 3 (oct 2026): sin los playoffs de la Championship
                                    // 4 (oct 2026): los mercados de goles con ENCOGER_TOTAL
 export const FORMATO_LISTAS = 2;   // partidos_liga sin playoffs (soloLiga): las de antes se bajan otra vez
+
+// La clave de IndexNow (indexnow.js): pública a propósito, en /<clave>.txt (public/), con
+// la que los buscadores comprueban que las direcciones que se les mandan son de esta web.
+// Si se cambia, cambiar también el nombre y el contenido de ese archivo.
+export const INDEXNOW_CLAVE = "0929ae0a00d11dc89eade75a541f841f";
 export const TOLERANCIA_FUERZAS = 1e-4;
 export const MAX_ITER_FUERZAS = 300;
 export const K_LIGA = 50;
@@ -124,8 +129,11 @@ export function ajustes(env = {}) {
     maxSuscripciones: num("MAX_SUSCRIPCIONES", 2000),
     maxSuscripcionesDia: num("MAX_SUSCRIPCIONES_DIA", 300),
     maxEscriturasAvisosDia: num("MAX_ESCRITURAS_AVISOS_DIA", 5000),
-    // la dirección de la web, que va en la firma VAPID como contacto
+    // la dirección de la web, que va en la firma VAPID como contacto y en lo que se manda a
+    // IndexNow (indexnow.js)
     urlWeb: env.URL_WEB || "https://pronosticos-bot.alvarocornejo2010.workers.dev",
+    // adónde se mandan las páginas nuevas (indexnow.js); vacío, no se mandan
+    indexnowUrl: env.INDEXNOW_URL ?? "https://api.indexnow.org/indexnow",
     // solo en las pruebas: el origen de un servicio de avisos de mentira (http://127.0.0.1:...)
     pushPrueba: env.PUSH_PRUEBA || "",
     // El calendario de Mis equipos (calendario.js): cuántos puede haber, cuántos nuevos al

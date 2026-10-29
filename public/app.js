@@ -73,9 +73,14 @@ function esFavorito(p) { return favoritos.has(p.local) || favoritos.has(p.visita
 const enlacePartido = (location.pathname.match(/^\/partido\/(\d+)\/?$/) || [])[1] || null;
 let partidoEnlazado = enlacePartido;
 // /equipo/86: la página de un equipo compartida (worker/equipos.js le pone la tarjeta).
-// Es una vista más de la web: la dirección pasa en el acto a /#/equipo/86.
+// Es una vista más de la web: la dirección pasa en el acto a /#/equipo/86. Igual
+// /liga/PD (worker/ligas.js), que pasa a /#/liga/PD.
 const enlaceEquipo = (location.pathname.match(/^\/equipo\/(\d{1,9})\/?$/) || [])[1] || null;
 if (enlaceEquipo) history.replaceState(null, "", "/#/equipo/" + enlaceEquipo);
+const enlaceLiga = (location.pathname.match(/^\/liga\/([A-Z0-9]{2,4})\/?$/) || [])[1] || null;
+if (enlaceLiga) history.replaceState(null, "", "/#/liga/" + enlaceLiga);
+// el título de la portada (el de index.html), para cuando se sale de la página de un equipo
+const TITULO_WEB = "Pronósticos de fútbol: 1 X 2 y goles";
 let orden = "hora";
 let mercadoFiab = "1x2";   // qué mercado enseña el panel de fiabilidad
 let fuenteFiab = "validacion";   // y de dónde: la temporada pasada o el registro en vivo
@@ -1753,7 +1758,7 @@ function render() {
   ligaContada = ligaVista;
   const equipoVista = ruta.vista === "equipo" ? ruta.id : null;
   if (equipoVista && equipoVista !== equipoContado) contar({ t: "equipo", id: equipoVista });
-  if (!equipoVista && equipoContado) document.title = "Pronósticos";   // sale de la página de un equipo
+  if (!equipoVista && equipoContado) document.title = TITULO_WEB;   // sale de la página de un equipo
   equipoContado = equipoVista;
   const clave = JSON.stringify(ruta) + "|" + orden + "|" + (busqueda ? "b" : "") + "|" + mqEscritorio.matches;
   const reconstruir = clave !== rutaPintada;
@@ -2109,6 +2114,7 @@ function contar(evento) {
   const ev = { t: "entrada", v, d: ancho >= 1180 ? "escritorio" : ancho >= 880 ? "intermedio" : "movil", o };
   if (enlacePartido) ev.via = "partido";
   else if (enlaceEquipo) ev.via = "equipo";
+  else if (enlaceLiga) ev.via = "liga";
   if (favoritos.size) ev.f = 1;
   if (window.matchMedia("(display-mode: standalone)").matches || navigator.standalone) ev.app = 1;
   if (v === "vuelve") ev.hace = Math.round((Date.parse(hoy) - Date.parse(ultima)) / 86400000);

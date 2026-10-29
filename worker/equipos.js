@@ -18,7 +18,8 @@ import { ajustes, FORMATO_LISTAS } from "./config.js";
 import { fuerzaEquipo, redondear } from "./modelo.js";
 import { CAMPOS_PARTIDO, entradaDe, isoSinMs } from "./registro.js";
 import { Reloj } from "./tiempo.js";
-import { etiquetasOg, paginaConTarjeta, textosPartido } from "./compartir.js";
+import { cuantos, deLiga, enlaceLiga, esc, etiquetasOg, filaPartido, filaResultado, paginaConTarjeta,
+  textosPartido } from "./compartir.js";
 
 const FORMA = 5;      // los últimos partidos de liga que enseña
 const ULTIMOS = 6;    // y los últimos con pronóstico de la web
@@ -29,8 +30,8 @@ const SQL_TABLA = `SELECT substr(d.clave, 7) AS liga, d.valor FROM documentos d
   WHERE d.clave >= 'tabla:' AND d.clave < 'tabla;'
     AND EXISTS (SELECT 1 FROM json_each(d.valor, '$.equipos') e WHERE json_extract(e.value, '$.id') = ?1)
   LIMIT 1`;
-const SQL_PROXIMO = `SELECT pa.local_id, pa.base, pr.ficha FROM partidos pa LEFT JOIN predicciones pr ON pr.id = pa.id
-  WHERE (pa.local_id = ?1 OR pa.visita_id = ?1) AND pa.utc > ?2 ORDER BY pa.utc, pa.orden LIMIT 1`;
+const SQL_PROXIMOS = `SELECT pa.local_id, pa.base, pr.ficha FROM partidos pa LEFT JOIN predicciones pr ON pr.id = pa.id
+  WHERE (pa.local_id = ?1 OR pa.visita_id = ?1) AND pa.utc > ?2 ORDER BY pa.utc, pa.orden LIMIT 4`;
 const COLUMNAS = CAMPOS_PARTIDO.map((c) => `json_extract(p.ficha, '$.${c}') AS c_${c}`).join(", ");
 // lo publicado antes de empezar (contado) y ya con resultado, de local y de visita
 const sqlUltimos = (lado) => `SELECT r.gl, r.gv, p.utc, ${COLUMNAS}
@@ -40,22 +41,22 @@ const sqlUltimos = (lado) => `SELECT r.gl, r.gv, p.utc, ${COLUMNAS}
 // Puesto de v entre valores (1 = el mejor): cuántos son mejores, más uno.
 const puesto = (v, todos, mejor) => 1 + todos.filter((x) => (mejor === "alto" ? x > v : x < v)).length;
 
-// Lo que lee la web de un equipo, y la ficha de su próximo partido (para la tarjeta);
-// null si no está en ninguna tabla ni en el calendario.
+// Lo que lee la web de un equipo, y las fichas de sus próximos partidos (para la tarjeta
+// y el texto de su página); datos null si no está en ninguna tabla ni en el calendario.
 async function leerEquipo(almacen, id, reloj, ahora) {
   const db = almacen.db;
   const [enTabla, prox] = await almacen.consultar(() => db.batch([
     db.prepare(SQL_TABLA).bind(id),
-    db.prepare(SQL_PROXIMO).bind(id, isoSinMs(ahora)),
+    db.prepare(SQL_PROXIMOS).bind(id, isoSinMs(ahora)),
   ]));
   const filaTabla = enTabla.results[0];
   const doc = filaTabla ? JSON.parse(filaTabla.valor) : null;
   const yo = doc && doc.equipos.find((e) => e.id === id);
-  const p = prox.results[0];
-  const proximo = p ? JSON.parse(p.ficha || p.base) : null;
+  const proximos = prox.results.map((p) => JSON.parse(p.ficha || p.base));
+  const p = prox.results[0], proximo = proximos[0] || null;
   const lado = p ? (p.local_id === id ? "local" : "visita") : null;
   const nombre = yo ? yo.nombre : proximo && proximo[lado];
-  if (!nombre) return { datos: null, proximo: null };
+  if (!nombre) return { datos: null, proximos: [] };
 
   const liga = filaTabla ? filaTabla.liga : null;
   const [fuerzas, lista, deLocal, deVisita] = await almacen.consultar(() => db.batch([
@@ -110,7 +111,7 @@ async function leerEquipo(almacen, id, reloj, ahora) {
     for (const c of CAMPOS_PARTIDO) ficha[c] = x["c_" + c];
     return entradaDe(ficha, x.gl, x.gv, reloj.local(Date.parse(x.utc)));
   });
-  return { datos: out, proximo };
+  return { datos: out, proximos };
 }
 
 export async function datosEquipo(almacen, id, reloj, ahora = Date.now()) {
@@ -135,19 +136,61 @@ export function textosEquipo(d, proximo, reloj) {
   return { titulo: `${nombre}: próximos partidos y pronóstico`, descripcion: partes.join(" ") };
 }
 
+// "32 % más", "lo mismo": su fuerza frente a la de un equipo medio (htmlFuerza en app.js).
+function cuanto(v) {
+  const n = Math.round((v - 1) * 100);
+  return n === 0 ? "lo mismo" : `un ${Math.abs(n)} % ${n > 0 ? "más" : "menos"}`;
+}
+
+// El texto de su página para quien no ejecuta JavaScript: su puesto, su forma, cómo
+// juega, sus próximos partidos y lo que dijo la web de los últimos, con sus enlaces.
+export function textoEquipo(d, proximos, reloj) {
+  const nombre = d.corto || d.nombre;
+  const deSuLiga = d.liga ? deLiga(d.liga, d.liga_nombre) : "de su liga";
+  const p = [];
+  if (d.tabla) {
+    const t = d.tabla;
+    p.push(`<p class="meta">${enlaceLiga(d.liga, d.liga_nombre)} · ${t.pos}.º de ${t.equipos} con ${cuantos(t.pts, "punto", "puntos")}`
+      + ` en ${cuantos(t.pj, "partido", "partidos")}: ${cuantos(t.g, "ganado", "ganados")}, ${cuantos(t.e, "empatado", "empatados")}`
+      + ` y ${cuantos(t.p, "perdido", "perdidos")}, ${cuantos(t.gf, "gol", "goles")} a favor y ${t.gc} en contra.</p>`);
+  }
+  if (d.forma.length) {
+    const letra = (x) => (x.gf > x.gc ? "G" : x.gf === x.gc ? "E" : "P");
+    p.push(`<p>Últimos de liga: ${esc(d.forma.map((x) => `${letra(x)} ${x.gf}-${x.gc} ante ${x.rival_corto || x.rival || "?"}`
+      + ` (${x.local ? "en casa" : "fuera"})`).join(" · "))}.</p>`);
+  }
+  if (d.fuerza) {
+    const f = d.fuerza;
+    p.push(`<p>Marca ${cuanto(f.ataque)} que un equipo medio ${esc(deSuLiga)} contra las mismas defensas (${f.puesto_ataque}.º`
+      + ` de ${f.equipos}) y encaja ${cuanto(f.defensa)} contra los mismos ataques (${f.puesto_defensa}.º). `
+      + (f.partidos ? `Es lo que usa el modelo, con sus ${f.partidos} partidos de liga de esta temporada y la anterior.`
+        : "Recién llegado a la liga: parte de lo que suelen rendir los que llegan, hasta que juegue.") + "</p>");
+  }
+  p.push("<h2>Próximos partidos</h2>", proximos.length
+    ? "<ul>" + proximos.map((x) => filaPartido(x, reloj)).join("") + "</ul>"
+    : "<p>No juega en los próximos días.</p>");
+  if (d.ultimos.length) {
+    p.push("<h2>Lo que dijo la web</h2>", "<ul>" + d.ultimos.map((x) => filaResultado(x, x.gl, x.gv, reloj)).join("") + "</ul>");
+  }
+  p.push(`<p class="enlaces">${d.liga ? enlaceLiga(d.liga, `Tabla y partidos ${deSuLiga}`) + " · " : ""}`
+    + '<a href="/">Los partidos de toda la semana</a></p>');
+  return { h1: `${nombre}: próximos partidos y pronóstico`, html: `<div class="escrito">${p.join("")}</div>` };
+}
+
 export async function paginaEquipo(request, env, almacen, id) {
-  let og = null;
+  let og = null, texto = null;
   try {
     const reloj = new Reloj(ajustes(env).tz);
-    const { datos: d, proximo } = await leerEquipo(almacen, id, reloj, Date.now());
+    const { datos: d, proximos } = await leerEquipo(almacen, id, reloj, Date.now());
     if (d) {
-      const { titulo, descripcion } = textosEquipo(d, proximo, reloj);
+      const { titulo, descripcion } = textosEquipo(d, proximos[0] || null, reloj);
       og = etiquetasOg(new URL(request.url).origin, `/equipo/${id}`, titulo, descripcion);
+      texto = textoEquipo(d, proximos, reloj);
     }
   } catch (e) {
     console.error(`/equipo/${id}: ${(e && e.stack) || e}`);
   }
-  return paginaConTarjeta(request, env, og);
+  return paginaConTarjeta(request, env, og, texto);
 }
 
 // Los equipos de todas las tablas, para el sitemap: [id, fecha de la tabla].

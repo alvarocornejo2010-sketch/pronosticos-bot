@@ -1419,6 +1419,13 @@ def equipo(id_equipo):
     return render_template("index.html")
 
 
+@app.route("/liga/<codigo>")
+def pagina_liga(codigo):
+    """La página de una liga para compartir y para los buscadores: la misma web, que la
+    abre. Su tarjeta y su texto solo los pone Cloudflare (worker/ligas.js)."""
+    return render_template("index.html")
+
+
 @app.route("/api/equipo/<int:id_equipo>")
 def api_equipo(id_equipo):
     """La página de cada equipo (su tabla, su fuerza y lo que dijo la web de sus

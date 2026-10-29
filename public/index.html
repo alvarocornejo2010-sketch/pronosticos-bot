@@ -6,12 +6,12 @@
 <meta name="theme-color" content="#0b130f">
 <meta name="color-scheme" content="dark">
 <!-- Título, descripción, dirección canónica y la tarjeta que enseñan WhatsApp,
-     Telegram o X al compartir la web. En /partido/123 el Worker cambia este
-     bloque por el del partido (worker/compartir.js). canonical, og:url y
-     og:image llevan la dirección entera: si la web cambia de dominio,
-     cambiarlas aquí. -->
+     Telegram o X al compartir la web. En /partido/123, /equipo/86 y /liga/PD el
+     Worker cambia este bloque por el suyo, y también el título de la vista (h1) y el
+     texto de #vista (worker/compartir.js). canonical, og:url y og:image llevan la
+     dirección entera: si la web cambia de dominio, cambiarlas aquí. -->
 <!-- og -->
-<title>Pronósticos</title>
+<title>Pronósticos de fútbol: 1 X 2 y goles</title>
 <meta name="description" content="Pronósticos 1X2 y doble oportunidad de la Champions League, LaLiga, Premier League, Ligue 1, Bundesliga, Serie A, Eredivisie, Primeira Liga, Championship y Brasileirão con un modelo Poisson de fuerzas de ataque y defensa ajustadas por rival.">
 <link rel="canonical" href="https://pronosticos-bot.alvarocornejo2010.workers.dev/">
 <meta property="og:type" content="website">
@@ -507,6 +507,23 @@
   .banda svg { flex-shrink: 0; margin-top: 3px; }
   .banda.error svg { color: var(--critico); }
   @media (min-width: 880px) { .banda { display: none; } }
+
+  /* El texto ya escrito (en #vista, entre las marcas "texto"): la portada y lo que
+     pone el Worker en /partido/123, /equipo/86 y /liga/PD para quien no ejecuta
+     JavaScript. Se ve un instante, hasta que app.js pinta. */
+  .centro:has(.escrito) .cab-tabla { display: none; }
+  .escrito { max-width: 72ch; padding: 4px 16px 32px; color: var(--tinta-2); font-size: var(--t-15); line-height: 1.55;
+             overflow-wrap: break-word; }
+  .escrito h2 { margin: 22px 0 8px; font-family: var(--f-disp); font-stretch: 88%; font-size: var(--t-20); font-weight: 800;
+                color: var(--tinta); text-wrap: balance; }
+  .escrito p { margin: 0 0 10px; }
+  .escrito .meta { color: var(--tinta-3); font-size: var(--t-14); }
+  .escrito ul, .escrito ol { margin: 0 0 12px; padding-left: 1.25em; }
+  .escrito li { margin-bottom: 6px; }
+  .escrito li::marker { color: var(--tinta-3); }
+  .escrito b { color: var(--tinta); font-weight: 700; }
+  .escrito a { color: var(--tinta); text-underline-offset: 2px; }
+  .escrito .enlaces { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--linea); font-size: var(--t-14); }
 
   /* ---------------- tabla ---------------- */
   .vista { min-height: 0; }
@@ -1126,7 +1143,7 @@
     <div class="banda" id="banda" hidden></div>
     <div class="tira-ligas" id="tira-ligas" role="toolbar" aria-label="Ligas"></div>
     <div class="herramientas">
-      <h1 class="titulo-vista" id="titulo-vista">Pronósticos</h1>
+      <h1 class="titulo-vista" id="titulo-vista"><!-- h1 -->Pronósticos de fútbol<!-- /h1 --></h1>
       <div id="limpiar-hueco"></div>
       <div class="segmentos" id="orden" role="group" aria-label="Ordenar: por hora, más claros primero o más reñidos primero"></div>
     </div>
@@ -1136,7 +1153,28 @@
       <span class="der c-d" data-tip="Doble oportunidad: gana el local o empate">1X</span><span class="der c-d" data-tip="Doble oportunidad: empate o gana el visitante">X2</span><span class="der c-d" data-tip="Doble oportunidad: gana cualquiera de los dos, sin empate">12</span>
       <span class="der c-xg" data-tip="Goles que el modelo espera de cada equipo">Goles esp.</span><span class="der c-g" data-tip="Más de 2.5 goles: 3 o más en el partido">+2.5</span><span class="der c-g" data-tip="Marcan los dos equipos">Ambos</span><span class="der c-m" data-tip="Partidos de liga (esta temporada y la anterior) del equipo con menos. Con menos de 4, el número tira hacia un equipo medio">Muestra</span><span class="c-rep" data-tip="El 1 X 2 en una barra">Reparto</span>
     </div>
-    <div class="vista" id="vista" tabindex="-1"></div>
+    <!-- Lo que lee quien no ejecuta JavaScript (buscadores, asistentes): en la portada,
+         qué es la web y sus ligas; en /partido/123, /equipo/86 y /liga/PD, su texto, que
+         pone el Worker. app.js lo cambia por lo suyo al pintar. -->
+    <div class="vista" id="vista" tabindex="-1"><!-- texto --><div class="escrito">
+      <p>Las probabilidades de cada partido de la semana: quién gana (1 X 2), la doble oportunidad, los goles (más o menos
+        de 2.5, ambos marcan, portería a cero) y los marcadores más probables. Salen de un modelo Poisson con la fuerza de
+        ataque y de defensa de cada equipo, ajustada por rival y medida contra miles de partidos.</p>
+      <h2>Ligas</h2>
+      <ul>
+        <li><a href="/liga/CL">Champions League</a></li>
+        <li><a href="/liga/PD">La Liga</a></li>
+        <li><a href="/liga/PL">Premier League</a></li>
+        <li><a href="/liga/FL1">Ligue 1</a></li>
+        <li><a href="/liga/BL1">Bundesliga</a></li>
+        <li><a href="/liga/SA">Serie A</a></li>
+        <li><a href="/liga/DED">Eredivisie</a></li>
+        <li><a href="/liga/PPL">Primeira Liga</a></li>
+        <li><a href="/liga/ELC">Championship</a></li>
+        <li><a href="/liga/BSA">Brasileirão</a></li>
+      </ul>
+      <p class="enlaces"><a href="/privacidad">Privacidad</a></p>
+    </div><!-- /texto --></div>
   </main>
 
   <div class="lateral">
