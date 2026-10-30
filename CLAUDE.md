@@ -1103,7 +1103,8 @@ hacia el prior del equipo: 1 si ya estaba en la liga la temporada anterior; si
 no, lo que diga `prior_recien_llegado` (ver "Recién llegados"). Encima, el 1X2
 lleva la corrección de Dixon-Coles de los marcadores bajos (`RHO_EMPATES` =
 -0.05) y los mercados de goles acercan el total de goles a la media con
-`ENCOGER_TOTAL` = 0.6 (ver "Mercados de goles").
+`ENCOGER_TOTAL` = 0.6 y bajan un poco el 0 de cada equipo (`MENOS_CEROS` = 0.02; ver
+"Mercados de goles").
 
 **Recién llegados** (`prior_recien_llegado`, oct 2026). Un equipo que no estaba
 en la liga la temporada anterior parte de:
@@ -1372,7 +1373,7 @@ la misma base "equipo medio". Cuesta 2
 peticiones por liga y solo la primera vez — las temporadas terminadas no cambian,
 así que quedan cacheadas en disco.
 
-## Mercados de goles — `ENCOGER_TOTAL = 0.6` (modelo 4, oct 2026)
+## Mercados de goles — `ENCOGER_TOTAL = 0.6` (modelo 4) y `MENOS_CEROS = 0.02` (modelo 5, oct 2026)
 
 Más/menos, ambos marcan, porterías a cero, cómo gana (por 2 o más y sin recibir
 gol) y marcadores salen de `mercados_de_goles`, no de `calcular_poisson`: todos de
@@ -1428,12 +1429,35 @@ habrá). La web no los deja pasar del entero con que gana ese equipo en la tabla
 salen de otra rejilla que el 1X2 y en 35.000 partidos no pasaba ni una vez, pero
 así no se contradicen nunca.
 
-**Lo que queda:** las porterías a cero salen algo altas (31.1% predicho frente a
-29.9% en la prueba, 24.1 frente a 22.6) y ambos marcan algo bajo (52.1 frente a
-53.9): un sesgo de nivel que ninguna de las rejillas probadas quita. Idea sin
-probar: una corrección de los marcadores bajos propia de los mercados de goles.
-Y la ganancia en el total sigue siendo pequeña frente al ~9% del 1X2: con solo
-goles marcados y encajados, cuántos goles habrá apenas se predice mejor que con
+**El 0 de cada equipo, algo más bajo: `MENOS_CEROS = 0.02` (modelo 5, oct 2026).** Con
+el modelo 4 las porterías a cero salían altas (31.1% predicho frente a 30.1% real en la
+prueba, y 24.1 frente a 22.7) y ambos marcan bajo (52.1 frente a 53.6): en todo caso,
+demasiados partidos en que un equipo no marca. En la rejilla de los mercados de goles,
+la probabilidad de que cada equipo marque 0 baja un 2% y lo que pierde se reparte entre
+1, 2, 3... goles en proporción (`_menos_ceros` y `menosCeros`). Elegido en las temporadas
+de ajuste por la log loss del marcador exacto (de 0 a 0.12: el mínimo, plano entre 0.02 y
+0.025; -0.00026, -1.9 se) y juzgado en las de prueba frente al modelo 4:
+
+```
+mercado            diferencia de Brier (prueba)    predicho con 5 (real)
+marcador (log loss)   -0.00056 (-3.7 se)
+más de 2.5            -0.00009 (-2.3 se)          51.9 (52.5)
+ambos marcan          -0.00021 (-3.1 se)          52.9 (53.6)
+portería a cero L/V   -0.00012 / -0.00011 (-2.3 / -2.8 se)   30.5 (30.1) / 23.6 (22.7)
+más de 1.5 y 3.5, gana por 2+ y sin recibir gol: iguales o algo mejor (de +0.1 a -2.1 se)
+```
+
+Mejor en 12 de las 16 temporadas y en las 8 ligas de la prueba. Es poco: un décimo de
+lo que ganó `ENCOGER_TOTAL`, y el sesgo no se va del todo. Probado también y peor en el
+ajuste: otra corrección de Dixon-Coles para los mercados de goles (rho de -0.15 a +0.10,
+lo mejor es el -0.05 del 1X2), subir el total de goles un 1-4%, bajar el 0 sin cambiar la
+media de goles de cada equipo y bajarlo solo al local o solo al visitante. La Champions
+usa la misma rejilla y no se ha medido aparte (`afinar_champions.py` mide el 1X2). `goles_total`
+sigue siendo la suma de los goles esperados acercados, sin este cambio (~1% menos que la
+media de la rejilla). `python afinar_liga.py afinar` repite la búsqueda.
+
+**Lo que queda:** la ganancia en el total sigue siendo pequeña frente al ~9% del 1X2: con
+solo goles marcados y encajados, cuántos goles habrá apenas se predice mejor que con
 la media de la liga. La web lo dice en el detalle de cada partido y en el panel
 Fiabilidad. No vender esos números como el 1X2.
 
@@ -1581,6 +1605,7 @@ Environment).
   `/api/validacion`, y es lo único que puede afinar `RHO_EMPATES` con datos
   propios. Desde el 27 oct 2026 lleva además las cuentas de cada versión del modelo
   (ver "El registro en vivo"): el 27 oct, 54 partidos del modelo 2, 79 del 3 y 12 del 4.
+  El 5 (`MENOS_CEROS`, oct 2026) solo toca los mercados de goles: su 1X2 es el del 4.
 - **Champions:** ya junta liga nacional, nivel de liga e historial en la
   Champions, medido con cuatro temporadas (ver "Champions: cómo se predice").
   Cada verano, añadir la temporada que termina a `TEMPORADAS_CL` en

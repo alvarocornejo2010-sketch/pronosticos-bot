@@ -189,12 +189,13 @@ DEFENSA_RECIEN_LLEGADO = {"PL": 1.3}   # ...salvo en la Premier, donde el que su
 LIGA_DE_ARRIBA = {"ELC": "PL"}
 ATAQUE_DESCENDIDO = 1.2
 DEFENSA_DESCENDIDO = 0.85
-VERSION_MODELO = 4              # subirlo al cambiar el modelo: las fuerzas guardadas se
+VERSION_MODELO = 5              # subirlo al cambiar el modelo: las fuerzas guardadas se
                                 # recalculan, cada ficha dice con cuál se calculó (una de
                                 # otra versión se recalcula) y en Cloudflare (donde D1
                                 # guarda la validación) esta se repite.
                                 # 3 (oct 2026): sin los playoffs de la Championship
                                 # 4 (oct 2026): los mercados de goles con ENCOGER_TOTAL
+                                # 5 (oct 2026): los mercados de goles con MENOS_CEROS
 FORMATO_LISTAS = 2              # partidos_liga sin playoffs (solo_liga): las de antes se bajan otra vez
 TOLERANCIA_FUERZAS = 1e-4       # el ajuste se repite hasta que nada cambia más que esto:
                                 # con 1e-6 harían falta el doble de vueltas y los goles
@@ -233,6 +234,17 @@ RHO_EMPATES = -0.05
 # (-2.7, -6.1 y -4.3 se), en las porterías a cero (-5.4 y -6.9) y en el marcador
 # (-15.3), e igual en ambos marcan (+0.2). Detalle en CLAUDE.md.
 ENCOGER_TOTAL = 0.6
+
+# En los mercados de GOLES, cada equipo se queda sin marcar un 2% menos de lo que dice
+# su Poisson (lo que pierde el 0 se reparte entre los demás goles, en proporción). Con
+# el modelo 4 las porterías a cero salían altas (31.1% predicho frente a 30.1% real en
+# las temporadas de prueba, y 24.1 frente a 22.7) y ambos marcan bajo (52.1 frente a
+# 53.6). Elegido en las de ajuste por la log loss del marcador exacto (0.02 o 0.025, de
+# 0 a 0.12; -1.9 se) y juzgado en las de prueba frente al modelo 4: -3.7 se en el
+# marcador, mejor en ambos marcan (-3.1), las porterías a cero (-2.3 y -2.8) y más de
+# 2.5 (-2.3), y ningún mercado peor. Es poco: un décimo de lo que ganó ENCOGER_TOTAL.
+# El 1X2 no lo usa. Detalle en CLAUDE.md.
+MENOS_CEROS = 0.02
 
 actualizando_ahora = False      # evita que dos actualizaciones corran a la vez
 
@@ -771,14 +783,27 @@ def _tres_mejores(flat, n):
     return a, b, c
 
 
+def _menos_ceros(p):
+    """Las probabilidades de 0, 1, 2... goles de un equipo con el 0 un MENOS_CEROS
+    más bajo; lo que pierde va a los demás, en proporción."""
+    p0 = p[0]
+    if p0 >= 1:
+        return p
+    q = p.copy()
+    q[0] = p0 * (1 - MENOS_CEROS)
+    q[1:] = p[1:] * (1 - q[0]) / (1 - p0)
+    return q
+
+
 def mercados_de_goles(xg_local, xg_visita, promedio_liga, limite=LIMITE_GOLES):
     """Más/menos, ambos marcan, porterías a cero, por cuánto gana y marcadores
     más probables.
 
     Salen todos de una misma rejilla de marcadores, así que no se contradicen
     entre sí. Esa rejilla usa los goles esperados con su total acercado a la media
-    de la liga (ENCOGER_TOTAL) y el reparto entre los dos equipos del 1X2, con la
-    misma corrección de los marcadores bajos (RHO_EMPATES). Con dos equipos medios
+    de la liga (ENCOGER_TOTAL) y el reparto entre los dos equipos del 1X2, cada
+    equipo con el 0 algo más bajo (MENOS_CEROS) y la misma corrección de los
+    marcadores bajos (RHO_EMPATES). Con dos equipos medios
     el acercamiento no cambia nada, así que la base "equipo medio" de la
     validación es la misma rejilla.
     """
@@ -789,7 +814,7 @@ def mercados_de_goles(xg_local, xg_visita, promedio_liga, limite=LIMITE_GOLES):
     gvi = xg_visita * escala
 
     goles = np.arange(limite + 1)
-    rejilla = np.outer(poisson.pmf(goles, gla), poisson.pmf(goles, gvi))
+    rejilla = np.outer(_menos_ceros(poisson.pmf(goles, gla)), _menos_ceros(poisson.pmf(goles, gvi)))
     for i in (0, 1):
         for j in (0, 1):
             rejilla[i, j] = rejilla[i, j] * _tau(i, j, gla, gvi)

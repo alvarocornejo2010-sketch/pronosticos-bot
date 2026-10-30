@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { Registro, rehacerDias, rehacerVersiones, favoritoDe, DIAS_RESUMEN } from "../worker/registro.js";
 import { enterosQueSuman, textosPartido, etiquetasOg, paginaPartido } from "../worker/compartir.js";
 import { Reloj } from "../worker/tiempo.js";
+import { VERSION_MODELO } from "../worker/config.js";
 
 const reloj = new Reloj("America/Lima");
 let n = 0;
@@ -85,7 +86,7 @@ const jugados = [
 const nuevo = new Registro(null);
 for (const [f, gl, gv] of jugados) anotar(nuevo, f, gl, gv);
 let pv = nuevo.publico("2026-10-27T00:00:00Z");
-assert.equal(pv.version_actual, 4);
+assert.equal(pv.version_actual, VERSION_MODELO);
 assert.deepEqual(pv.versiones.map((x) => [x.version, x.partidos, x.desde_fecha]), [[4, 3, "2026-10-25"], [3, 2, "2026-10-23"], [2, 2, "2026-10-18"]]);
 assert.equal(pv.versiones.reduce((s, x) => s + x.partidos, 0), pv.partidos);
 assert.ok(pv.versiones.every((x) => typeof x.skill_score === "number" && "mas_25" in x.mercados && "ambos" in x.mercados));

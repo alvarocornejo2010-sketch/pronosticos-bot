@@ -1,7 +1,8 @@
 // El modelo, el mismo de app.py: fuerzas de ataque y defensa de cada equipo
 // ajustadas por el rival (ajustarFuerzas), Poisson con la corrección de
 // Dixon-Coles para el 1X2 (RHO_EMPATES) y los mercados de goles con el total de
-// goles esperados acercado a la media (ENCOGER_TOTAL).
+// goles esperados acercado a la media (ENCOGER_TOTAL) y el 0 de cada equipo algo más
+// bajo (MENOS_CEROS).
 //
 // Cada función hace las mismas operaciones y en el mismo orden que su gemela de
 // Python, así que salen los mismos números. test_paridad.py lo comprueba con
@@ -10,7 +11,7 @@
 import {
   ATAQUE_DESCENDIDO, ATAQUE_RECIEN_LLEGADO, DEFENSA_DESCENDIDO, DEFENSA_RECIEN_LLEGADO, ENCOGER_TOTAL,
   ESCALA_CHAMPIONS, EXPONENTE_FUERZA_CHAMPIONS, FACTOR_DIARIO, K_HISTORIAL_CHAMPIONS, LIMITE_GOLES,
-  MAX_ITER_FUERZAS, PSEUDO_GOLES_ATAQUE, PSEUDO_GOLES_DEFENSA, RHO_EMPATES, TOLERANCIA_FUERZAS,
+  MAX_ITER_FUERZAS, MENOS_CEROS, PSEUDO_GOLES_ATAQUE, PSEUDO_GOLES_DEFENSA, RHO_EMPATES, TOLERANCIA_FUERZAS,
 } from "./config.js";
 
 // ------------------------------------------
@@ -302,6 +303,16 @@ export function calcularPoisson(gla, gvi, limite = LIMITE_GOLES) {
 // de una misma rejilla de marcadores con el total de goles esperados acercado a
 // la media de la liga, el reparto entre los dos equipos del 1X2 y la misma
 // corrección de los marcadores bajos.
+// Las probabilidades de 0, 1, 2... goles de un equipo con el 0 un MENOS_CEROS más bajo;
+// lo que pierde va a los demás, en proporción (_menos_ceros de app.py). Cambia p.
+function menosCeros(p) {
+  const p0 = p[0];
+  if (p0 >= 1) return p;
+  p[0] = p0 * (1 - MENOS_CEROS);
+  for (let k = 1; k < p.length; k++) p[k] = p[k] * (1 - p[0]) / (1 - p0);
+  return p;
+}
+
 export function mercadosDeGoles(xgLocal, xgVisita, promedioLiga, limite = LIMITE_GOLES) {
   const totalLiga = promedioLiga.avg_local + promedioLiga.avg_visita;
   const totalXg = xgLocal + xgVisita;
@@ -311,8 +322,8 @@ export function mercadosDeGoles(xgLocal, xgVisita, promedioLiga, limite = LIMITE
 
   const n = limite + 1;
   const reutilizar = limite === LIMITE_GOLES;   // la rejilla de siempre: sin reservar memoria
-  const pl = reutilizar ? pmfs(gla, limite, PL) : pmfs(gla, limite);
-  const pv = reutilizar ? pmfs(gvi, limite, PV) : pmfs(gvi, limite);
+  const pl = menosCeros(reutilizar ? pmfs(gla, limite, PL) : pmfs(gla, limite));
+  const pv = menosCeros(reutilizar ? pmfs(gvi, limite, PV) : pmfs(gvi, limite));
   const rejilla = reutilizar ? REJILLA : new Float64Array(n * n);
   let suma = 0;
   for (let i = 0; i < n; i++) {
