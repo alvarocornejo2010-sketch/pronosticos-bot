@@ -61,7 +61,7 @@ export function temporadaActual(reloj, codigoLiga = null) {
 
 // Goles a los 90 minutos (goles_90 en app.py): con prórroga o penaltis,
 // fullTime es el resultado final y manda regularTime. En liga no cambia nada.
-function goles90(m) {
+export function goles90(m) {
   const score = m.score || {};
   if (score.duration === "EXTRA_TIME" || score.duration === "PENALTY_SHOOTOUT") {
     const rt = score.regularTime || {};

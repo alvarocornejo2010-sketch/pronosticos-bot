@@ -640,7 +640,17 @@ function htmlNotaChampions() {
     + 'atenuada), se ajusta por el nivel de esa liga y se corrige con sus partidos de Champions de esta temporada y '
     + 'la anterior: lo que marcó y encajó frente a lo esperado de un equipo de su liga contra esos mismos rivales. '
     + 'Medido con cuatro Champions (2022/23 a 2025/26, 628 partidos): acierta un 13 % mejor que no saber nada, y el '
-    + 'historial suma casi 1 punto a lo que daba la liga sola.</p>';
+    + 'historial suma casi 1 punto a lo que daba la liga sola.' + htmlMedidaChampions() + '</p>';
+}
+
+/** La Champions medida aquí (la validación, con los datos de football-data), si ya está. */
+function htmlMedidaChampions() {
+  const det = validacion && validacion.estado === "listo" ? (validacion.ligas || {}).CL : null;
+  if (!det || det.skill_score === undefined) return "";
+  // la 2025/26 fue una de las cuatro con que se eligieron los parámetros (afinar_champions.py)
+  const vista = det.temporada_evaluada <= 2025 ? ", una de esas cuatro" : "";
+  return ' Medido aquí con la temporada ' + esc(String(det.temporada_evaluada)) + ' (' + det.partidos + ' partidos' + vista
+    + '): ' + (det.skill_score > 0 ? '+' : '') + det.skill_score + ' % frente a no saber nada en el 1X2.';
 }
 
 /** Goles totales del partido, 0 a 5+: un histograma de seis barras con su valor
