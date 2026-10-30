@@ -2,7 +2,8 @@
 Mide y afina el modelo de liga de app.py con resultados reales: las fuerzas
 ajustadas por rival (ajustar_fuerzas: FACTOR_DIARIO, PSEUDO_GOLES_ATAQUE,
 PSEUDO_GOLES_DEFENSA, ATAQUE_RECIEN_LLEGADO), la corrección de empates
-(RHO_EMPATES) y el acercamiento de los mercados de goles (ENCOGER_TOTAL).
+(RHO_EMPATES) y los mercados de goles: el acercamiento del total (ENCOGER_TOTAL) y
+el 0 de cada equipo (MENOS_CEROS).
 
 Datos: openfootball/football.json en GitHub, gratis y sin token. Ocho ligas
 (LaLiga, Premier, Bundesliga, Serie A, Ligue 1, Eredivisie, Primeira Liga y
@@ -318,9 +319,18 @@ G = np.arange(app.LIMITE_GOLES + 1)
 DIF, TOT = np.subtract.outer(G, G), np.add.outer(G, G)
 
 
-def rejillas(lh, la, rho):
-    """Rejillas de marcadores normalizadas, con la corrección de Dixon-Coles."""
-    r = poisson.pmf(G[None, :], lh[:, None])[:, :, None] * poisson.pmf(G[None, :], la[:, None])[:, None, :]
+def _ceros(p, z):
+    """Con el 0 un z más bajo y lo que pierde repartido entre los demás (_menos_ceros)."""
+    if not z:
+        return p
+    p0 = p[:, :1]
+    return np.concatenate([p0 * (1 - z), p[:, 1:] * (1 - p0 * (1 - z)) / (1 - p0)], 1)
+
+
+def rejillas(lh, la, rho, z=0.0):
+    """Rejillas de marcadores normalizadas, con la corrección de Dixon-Coles (y, en los
+    mercados de goles, con MENOS_CEROS)."""
+    r = _ceros(poisson.pmf(G[None, :], lh[:, None]), z)[:, :, None] * _ceros(poisson.pmf(G[None, :], la[:, None]), z)[:, None, :]
     r[:, 0, 0] *= 1 - lh * la * rho
     r[:, 0, 1] *= 1 + lh * rho
     r[:, 1, 0] *= 1 + la * rho
@@ -328,12 +338,15 @@ def rejillas(lh, la, rho):
     return r / r.sum(axis=(1, 2), keepdims=True)
 
 
-def puntuar(f, rho, alfa, forma="total"):
+def puntuar(f, rho, alfa, forma="total", z=None):
     """Brier por partido del 1X2, de más de 2.5 y de ambos marcan, del modelo y
     de la base "equipo medio" (la media de la liga para los dos). Los mercados de
     goles, con el total de goles esperados acercado a la media de la liga (lineal,
     alfa: ENCOGER_TOTAL de app.py) o, con forma="log", cada equipo por separado en
-    escala logarítmica (los modelos de antes del 4)."""
+    escala logarítmica (los modelos de antes del 4). z: MENOS_CEROS (por defecto, el
+    de app.py; los modelos de antes del 5, 0). "marcador": log loss del marcador
+    exacto de la rejilla de goles, con la que se eligen ENCOGER_TOTAL y MENOS_CEROS."""
+    z = app.MENOS_CEROS if z is None else z
     y = np.where(f[:, 4] > f[:, 5], 0, np.where(f[:, 4] == f[:, 5], 1, 2))
     mas = (f[:, 4] + f[:, 5] > 2.5).astype(float)
     amb = ((f[:, 4] > 0) & (f[:, 5] > 0)).astype(float)
@@ -353,8 +366,11 @@ def puntuar(f, rho, alfa, forma="total"):
         total, media = f[:, 0] + f[:, 1], f[:, 2] + f[:, 3]
         escala = (media + alfa * (total - media)) / total
         lh, la = f[:, 0] * escala, f[:, 1] * escala
-    out["mas_25"], out["ambos"] = goles(rejillas(lh, la, rho))
-    out["mas_25_base"], out["ambos_base"] = goles(rejillas(f[:, 2], f[:, 3], rho))
+    rg = rejillas(lh, la, rho, z)
+    out["mas_25"], out["ambos"] = goles(rg)
+    out["marcador"] = -np.log(rg[np.arange(len(y)), np.minimum(f[:, 4], G[-1]).astype(int),
+                                 np.minimum(f[:, 5], G[-1]).astype(int)])
+    out["mas_25_base"], out["ambos_base"] = goles(rejillas(f[:, 2], f[:, 3], rho, z))
     out["empate_pred"] = rejillas(f[:, 0], f[:, 1], rho)[:, DIF == 0].sum(1)
     out["empate_real"] = (y == 1).astype(float)
     return out
@@ -383,7 +399,7 @@ def evaluar(pool, lista):
     nuevo, liga, temp = _juntar(pool.map(recorrer_app, lista))
     viejo, _, _ = _juntar(pool.map(recorrer_anterior, lista))
     pn = puntuar(nuevo, app.RHO_EMPATES, app.ENCOGER_TOTAL)
-    pv = puntuar(viejo, 0.0, 0.3, "log")   # el modelo anterior, con su Poisson sin corregir
+    pv = puntuar(viejo, 0.0, 0.3, "log", 0.0)   # el modelo anterior, con su Poisson sin corregir
     grupos = [("ajuste (hasta 2020/21)", temp <= FIN_AJUSTE), ("prueba (2021/22-2025/26)", (temp > FIN_AJUSTE) & (temp <= 2025)),
               ("2026/27 en curso", temp >= 2026)]
     print("\n1X2: skill frente a la base 'equipo medio' y diferencia de Brier con el modelo anterior")
@@ -413,6 +429,10 @@ def evaluar(pool, lista):
     for k, txt in (("mas_25", "más de 2.5"), ("ambos", "ambos marcan")):
         print(f"  {txt:13s} {skill(pv[k][prueba], pv[k + '_base'][prueba]):+5.2f}% -> "
               f"{skill(pn[k][prueba], pn[k + '_base'][prueba]):+5.2f}%")
+    p4 = puntuar(nuevo, app.RHO_EMPATES, app.ENCOGER_TOTAL, z=0.0)
+    for nombre, m in grupos[:2]:
+        d, se = pareado(pn["marcador"][m], p4["marcador"][m])
+        print(f"  log loss del marcador, MENOS_CEROS frente al modelo 4, {nombre}: {d:+.5f} ({d / se:+.1f} se)")
     print(f"\nEmpates (prueba): app.py predice {100 * pn['empate_pred'][prueba].mean():.1f}%, "
           f"hubo {100 * pn['empate_real'][prueba].mean():.1f}%")
     return nuevo, liga, temp
@@ -459,7 +479,16 @@ def afinar(pool, lista):
         p = puntuar(f, app.RHO_EMPATES, alfa)
         print(f"  ENCOGER_TOTAL {alfa}: más de 2.5 {skill(p['mas_25'][aj], p['mas_25_base'][aj]):+.2f}% | "
               f"{skill(p['mas_25'][pr], p['mas_25_base'][pr]):+.2f}%   ambos marcan "
-              f"{skill(p['ambos'][aj], p['ambos_base'][aj]):+.2f}% | {skill(p['ambos'][pr], p['ambos_base'][pr]):+.2f}%")
+              f"{skill(p['ambos'][aj], p['ambos_base'][aj]):+.2f}% | {skill(p['ambos'][pr], p['ambos_base'][pr]):+.2f}%"
+              f"   marcador {p['marcador'][aj].mean():.5f} | {p['marcador'][pr].mean():.5f}")
+    p0 = puntuar(f, app.RHO_EMPATES, app.ENCOGER_TOTAL, z=0.0)
+    for z in (0.0, 0.01, 0.02, 0.03, 0.04, 0.06, 0.08):
+        p = puntuar(f, app.RHO_EMPATES, app.ENCOGER_TOTAL, z=z)
+        partes = []
+        for nombre, m in (("ajuste", aj), ("prueba", pr)):
+            d, se = pareado(p["marcador"][m], p0["marcador"][m])
+            partes.append(f"{nombre} {d:+.5f}" + (f" ({d / se:+.1f} se)" if se else ""))
+        print(f"  MENOS_CEROS {z:.2f}: log loss del marcador frente a 0, " + "   ".join(partes))
 
 
 def _np_prior(arg):

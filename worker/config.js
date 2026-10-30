@@ -52,8 +52,9 @@ export const DEFENSA_RECIEN_LLEGADO = { PL: 1.3 };
 export const LIGA_DE_ARRIBA = { ELC: "PL" };
 export const ATAQUE_DESCENDIDO = 1.2;
 export const DEFENSA_DESCENDIDO = 0.85;
-export const VERSION_MODELO = 4;   // 3 (oct 2026): sin los playoffs de la Championship
+export const VERSION_MODELO = 5;   // 3 (oct 2026): sin los playoffs de la Championship
                                    // 4 (oct 2026): los mercados de goles con ENCOGER_TOTAL
+                                   // 5 (oct 2026): los mercados de goles con MENOS_CEROS
 export const FORMATO_LISTAS = 2;   // partidos_liga sin playoffs (soloLiga): las de antes se bajan otra vez
 
 // La clave de IndexNow (indexnow.js): pública a propósito, en /<clave>.txt (public/), con
@@ -69,6 +70,7 @@ export const DIAS_VALIDEZ_PRIOR = 30;
 export const LIMITE_GOLES = 10;
 export const RHO_EMPATES = -0.05;
 export const ENCOGER_TOTAL = 0.6;
+export const MENOS_CEROS = 0.02;
 export const LIGAS_ANO_NATURAL = new Set(["BSA"]);
 export const DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"];
 export const MAX_INTENTOS_VALIDACION = 3;
