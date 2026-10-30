@@ -21,6 +21,8 @@
 //                     de sus últimos partidos; /equipo/86, la web con su tarjeta (equipos.js)
 //   /api/calendario   POST: crear el calendario de Mis equipos o cambiarle los equipos;
 //                     /calendario/<clave>.ics, el calendario para suscribirse (calendario.js)
+//   /liga/PD          la web con la tarjeta y el texto de una liga: sus próximos partidos,
+//                     su tabla y lo que dijo la web (ligas.js)
 //
 // El trabajo de verdad lo hace el cron (planificador.js), una vez por minuto.
 
@@ -39,6 +41,7 @@ import { CODIGOS_TABLA } from "./tablas.js";
 import { RUTAS_AVISOS, atenderAvisos } from "./avisos.js";
 import { apiEquipo, paginaEquipo } from "./equipos.js";
 import { RUTAS_CALENDARIO, atenderCalendario, servirCalendario } from "./calendario.js";
+import { paginaLiga } from "./ligas.js";
 
 // Las mismas cabeceras que pone app.py a sus respuestas JSON (la web y app.js
 // llevan las suyas en public/_headers). no-store: el JSON cambia cada pocos
@@ -206,6 +209,7 @@ export default {
     const tabla = url.pathname.match(/^\/api\/tabla\/([A-Z0-9]{2,4})$/);
     const equipo = url.pathname.match(/^\/(api\/)?equipo\/(\d{1,9})\/?$/);
     const calendario = url.pathname.match(/^\/calendario\/([a-z2-7]{26})\.ics$/);
+    const liga = url.pathname.match(/^\/liga\/([A-Z0-9]{2,4})\/?$/);
     const ruta = rutas[url.pathname]
       || (enlace && ((almacen) => paginaPartido(request, env, almacen, Number(enlace[1]))))
       || (equipo && (equipo[1]
@@ -215,6 +219,7 @@ export default {
         }
         : (almacen) => paginaEquipo(request, env, almacen, Number(equipo[2]))))
       || (calendario && ((almacen) => servirCalendario(request, env, almacen, calendario[1])))
+      || (liga && ((almacen) => paginaLiga(request, env, almacen, liga[1])))
       || (tabla && (async (almacen) => (CODIGOS_TABLA.includes(tabla[1])
         ? condicional(request, (await almacen.leerDocTexto("tabla:" + tabla[1])) ?? JSON.stringify(TABLA_PENDIENTE))
         : json({ error: "no hay tabla de esa liga" }, 404))));

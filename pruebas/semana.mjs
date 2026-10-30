@@ -146,7 +146,7 @@ const conFila = (fila) => ({ db: { prepare: () => ({ bind: () => ({ first: async
 const raro = JSON.stringify({ local: "A$'B", visita: "C$&D", liga: "L", utcDate: "2026-10-22T19:00:00Z" });
 const pag = await paginaPartido(new Request("https://x.dev/partido/1"), env, conFila({ f: raro }), 1);
 const cuerpo = await pag.text();
-assert.ok(cuerpo.includes("<title>A$&#39;B – C$&amp;D · Pronósticos</title>") && cuerpo.endsWith("</head><body>cola</body>"), cuerpo);
+assert.ok(cuerpo.includes("<title>A$&#39;B – C$&amp;D: pronóstico y probabilidades</title>") && cuerpo.endsWith("</head><body>cola</body>"), cuerpo);
 assert.ok(!pag.headers.has("X-Robots-Tag") && !pag.headers.has("ETag"));
 const nadie = await paginaPartido(new Request("https://x.dev/partido/2"), env, conFila(null), 2);
 assert.ok((await nadie.text()).includes("<title>x</title>") && nadie.headers.get("X-Robots-Tag") === "noindex");

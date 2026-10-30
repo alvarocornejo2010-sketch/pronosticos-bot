@@ -2,11 +2,14 @@
 las tablas bajadas (lo deja así tablas.py): /api/equipo/86 trae su fila de la tabla,
 su ataque y su defensa (los del modelo, con su puesto en la liga), sus últimos partidos
 de liga (los de la caché) y lo que dijo la web de sus partidos con resultado, con ETag;
-un equipo que no existe da 404; /equipo/86 lleva su tarjeta, su descripción y su
-dirección canónica; el sitemap trae todos los equipos de las tablas; cada partido de
-/api/estado lleva el id de sus equipos; y Flask responde no_disponible. Y la CPU.
+un equipo que no existe da 404; /equipo/86 lleva su tarjeta, su descripción, su
+dirección canónica y su texto ya escrito (su puesto, su fuerza, sus partidos y lo que dijo
+la web, con sus enlaces); /partido/123 de un partido terminado lleva el marcador; /liga/PD,
+la tarjeta y el texto de la liga (sus partidos con los enteros de la web, su tabla y lo que
+dijo la web); el sitemap trae todos los equipos de las tablas; cada partido de /api/estado
+lleva el id de sus equipos; y Flask responde no_disponible. Y la CPU.
 Uso: python pruebas/equipos.py PUERTO_WORKER PUERTO_INSPECTOR DIR_D1 MAX_MS"""
-import glob, html, json, re, sqlite3, sys, urllib.error, urllib.request
+import glob, html, json, math, re, sqlite3, sys, time, urllib.error, urllib.request
 
 from medir_cpu import Medidor
 
@@ -106,9 +109,62 @@ assert og(pag, "title") == f"{corto}: próximos partidos y pronóstico", og(pag,
 desc = og(pag, "description")
 assert desc.startswith(f"{tabla['nombre']}: {d['tabla']['pos']}.º con {d['tabla']['pts']} puntos. Próximo partido: "), desc
 assert f'<link rel="canonical" href="{W}/equipo/{eid}">' in pag and og(pag, "url") == f"{W}/equipo/{eid}"
+texto = pag[pag.index('id="vista"'):pag.index("</main>")]
+e = html.escape
+t = d["tabla"]
+assert f'id="titulo-vista">{e(corto)}: próximos partidos y pronóstico</h1>' in pag
+assert f'<a href="/liga/PD">{e(tabla["nombre"])}</a> · {t["pos"]}.º de {len(ids)} con {t["pts"]} punto' in texto
+n = math.floor((f["ataque"] - 1) * 100 + 0.5)   # Math.round
+assert (f"Marca un {abs(n)} % {'más' if n > 0 else 'menos'} que un equipo medio de La Liga" if n
+        else "Marca lo mismo que un equipo medio") in texto, texto[:800]
+assert f'<li><a href="/partido/{p["id"]}">' in texto and "<h2>Próximos partidos</h2>" in texto
+assert "<h2>Lo que dijo la web</h2>" in texto and f"{e(p.get('local_corto') or p['local'])} 2-1" in texto
+assert "Últimos de liga: " in texto and texto.count(" ante ") == 5
 st, cab, pag = pedir("/equipo/999999999")
-assert st == 200 and cab["X-Robots-Tag"] == "noindex" and "<title>Pronósticos</title>" in pag
-print(f"/equipo/{eid}: la web con la tarjeta de {corto} ({desc[:60]}…) y su dirección canónica; uno que no existe, fuera de Google")
+assert st == 200 and cab["X-Robots-Tag"] == "noindex" and "<title>Pronósticos de fútbol: 1 X 2 y goles</title>" in pag
+print(f"/equipo/{eid}: la web con la tarjeta de {corto} ({desc[:60]}…), su dirección canónica y su texto; uno que no"
+      " existe, fuera de Google")
+
+# /partido/123 de un partido terminado: el marcador y si acertó el favorito
+st, _, pag = pedir(f"/partido/{p['id']}")
+loc, vis = p.get("local_corto") or p["local"], p.get("visita_corto") or p["visita"]
+assert f"<b>Final: {e(loc)} 2-1 {e(vis)}.</b> " in pag and "Esto es lo que dijo la web antes de empezar" in pag
+print(f"/partido/{p['id']} con resultado: el marcador y lo que dijo la web")
+
+# /liga/PD: sus partidos por jugar con los enteros de la web, su tabla y lo que dijo la web. En
+# producción, la primera petición no encuentra el índice resultados_por_liga y lo crea
+db.execute("DROP INDEX IF EXISTS resultados_por_liga")
+db.commit()
+st, cab, pag = pedir("/liga/PD")
+assert "resultados_por_liga" in {f[0] for f in db.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+assert st == 200 and cab.get("X-Robots-Tag") is None and "script-src 'self'" in cab["Content-Security-Policy"], st
+assert og(pag, "title") == "Pronósticos de La Liga" and f'<link rel="canonical" href="{W}/liga/PD">' in pag
+assert "<title>Pronósticos de La Liga: probabilidades de cada partido</title>" in pag
+assert 'id="titulo-vista">Pronósticos de La Liga</h1>' in pag and '<script src="/app.js"></script>' in pag
+texto = pag[pag.index('id="vista"'):pag.index("</main>")]
+ahora = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+suyos = [x for x in partidos if x["liga_codigo"] == "PD" and x["utcDate"] > ahora]
+prox = texto[texto.index("<h2>Próximos partidos</h2>"):texto.index("<h2>Tabla</h2>")]
+assert suyos and prox.count('<li><a href="/partido/') == len(suyos), (len(suyos), prox.count("/partido/"))
+for x in suyos:
+    assert f'<li><a href="/partido/{x["id"]}">' in texto, x["id"]
+    if not x.get("pendiente"):
+        bruto = [x["prob_local"], x["prob_empate"], x["prob_visita"]]
+        en = [int(v // 1) for v in bruto]
+        for i in sorted(range(3), key=lambda i: -(bruto[i] - en[i]))[:100 - sum(en)]:
+            en[i] += 1
+        assert f"{e(x.get('local_corto') or x['local'])} {en[0]} % · empate {en[1]} % · " in texto, x["id"]
+pos = [texto.index(f'<li value="{eq["pos"]}"><a href="/equipo/{eq["id"]}">') for eq in sorted(tabla["equipos"], key=lambda q: q["pos"])]
+assert pos == sorted(pos) and len(pos) == len(ids)
+assert "<h2>Lo que dijo la web</h2>" in texto and f"{e(loc)} 2-1 {e(vis)}" in texto
+assert '<a href="/liga/CL">Champions League</a>' in texto and 'href="/liga/PD"' not in texto
+st, cab, pag = pedir("/liga/XX")
+assert st == 200 and cab["X-Robots-Tag"] == "noindex" and "<h2>Ligas</h2>" in pag
+assert pedir("/liga/pd")[0] == 404
+ms = [medidor.pedir(W + "/liga/PD")[1] for _ in range(3)] + [medidor.pedir(W + f"/equipo/{eid}")[1] for _ in range(3)]
+assert max(ms) <= MAX_MS, ms
+print(f"/liga/PD: sus {len(suyos)} partidos por jugar con los enteros de la web, la tabla en orden con sus {len(ids)}"
+      f" equipos y lo que dijo la web; una liga que no existe, fuera de Google; CPU {min(ms)}-{max(ms)} ms")
 
 # el sitemap: los equipos de todas las tablas que ya hay
 listas = [json.loads(pedir("/api/tabla/" + c)[2]) for c in ("PD", "PL", "FL1", "BL1", "SA", "DED", "PPL", "ELC", "BSA")]

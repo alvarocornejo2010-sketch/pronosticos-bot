@@ -8,7 +8,9 @@ calendario pasan a estar jugados, para el registro en vivo) y
 "ficha-buena" (una vez cada una: "ficha-buena-2" es otra), y cualquier otra no. Y a
 /push/<id>, un servicio de avisos (Web Push) de mentira: apunta cada aviso (sus
 cabeceras y el cuerpo cifrado, que se ven en /__push) y responde 201, o 410 si el id
-empieza por "gone" (una suscripción que el navegador ya quitó).
+empieza por "gone" (una suscripción que el navegador ya quitó). Y a /indexnow, un
+IndexNow de mentira: apunta lo que le llega (se ve en /__indexnow) y responde 200, o lo
+que diga /__indexnow?estado=N.
 Uso: python pruebas/api_falsa.py PUERTO [limite429]"""
 import base64, hashlib, json, random, re, sys, threading
 from collections import Counter
@@ -229,6 +231,8 @@ def responder(ruta, q):
 
 FICHAS_USADAS = set()   # Turnstile: cada ficha vale una vez
 AVISOS = []             # lo que llegó al servicio de avisos de mentira
+INDEXNOW = []           # y a IndexNow, que responde INDEXNOW_ESTADO
+INDEXNOW_ESTADO = [200]
 CABECERAS_PUSH = ("Authorization", "TTL", "Urgency", "Topic", "Content-Encoding", "Content-Type")
 
 class H(BaseHTTPRequestHandler):
@@ -242,6 +246,10 @@ class H(BaseHTTPRequestHandler):
                 AVISOS.append({"id": m.group(1), "cabeceras": {k: self.headers.get(k) for k in CABECERAS_PUSH},
                                "cuerpo": base64.urlsafe_b64encode(crudo).decode().rstrip("=")})
             self.send_response(410 if m.group(1).startswith("gone") else 201); self.end_headers(); return
+        if u.path == "/indexnow":
+            with CANDADO:
+                INDEXNOW.append({"tipo": self.headers.get("Content-Type"), **json.loads(crudo)})
+            self.send_response(INDEXNOW_ESTADO[0]); self.end_headers(); return
         datos = {k: v[0] for k, v in parse_qs(crudo.decode()).items()}
         if u.path != "/turnstile/v0/siteverify":
             self.send_response(404); self.end_headers(); return
@@ -268,6 +276,10 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/__omitir":
             OMITIR[q["liga"]] = (int(q.get("n", "3")), int(q.get("veces", "1")))
             self.send_response(200); self.end_headers(); return
+        if u.path == "/__indexnow":
+            if "estado" in q: INDEXNOW_ESTADO[0] = int(q["estado"])
+            cuerpo = json.dumps(INDEXNOW).encode()
+            self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(cuerpo); return
         if u.path == "/__push":
             cuerpo = json.dumps(AVISOS).encode()
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(cuerpo); return

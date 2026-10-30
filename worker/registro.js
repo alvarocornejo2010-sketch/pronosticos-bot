@@ -19,7 +19,7 @@
 import { COMPETICIONES, VERSION_MODELO } from "./config.js";
 import { calcularPoisson, mercadosDeGoles, redondear } from "./modelo.js";
 import { Acumulador, Binario, MERCADOS, resultado, resumenMercado } from "./metricas.js";
-import { enterosQueSuman } from "./compartir.js";
+import { enterosQueSuman, favoritoDe } from "./compartir.js";
 
 export const REGISTRO_VACIO = {
   estado: "sin_datos", partidos: 0, plataforma: "cloudflare",
@@ -53,10 +53,8 @@ export function entradaDe(ficha, gl, gv, local) {
   return e;
 }
 
-// El favorito como en la web (veredictoDe): el mayor; si empatan, el primero (1, X, 2).
-export function favoritoDe(e) {
-  return [["1", e.prob_local], ["X", e.prob_empate], ["2", e.prob_visita]].reduce((a, b) => (b[1] > a[1] ? b : a));
-}
+// El favorito como en la web (veredictoDe), en compartir.js con los enteros de la web.
+export { favoritoDe };
 
 const NOMBRES = Object.fromEntries(Object.entries(COMPETICIONES).map(([n, c]) => [c, n]));
 export const isoSinMs = (ms) => new Date(ms).toISOString().slice(0, 19) + "Z";

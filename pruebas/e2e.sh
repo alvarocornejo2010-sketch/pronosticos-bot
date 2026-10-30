@@ -11,7 +11,9 @@
 # funcionan de crear a borrar, con correo y Turnstile (cuentas.py), los avisos de Mis
 # equipos llegan cifrados y firmados al servicio de avisos de mentira (avisos.mjs) y la
 # página de cada equipo trae su tabla, su fuerza, su forma y lo que dijo la web (equipos.py),
-# y el calendario de Mis equipos es un .ics bien hecho que sigue a sus equipos (ics.py).
+# el calendario de Mis equipos es un .ics bien hecho que sigue a sus equipos (ics.py), la
+# limpieza del día borra lo caducado (limpieza.py) y el cron avisa a IndexNow de las páginas
+# nuevas (indexnow.py, contra el IndexNow de mentira de la API falsa).
 #
 # Uso: bash pruebas/e2e.sh   (antes: npm ci y pip install -r requirements.txt)
 # Las variables del Worker van con --var, que manda sobre .dev.vars: tu token de
@@ -66,7 +68,7 @@ echo "== Worker"
   --var TURNSTILE_SITEKEY:clave_de_sitio_falsa --var TURNSTILE_SECRET:secreto_turnstile_falso \
   --var "TURNSTILE_VERIFICAR:http://127.0.0.1:$P_API/turnstile/v0/siteverify" \
   --var "PUSH_PRUEBA:http://127.0.0.1:$P_API" --var AVISO_ANTES_MIN:20160 --var MAX_ENVIOS_PASADA:3 \
-  --var MAX_CALENDARIOS_DIA:5 \
+  --var MAX_CALENDARIOS_DIA:5 --var "INDEXNOW_URL:http://127.0.0.1:$P_API/indexnow" \
   > "$TMP/wrangler.log" 2>&1) &
 esperar "http://127.0.0.1:$P_W/salud"
 python3 "$REPO/pruebas/correr_cron.py" "$P_W" "$P_INS" 600 "$MAX_MS" | tail -4
@@ -122,4 +124,7 @@ python3 "$REPO/pruebas/ics.py" "$P_W" "$P_INS" "$TMP/d1" secreto_de_prueba_123 "
 
 echo "== Limpieza del día"
 python3 "$REPO/pruebas/limpieza.py" "$P_W" "$TMP/d1"
+
+echo "== IndexNow"
+python3 "$REPO/pruebas/indexnow.py" "$P_W" "$P_API" "$TMP/d1"
 echo "e2e: OK"

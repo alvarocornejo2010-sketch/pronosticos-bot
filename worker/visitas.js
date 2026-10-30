@@ -24,8 +24,8 @@
 // "nuevo", "vuelve" y "repite" los decide el navegador, que guarda solo el día de
 // su última visita: un visitante es un navegador en un día. hace: días desde esa
 // visita. o: el dominio de la página de la que llegó (vacío si no se sabe).
-// via: "partido" o "equipo" si entró por un enlace compartido (/partido/123,
-// /equipo/86). f: 1 si sigue
+// via: "partido", "equipo" o "liga" si entró por un enlace (/partido/123, /equipo/86,
+// /liga/PD: compartido o desde un buscador). f: 1 si sigue
 // a algún equipo. app: 1 si la abrió desde la app instalada.
 //
 // Todo lo que llega se coteja con listas fijas: nadie puede meter una clave
@@ -96,7 +96,7 @@ export function contadores(eventos, propio, hora) {
       entrada = true;   // una por petición: la web manda una sola al cargar
       sumar("visitas", "");
       sumar("hora", hora);
-      if (e.via === "partido" || e.via === "equipo") sumar("enlace", e.via);
+      if (e.via === "partido" || e.via === "equipo" || e.via === "liga") sumar("enlace", e.via);
       if (e.v !== "nuevo" && e.v !== "vuelve") continue;
       sumar("visitantes", e.v);
       if (e.f === 1) sumar("con_favoritos", "");
@@ -384,7 +384,7 @@ ${lista("Errores del navegador (tipo:línea de app.js)", r.desglose.error, null)
 ${par(s.compartidos, "veces que se pulsó Compartir en un partido")}
 ${par(s.equipos_compartidos, "veces que se pulsó Compartir en la página de un equipo")}
 ${par(s.imagenes, "imágenes de un partido para historias")}
-${par(s.llegadas, "visitas que llegaron por un enlace compartido")}
+${par(s.llegadas, "visitas que llegaron por el enlace de un partido, un equipo o una liga (compartido o de un buscador)")}
 ${par(s.estrellas, "equipos marcados con la estrella")}
 ${par(s.con_favoritos, `visitantes que siguen a algún equipo (${pct(s.con_favoritos, s.visitantes)})`)}
 ${par(s.instaladas, "veces que se instaló como app")}

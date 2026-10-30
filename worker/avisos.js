@@ -21,8 +21,8 @@
 import { ajustes } from "./config.js";
 import { Reloj, sumarDias } from "./tiempo.js";
 import { cuerpoJson, limpiarEquipos, mismoSitio } from "./cuentas.js";
-import { enterosQueSuman } from "./compartir.js";
-import { favoritoDe, isoSinMs } from "./registro.js";
+import { lineaReparto, queDijo } from "./compartir.js";
+import { isoSinMs } from "./registro.js";
 import { autorizacionVapid, cifrar, clavesValidas, clavesVapidNuevas, deB64u } from "./push.js";
 
 const MS_MIN = 60000, MS_HORA = 60 * MS_MIN, MS_DIA = 24 * MS_HORA;
@@ -84,8 +84,7 @@ export function momentoPrevio(inicioMs, antesMin, reloj) {
 export function mensajeAviso(x, reloj, ahora) {
   const local = x.local_corto || x.local, visita = x.visita_corto || x.visita;
   const conNumeros = x.prob_local != null && x.prob_empate != null && x.prob_visita != null;
-  const ent = conNumeros ? enterosQueSuman([x.prob_local, x.prob_empate, x.prob_visita]) : null;
-  const reparto = ent && `${local} ${ent[0]} % · empate ${ent[1]} % · ${visita} ${ent[2]} %`;
+  const reparto = conNumeros && lineaReparto(x);
   const tag = "p" + x.partido;
   if (x.tipo === "previo") {
     const ini = reloj.local(Date.parse(x.utc)), hoy = reloj.local(ahora).fecha;
@@ -95,12 +94,7 @@ export function mensajeAviso(x, reloj, ahora) {
       + (reparto ? ` ${reparto}.` : ""), url: `/partido/${x.partido}`, tag };
   }
   let cuerpo = `${x.liga}.`;
-  if (reparto && x.contado) {
-    const fav = favoritoDe(x)[0];
-    const real = x.gl > x.gv ? "1" : x.gl === x.gv ? "X" : "2";
-    cuerpo = `La web daba ${reparto}. ` + (fav === real ? "Acertó el favorito."
-      : fav === "X" ? "Sorpresa: lo más probable era el empate." : `Sorpresa: el favorito era ${fav === "1" ? local : visita}.`);
-  }
+  if (reparto && x.contado) cuerpo = `La web daba ${reparto}. ${queDijo(x, x.gl, x.gv)}`;
   return { titulo: `Final: ${local} ${x.gl}-${x.gv} ${visita}`, cuerpo, url: "/", tag };
 }
 

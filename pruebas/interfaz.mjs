@@ -11,10 +11,12 @@
 // dirección deje de funcionar), que la página de privacidad se lee en todos los anchos, que
 // Fiabilidad medida, En vivo, trae una fila por versión del modelo, que el detalle de
 // un partido de un equipo seguido propone los avisos, que sus nombres enlazan con la
-// página de cada equipo y que «Cómo gana» trae sus cuatro casillas, y pasa axe-core (accesibilidad) por la
-// semana, Mis equipos, el detalle, la tabla y la página de un equipo, en el móvil y en
-// escritorio. Así se vio en oct 2026 que la fecha se metía bajo el escudo y
-// que "Seguir" no cabía en el móvil.
+// página de cada equipo y que «Cómo gana» trae sus cuatro casillas, que el texto ya escrito de
+// la portada, de un partido, de un equipo y de una liga (el que lee quien no ejecuta
+// JavaScript) se lee en todos los anchos y la web lo cambia por lo suyo al arrancar, y pasa
+// axe-core (accesibilidad) por la semana, Mis equipos, el detalle, la tabla, la página de un
+// equipo y ese texto, en el móvil y en escritorio. Así se vio en oct 2026 que la fecha se
+// metía bajo el escudo y que "Seguir" no cabía en el móvil.
 // Uso: node pruebas/interfaz.mjs PUERTO_WORKER PUERTO_API
 // Las fuentes vienen de Google; sin red, FUENTES=carpeta con fuentes.css, mapa.txt
 // (URL de cada woff2 y su archivo) y los woff2.
@@ -264,6 +266,31 @@ for (const [ancho, alto] of ANCHOS) {
   }
   await p.unroute("**/api/registro");
 
+  // el texto ya escrito (sin app.js, como lo lee quien no ejecuta JavaScript) de la portada, de
+  // un partido, de un equipo y de una liga; y con JavaScript, que la web lo cambia por lo suyo
+  const PARTIDO = conPartidos[1].partidos.find((x) => !x.pendiente) || conPartidos[1].partidos[0];
+  await p.route("**/app.js", (r) => r.abort());
+  for (const ruta of ["/", `/partido/${PARTIDO.id}`, `/equipo/${EQUIPO}`, "/liga/PD"]) {
+    await p.goto(W + ruta);
+    await p.waitForSelector(".escrito");
+    await p.evaluate(() => document.fonts.ready);
+    const r = await p.evaluate(revisar);
+    for (const x of r.fuera) fallo(`${ancho}px, ${ruta} sin JavaScript: se sale ${x}`);
+    if (await p.evaluate(() => document.documentElement.scrollWidth > innerWidth)) fallo(`${ancho}px, ${ruta} sin JavaScript: la página se sale de ancho`);
+    if (ancho === 390 || ancho === 1440) {
+      await p.evaluate(AXE);
+      const v = await p.evaluate(async () => (await axe.run(document, { resultTypes: ["violations"] })).violations
+        .map((x) => `${x.impact} ${x.id} (${x.nodes.length}): ${x.nodes[0].target.join(" ")}`));
+      for (const x of v) fallo(`${ancho}px, ${ruta} sin JavaScript: accesibilidad ${x}`);
+    }
+  }
+  await p.unroute("**/app.js");
+  await p.goto(W + "/liga/PD");
+  await p.waitForFunction(() => !document.querySelector(".escrito") && document.querySelector("#vista .fila, #vista .vacio"));
+  const dir = await p.evaluate(() => location.pathname + location.hash);
+  if (dir !== "/#/liga/PD") fallo(`${ancho}px, /liga/PD no pasa a #/liga/PD (${dir})`);
+  if (!(await p.textContent("#titulo-vista")).includes("La Liga")) fallo(`${ancho}px, /liga/PD no pinta la liga`);
+
   // la política de privacidad: una página aparte, sin JavaScript, enlazada desde la web
   await p.goto(W + "/privacidad");
   await p.waitForSelector("h1");
@@ -281,5 +308,6 @@ for (const [ancho, alto] of ANCHOS) {
   await ctx.close();
 }
 await navegador.close();
-console.log(`interfaz: ${VISTAS.length} vistas y la privacidad × ${ANCHOS.length} anchos, axe en ${AXE_EN.size + 2}: ${fallos ? fallos + " fallos" : "todo bien"}`);
+console.log(`interfaz: ${VISTAS.length} vistas, el texto sin JavaScript de 4 páginas y la privacidad × ${ANCHOS.length} anchos,`
+  + ` axe en ${AXE_EN.size + 10}: ${fallos ? fallos + " fallos" : "todo bien"}`);
 process.exit(fallos ? 1 : 0);

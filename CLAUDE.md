@@ -185,8 +185,9 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
 - Rutas por hash: `#/`, `#/semana`, `#/dia/2026-10-10`, `#/liga/PD`,
   `#/liga/PD/2026-10-10`, `#/liga/PD/tabla` (ver "Tabla y proyección"), `#/favoritos`,
   `#/equipo/86` (ver "Página de cada equipo"). `#/` es toda la semana en escritorio y
-  el primer día en móvil. Y dos sin hash, para compartir: `/partido/123` (ver
-  "Compartir y favoritos") y `/equipo/86`, que pasa en el acto a `/#/equipo/86`.
+  el primer día en móvil. Y tres sin hash, para compartir y para los buscadores:
+  `/partido/123` (ver "Compartir y favoritos"), `/equipo/86`, que pasa en el acto a
+  `/#/equipo/86`, y `/liga/PD`, que pasa a `/#/liga/PD` (ver "Buscadores").
 - Tipografía: Saira (marca, títulos y todos los números) y Figtree (nombres y
   textos), de Google Fonts. Las dos tienen cifras tabulares, comprobadas en el
   navegador: las columnas de números no bailan.
@@ -246,7 +247,9 @@ equipos"). Y `/api/equipo/86`, la página de un equipo (en Render, `no_disponibl
 `/equipo/86`, la web con su tarjeta (en Render, la web sin tarjeta; ver "Página de cada
 equipo"). Y el calendario de Mis equipos, solo en Cloudflare: `/api/calendario` (POST) y
 `/calendario/<clave>.ics` (ver "Calendario de Mis equipos"). Y `/privacidad`, la política
-de privacidad (ver "Privacidad").
+de privacidad (ver "Privacidad"). Y `/liga/PD`, la web con la tarjeta y el texto de una liga
+(en Render, la web sin ellos; ver "Buscadores"), y `/0929ae0a00d11dc89eade75a541f841f.txt`, la
+clave de IndexNow (un archivo de `public/`).
 
 **Efecto secundario de cada deploy:** el disco de Render free es efímero, cada
 deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
@@ -289,7 +292,8 @@ incluidos), `actualizacion.js` (la pasada), `validacion.js`, `metricas.js`
 `tablas.js` (la tabla de cada liga y lo que le falta), `avisos.js` (los avisos de Mis
 equipos), `push.js` (su cifrado y su firma, Web Push), `equipos.js` (la página de cada
 equipo), `calendario.js` (el calendario `.ics` de Mis equipos), `limpieza.js` (la limpieza
-del día: sesiones y calendarios caducados) e `index.js` (rutas).
+del día: sesiones y calendarios caducados), `ligas.js` (la página de cada liga), `indexnow.js`
+(el aviso a los buscadores de las páginas nuevas) e `index.js` (rutas).
 
 **El ritmo lo marca la CPU.** El plan gratis da 10 ms por ejecución y leer el
 JSON de la API cuesta ~7 ms por MB, así que en vez de una pasada de 40
@@ -329,12 +333,12 @@ equipo, `predicciones_por_local` y `predicciones_por_visita`, para su página: l
 consultas los piden con `INDEXED BY`, y si faltan, el "no such index" vuelve a pasar el
 `ESQUEMA`, como una tabla que falta), `resultados` (el marcador
 a los 90 minutos de cada partido con predicción, ya sumado al registro en
-vivo), `documentos` (`estado` que sirve `/api/estado`, `resumen`, `validacion`,
+vivo; con un índice por liga, `resultados_por_liga`, para la página de cada liga), `documentos` (`estado` que sirve `/api/estado`, `resumen`, `validacion`,
 `registro` y `registro_publico`, pedidos, temporadas terminadas compactas,
 `temporada:liga:{código}:{año}`, `tabla:{código}` que sirve `/api/tabla/...` y
 `tablas_resumen`, cuándo se bajó cada cosa, los de los avisos: `vapid`, su par
-de claves, y `avisos_resumen`, cuándo volver a mirar, y `limpieza`, cuándo se hizo la
-del día y qué borró) y
+de claves, y `avisos_resumen`, cuándo volver a mirar, `limpieza`, cuándo se hizo la
+del día y qué borró, e `indexnow`, cuándo se avisó a los buscadores y qué) y
 `candado` (que dos pasadas no se pisen, hora de la última petición, pasadas
 muertas), `visitas` (los contadores de visitas por día, ver "Visitas"), las de
 las cuentas: `cuentas`, `usuarios`, `correos`, `accesos`, `sesiones` y `favoritos` (ver
@@ -428,8 +432,9 @@ hasta que termina, `versiones` sale vacío. El total y las ligas no se tocan.
   en menos de un minuto: una petición web no puede durar lo que una pasada;
 - el registro en vivo (`/api/registro`), las visitas (`/visitas`), la tabla con
   su proyección (`/api/tabla/PD`), los avisos de Mis equipos (`/api/avisos`), la
-  página de cada equipo (`/api/equipo/86`) y el calendario de Mis equipos
-  (`/calendario/<clave>.ics`) solo existen aquí.
+  página de cada equipo (`/api/equipo/86`), el calendario de Mis equipos
+  (`/calendario/<clave>.ics`), el texto ya escrito de `/partido/123`, `/equipo/86` y
+  `/liga/PD` y el aviso a los buscadores (IndexNow) solo existen aquí.
 
 **En local:** `npm install`, copiar `.dev.vars.example` a `.dev.vars`, `npm run
 dev` y lanzar el cron a mano con
@@ -479,8 +484,8 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
   llevar datos de la página. Como mucho 3 por visita y 3 por aviso. En el panel,
   "Errores del navegador": si una línea sube, la web falla en algún aparato.
 - **Compartir y favoritos** también se cuentan: veces que se pulsó Compartir
-  (`compartir`, por partido), imágenes para historias (`imagen`, por partido), visitas que llegaron por un enlace `/partido/123`
-  (`enlace`), estrellas puestas (`favorito`) y visitantes que siguen a algún
+  (`compartir`, por partido), imágenes para historias (`imagen`, por partido), visitas que llegaron por un enlace `/partido/123`,
+  `/equipo/86` o `/liga/PD`, compartido o desde un buscador (`enlace`, por tipo), estrellas puestas (`favorito`) y visitantes que siguen a algún
   equipo (`con_favoritos`). Y la app: instalaciones (`instalada`) y visitantes
   que entraron desde la app instalada (`en_app`, `display-mode: standalone`). En
   el panel, el tablero "Compartir, favoritos y app". Los avisos los cuenta el Worker,
@@ -488,7 +493,7 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
 - **La página de cada equipo:** las veces que se abre (`equipo`, por equipo: solo cuenta
   si está en la tabla de una liga o juega en la semana) y que se pulsa su Compartir
   (`compartir_equipo`); las llegadas por un enlace `/equipo/86` van con las de
-  `/partido/123` (`enlace`). En el panel, "Equipos que más se abren".
+  `/partido/123` y `/liga/PD` (`enlace`). En el panel, "Equipos que más se abren".
 
 ## Tabla y proyección (oct 2026)
 
@@ -907,17 +912,13 @@ es lo que pidió el dueño del proyecto; lo que cueste dinero (mandar correos) e
   archivos de `public/` que no son la página van por una lista cerrada
   (`ARCHIVOS_WEB`), y `sw.js` lleva la CSP de la web (su `connect-src 'self'` es
   lo que le deja pedir la página).
-- **Buscadores:** toda la web va detrás del `#`, que Google no ve como páginas
-  distintas; lo que sí ve son los `/partido/123` y los `/equipo/86` (ver "Página de cada
-  equipo"), cada uno con su título, su `meta description` (la misma que la tarjeta) y su
-  `canonical`. El Worker sirve
+- **Buscadores:** el Worker sirve
   `/robots.txt` (sí a la web, los partidos y los datos que pinta: Google pinta la
   página pidiendo `/api/estado`, y sin él indexaría "Cargando"; no a
-  `/api/contar`, `/api/visitas`, `/visitas`, `/api/avisos`, `/api/calendario`, `/calendario/`, `/actualizar` ni `/validar`) y `/sitemap.xml` con la portada, los partidos por
+  `/api/contar`, `/api/visitas`, `/visitas`, `/api/avisos`, `/api/calendario`, `/calendario/`, `/actualizar` ni `/validar`) y `/sitemap.xml` con la portada, las ligas, los partidos por
   jugar y los equipos de las tablas (`buscadores.js`, dos consultas a D1). Las direcciones salen del origen de
-  la petición. Solo en Cloudflare. Para que Google lo lea antes, falta darlo de
-  alta en Search Console (verificar la propiedad con una etiqueta `meta`, la
-  pondría el dueño de la cuenta).
+  la petición. Solo en Cloudflare. El texto de cada página, IndexNow y Search Console, en
+  "Buscadores".
 - **Ligas de fiabilidad baja:** la Championship (+2.7 % de mejora sobre "no
   saber nada", 2.855 partidos) y el Brasileirão (+3.5 %, 277) aportan mucho menos
   que las demás (+7.5 a +15.6 %, ver "Validación"). La web lo marca:
@@ -927,6 +928,60 @@ es lo que pidió el dueño del proyecto; lo que cueste dinero (mandar correos) e
   detalle de cada partido. Los números están fijos en `POCO_FIABLES` (`app.js`),
   medidos con `afinar_liga.py` en las temporadas de prueba: si se reajusta el
   modelo, actualizarlos.
+
+## Buscadores (oct 2026)
+
+Del 23 al 28 oct entraron 19 visitas, ninguna desde un buscador: la web no salía en ninguno
+(buscada por su dirección, nada). Toda la web va detrás del `#`, que los buscadores no ven como
+páginas distintas, y lo que se ve lo pinta JavaScript: Google lo ejecuta, Bing a medias y los
+asistentes (ChatGPT, Perplexity...) no, así que leían una página vacía. Lo que se hizo:
+
+- **Páginas con su texto ya escrito:** `/partido/123`, `/equipo/86` y `/liga/PD` son la web
+  (`index.html`) con su tarjeta (título, descripción y `canonical`), su título de vista (`h1`)
+  y su texto en `#vista`, que el Worker pega entre las marcas `og`, `h1` y `texto` de
+  `index.html` (`paginaConTarjeta` en `compartir.js`). Un partido: la liga y la hora, el
+  veredicto, el 1X2, la doble oportunidad, los goles esperados, más de 2.5, ambos marcan y los
+  marcadores, con los enteros de la web, y si terminó, el marcador y si acertó el favorito
+  (`textoPartido`). Un equipo: su puesto, su forma, cómo juega, sus próximos partidos y lo que
+  dijo la web (`textoEquipo`). Una liga (`ligas.js`): sus partidos de los próximos días, su
+  tabla y lo que dijo la web de sus 8 últimos (`textosLiga`, con el índice
+  `resultados_por_liga`; menos de 1 ms de CPU). Todo enlaza con direcciones de verdad
+  (`/equipo/86`, `/liga/PD`, `/partido/123`), que los buscadores siguen, y la portada (estática)
+  trae qué es la web y un enlace a cada liga. `app.js` lo cambia por lo suyo al pintar (se ve un
+  instante; la cabecera de la tabla se esconde mientras, `:has(.escrito)`) y `/liga/PD` pasa a
+  `/#/liga/PD`. **Cada marca va una sola vez en `index.html`**: otra (en un comentario, por
+  ejemplo) haría que el reemplazo se comiera media página; lo comprueba `paginas.mjs`. Títulos:
+  "Inter – Shakhtar: pronóstico y probabilidades", "Pronósticos de La Liga: probabilidades de
+  cada partido" y, en la portada, "Pronósticos de fútbol: 1 X 2 y goles" (antes, "Pronósticos" a
+  secas). Las frases (`veredicto`, `lineaReparto`, `queDijo`) son las de la web y las de los
+  avisos: viven en `compartir.js`, una sola vez.
+- **El sitemap** lleva además las 10 ligas.
+- **IndexNow** (`indexnow.js`): avisa a Bing de las páginas nuevas o cambiadas (y a Yandex,
+  Seznam, Naver y Yep; de Bing beben DuckDuckGo, Yahoo, Ecosia y la búsqueda de ChatGPT), gratis y
+  sin cuenta. Google no lo usa. La clave es `INDEXNOW_CLAVE` (`config.js`), pública a propósito,
+  en `public/<clave>.txt`: con ella los buscadores comprueban que las direcciones son de esta
+  web (si se cambia, cambiar el archivo). Es la tarea del cron `indexnow`, la menos urgente
+  (tras la limpieza), cada 3 h (`HORAS_INDEXNOW`) con la web `listo` y sin la API ni el candado:
+  manda los partidos que entraron en la ventana con predicción (los ya mandados van en
+  `enviados` del documento `indexnow`), los que terminaron desde la vez anterior
+  (`resultados.liquidado` mayor que `desde`), los equipos de unos y otros, sus ligas y la
+  portada; la primera vez, además, todas las ligas y los equipos de las tablas (unas 450
+  direcciones). Si IndexNow no responde 200 o 202, se apunta (con el error) y la vez siguiente
+  va todo otra vez (`al_dia`). `INDEXNOW_URL` cambia adónde se mandan (vacío: a ningún sitio);
+  las pruebas lo mandan al IndexNow de mentira de `api_falsa.py`. Solo manda direcciones de
+  páginas públicas, nada de quién entra.
+- **Google: Search Console, lo hace el dueño (5 minutos).** En
+  https://search.google.com/search-console → Añadir propiedad → "Prefijo de la URL" →
+  `https://pronosticos-bot.alvarocornejo2010.workers.dev/` → método "Etiqueta HTML": copiar el
+  `content="..."` de la etiqueta `google-site-verification` y pasárselo a Claude, que la pone en
+  el `<head>` de `index.html` (no es un secreto: va en la página). Tras el despliegue,
+  "Verificar" y, en Sitemaps, mandar `sitemap.xml`. Así Google lee las páginas antes y se ve
+  con qué búsquedas llega la gente. Bing Webmaster Tools puede importar la propiedad desde Search
+  Console (para IndexNow no hace falta).
+- **Lo que queda:** sin dominio propio la dirección es larga y no se recuerda; un dominio (unos
+  US$10 al año) se recordaría y se enlazaría mejor. Y lo que más trae gente son los enlaces desde
+  otros sitios (redes, foros): el texto de cada página solo ayuda a que, cuando alguien busca, la
+  encuentre.
 
 ## Privacidad (oct 2026)
 
@@ -1495,13 +1550,16 @@ Environment).
 
 ## Pendiente (por orden de lo que más mueve la aguja)
 
-- **Mirar `/visitas` a las dos semanas** (en marcha desde oct 2026), también
-  "Compartir, favoritos y app". Con eso se decide lo siguiente, ideas ya
-  habladas: un dominio propio (más fácil de recordar, Search Console y la regla
-  de límite de peticiones; ojo, `canonical`, `og:url` y `og:image` de
+- **Que la encuentren** (ver "Buscadores"). Del 23 al 28 oct, 19 visitas de 14 navegadores
+  (11 directas, 3 de Instagram y Facebook, ninguna de un buscador). Falta que el dueño dé de
+  alta la web en Search Console (5 minutos) y, a las dos o tres semanas, mirar en `/visitas` si
+  llegan desde buscadores (origen Google u "Otros buscadores", y las llegadas por enlace) y en
+  Search Console con qué búsquedas. Ideas ya habladas para después: un dominio propio (más fácil
+  de recordar y la regla de límite de peticiones; ojo, `canonical`, `og:url` y `og:image` de
   `index.html` llevan workers.dev) y, si hay gente que vuelve, una porra gratis
   contra el modelo con las cuentas que ya hay (sin dinero ni premios). Hecho en
-  oct 2026: el enlace con vista previa, los favoritos, el resumen de la semana,
+  oct 2026: el texto ya escrito de cada página, la página de cada liga e IndexNow (ver
+  "Buscadores"), el enlace con vista previa, los favoritos, el resumen de la semana,
   instalarla como app, el sitemap, la marca de las ligas de fiabilidad baja, las
   cuentas (ver "Cuentas"; lo que les falta, en el punto siguiente), los avisos de
   Mis equipos (ver "Avisos de Mis equipos"), la página de cada equipo (ver "Página
@@ -1547,7 +1605,10 @@ Environment).
   - **Paridad Python / Worker**: `node --check` de `worker/*.js`, `public/app.js`, `public/sw.js` y `public/imagen.js`,
     `python test_paridad.py` ("todo igual"), `node pruebas/semana.mjs` (el resumen
     de la semana del registro, sus cuentas por versión del modelo, también rehechas por
-    partes, y los textos de la tarjeta para compartir), `node
+    partes, y los textos de la tarjeta para compartir), `node pruebas/paginas.mjs` (el texto
+    ya escrito de un partido, un equipo y una liga, con los enteros de la web, escapado y con sus
+    enlaces; las marcas de `index.html`, una de cada; y qué se manda a IndexNow, todo la primera
+    vez y luego solo lo nuevo, sin perder nada si falla), `node
     pruebas/sw.mjs` (el service worker: "Sin conexión" sin red, la web con red, y los
     avisos: su texto, adónde llevan y la pestaña que abren) y `node pruebas/push.mjs`
     (el cifrado de los avisos contra el ejemplo de RFC 8291, la firma VAPID, la hora
@@ -1564,9 +1625,11 @@ Environment).
     la web sigue enseñando números mientras se recalculan (`caducidad.py`), y que
     un calendario que llega incompleto no quita partidos a la primera
     (`calendario.py`, con `/__omitir` de la API falsa). Que `/partido/123` lleva la
-    tarjeta de ese partido, con su descripción y su `canonical`, y la CSP de la web
+    tarjeta de ese partido, con su descripción y su `canonical`, la CSP de la web y su texto
+    ya escrito con los enteros de la web y los enlaces a sus equipos y a su liga
     (`compartir.py`). Que la web es instalable (manifiesto, iconos, service worker,
-    CSP) y que `robots.txt` y `sitemap.xml` traen lo que deben (`descubrir.py`). Y
+    CSP), que `robots.txt` y `sitemap.xml` (con las ligas) traen lo que deben y que la portada
+    enlaza con la página de cada liga sin JavaScript (`descubrir.py`). Y
     que las visitas se cuentan bien, que lo inventado no entra y que el tope corta
     (`visitas.py`, con `MAX_VISITAS_DIA=60`). Que el cron baja en sus minutos libres
     la tabla de cada liga y lo que le falta, sin pasarse de CPU, que los goles
@@ -1590,8 +1653,10 @@ Environment).
     no entran; la baja pide `auth`; el panel lo cuenta; y la CPU de cada pasada de
     avisos. Que la página de cada equipo trae su fila de la tabla, su ataque y su defensa
     (los del modelo, con su puesto), su forma (la de la caché) y lo que dijo la web de un
-    partido suyo con resultado, con ETag, 404 para uno que no existe, su tarjeta en
-    `/equipo/86` y todos los equipos en el sitemap (`equipos.py`). Que `/privacidad` se sirve
+    partido suyo con resultado, con ETag, 404 para uno que no existe, su tarjeta y su texto en
+    `/equipo/86`, el marcador en `/partido/123` de un partido terminado, la página de su liga
+    (`/liga/PD`: sus partidos con los enteros de la web, la tabla en orden y lo que dijo la web) y
+    todos los equipos en el sitemap (`equipos.py`). Que `/privacidad` se sirve
   con la CSP de la web y sin JavaScript, en el Worker y en Flask (`descubrir.py`), y el
   freno por IP: a la sexta en un minuto desde la misma IP, 429, también al crear, sin
   gastar intentos (`cuentas.py`). Que el calendario de
@@ -1602,7 +1667,10 @@ Environment).
     `MAX_CALENDARIOS_DIA=5`; va después de la interfaz, que también crea uno). Que la
     limpieza del día borra en un minuto libre del cron las sesiones de más de 180 días y
     los calendarios de más de 120, deja los demás y no se repite antes de un día
-    (`limpieza.py`). Y la
+    (`limpieza.py`). Que el cron avisa a IndexNow (el de mentira de `api_falsa.py`) con la clave
+    del archivo que sirve la web: la primera vez la portada, las ligas, los partidos y los
+    equipos, luego solo lo que cambió, nada antes de 3 horas, y lo que falla, otra vez
+    (`indexnow.py`). Y la
     interfaz en un navegador de verdad (`interfaz.mjs`,
     Playwright): 13 vistas (semana, día, liga, por claros y por reñidos, búsqueda,
     Mis equipos, el detalle abierto, el de un partido de Mis equipos, la tabla con su
@@ -1613,7 +1681,8 @@ Environment).
     privacidad en los 7 anchos (con axe en 390 y 1440), Fiabilidad medida → En vivo con tres
     versiones del modelo (con un registro de mentira; axe en 390 y 1440), una casilla de cada tramo
     de la rampa (el contraste, con axe en 390 y 1440), los nombres del detalle enlazando con
-    la página de su equipo, y axe-core sin nada en la semana,
+    la página de su equipo, el texto sin JavaScript de la portada, un partido, un equipo y una
+    liga en los 7 anchos (con axe en 390 y 1440) y que la web lo cambia por lo suyo, y axe-core sin nada en la semana,
     Mis equipos, los dos detalles, la tabla y la página de un equipo, en el móvil y en escritorio. Es lo que en oct
     2026 encontró la fecha bajo el escudo y "Seguir" cortado en el móvil. El job
     instala Chromium (`npx playwright install --with-deps chromium`); sin red para
