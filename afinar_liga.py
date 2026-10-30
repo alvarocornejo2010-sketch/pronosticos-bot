@@ -25,6 +25,9 @@ Uso:
     python afinar_liga.py descensos   # de dónde parten los recién llegados: los
                                       # que bajan de la Premier a la Championship
                                       # y los que suben a cada liga
+    python afinar_liga.py tabla       # la proyección de la tabla (la de app.js)
+                                      # a mitad de temporadas pasadas, contra
+                                      # cómo acabaron (~1 min)
 
 La evaluación usa las funciones de app.py (ajustar_fuerzas, calcular_poisson,
 mercados_de_goles) y el recorrido de validacion.py, no una copia. La búsqueda
@@ -566,6 +569,153 @@ def descensos(pool, lista):
             linea(f"{d0:.2f}", brier(sel, d0, None), b0, liga and d0 == app.DEFENSA_RECIEN_LLEGADO.get(liga))
 
 
+# ------------------------------------------------------------------
+# La proyección de la tabla (simularPorTandas en app.js, tablas.js en el Worker)
+# ------------------------------------------------------------------
+CORTES = (0.25, 0.5, 0.75)            # lo jugado de la temporada al cortarla
+BAJAN = {"PD": 3, "PL": 3, "SA": 3, "BL1": 2, "FL1": 2, "DED": 2, "PPL": 2, "BSA": 4, "ELC": 3}   # ZONAS
+SIMULACIONES = 4000                   # las de app.js
+
+
+def _tabla(n, partidos):
+    pts, dg, gf = np.zeros(n), np.zeros(n), np.zeros(n)
+    for i, j, a, b in partidos:
+        dg[i] += a - b; dg[j] += b - a; gf[i] += a; gf[j] += b
+        if a > b:
+            pts[i] += 3
+        elif a < b:
+            pts[j] += 3
+        else:
+            pts[i] += 1; pts[j] += 1
+    return pts, dg, gf
+
+
+def _puestos(pts, dg, gf):
+    """Puesto de cada equipo (0, el primero), por puntos, diferencia de goles y goles
+    a favor, como app.js; con varias filas, cada una es una temporada simulada."""
+    orden = np.argsort(-(pts * 1e8 + (dg + 1000) * 1e4 + gf), axis=-1, kind="stable")
+    pos = np.empty_like(orden)
+    np.put_along_axis(pos, orden, np.broadcast_to(np.arange(orden.shape[-1]), orden.shape), axis=-1)
+    return pos
+
+
+def cortes_temporada(caso):
+    """Cada corte de una temporada completa: lo jugado hasta ahí, lo que falta con los
+    goles esperados de ese día (las fuerzas y la media de liga de validacion.py, como
+    tablas.js) y cómo acabó."""
+    c, s = caso
+    previa, ultima = cargar(c, s - 1), cargar(c, s)
+    equipos = sorted({m["local"] for m in ultima} | {m["visita"] for m in ultima})
+    n = len(equipos)
+    if len(ultima) != n * (n - 1):    # temporada incompleta en openfootball
+        return []
+    idx = {e: i for i, e in enumerate(equipos)}
+    par = lambda m: (idx[m["local"]], idx[m["visita"]])   # noqa: E731
+    hist = validacion._Historial(previa, _ancla(previa), app.K_LIGA, codigo_liga=c, de_arriba=de_arriba(c, s))
+    dias = [app.dia_de(m["fecha"]) for m in ultima]
+    objetivo = [int(f * len(ultima)) for f in CORTES]
+    out = []
+    for pos, m in enumerate(ultima):
+        # el corte, al empezar el primer día con la parte de la temporada ya jugada
+        while len(out) < len(objetivo) and pos >= objetivo[len(out)] and dias[pos] != dias[pos - 1]:
+            fz, media = hist.antes_de(m)
+            out.append({"liga": c, "temp": s, "corte": CORTES[len(out)], "n": n,
+                        "jugados": [(*par(x), x["gl"], x["gv"]) for x in ultima[:pos]],
+                        "restantes": [(*par(x), *app.calcular_xg_partido(app.fuerza_equipo(fz, x["local"]),
+                                                                           app.fuerza_equipo(fz, x["visita"]), media))
+                                      for x in ultima[pos:]],
+                        "final": [(*par(x), x["gl"], x["gv"]) for x in ultima]})
+        if len(out) == len(objetivo):
+            break
+        hist.registrar(m)
+    return out
+
+
+def simular_corte(arg):
+    """Lo que falta de un corte jugado SIMULACIONES veces, cada partido con dos Poisson
+    de sus goles esperados (simularPorTandas). Con sigma > 0, en cada temporada simulada
+    el ataque y la defensa de cada equipo se mueven al azar (lognormal de media 1): la
+    fuerza de hoy no es segura. Devuelve, por zona de la web, la probabilidad de cada
+    equipo y si acabó en ella, y los puntos (media y si los reales caen en el 10-90 %)."""
+    r, sigma = arg
+    n, rng = r["n"], np.random.default_rng(7)
+    p0, d0, g0 = _tabla(n, r["jugados"])
+    R = np.array(r["restantes"], dtype=float)
+    i, j = R[:, 0].astype(int), R[:, 1].astype(int)
+    xl, xv = np.broadcast_to(R[:, 2], (SIMULACIONES, len(R))), np.broadcast_to(R[:, 3], (SIMULACIONES, len(R)))
+    if sigma:
+        A = np.exp(sigma * rng.standard_normal((SIMULACIONES, n)) - sigma ** 2 / 2)
+        D = np.exp(sigma * rng.standard_normal((SIMULACIONES, n)) - sigma ** 2 / 2)
+        xl, xv = xl * A[:, i] * D[:, j], xv * A[:, j] * D[:, i]
+    gl, gv = np.minimum(rng.poisson(xl), 10), np.minimum(rng.poisson(xv), 10)   # app.js corta en 10
+    pts, dg, gf = (np.repeat(v[None], SIMULACIONES, 0) for v in (p0, d0, g0))
+    for k in range(len(R)):
+        a, b = gl[:, k], gv[:, k]
+        pts[:, i[k]] += np.where(a > b, 3, np.where(a == b, 1, 0))
+        pts[:, j[k]] += np.where(b > a, 3, np.where(a == b, 1, 0))
+        dg[:, i[k]] += a - b; dg[:, j[k]] += b - a; gf[:, i[k]] += a; gf[:, j[k]] += b
+    pos = _puestos(pts, dg, gf)
+    fp, fd, fg = _tabla(n, r["final"])
+    real = _puestos(fp, fd, fg)
+    zonas = {"campeón": (0, 0), "arriba": (0, 1 if r["liga"] == "ELC" else 3), "descenso": (n - BAJAN[r["liga"]], n - 1)}
+    q10, q90 = np.percentile(pts, 10, axis=0), np.percentile(pts, 90, axis=0)
+    return {"liga": r["liga"], "temp": r["temp"], "corte": r["corte"],
+            "zonas": [(z, ((pos >= a) & (pos <= b)).mean(0), ((real >= a) & (real <= b)).astype(float))
+                      for z, (a, b) in zonas.items()],
+            "pts": (pts.mean(0), fp, ((fp >= q10) & (fp <= q90)).astype(float))}
+
+
+def tabla(pool, lista):
+    """La proyección de la tabla de la web, medida: cada temporada completa cortada al
+    25, 50 y 75 % jugado, simulada desde ahí y comparada con cómo acabó (por puntos,
+    diferencia y goles a favor: sin sanciones ni enfrentamientos directos, que los
+    resultados no traen). Calibración de las zonas que enseña la web (campeón, top 4 o
+    ascenso directo, descenso directo) y de los puntos, y la búsqueda de sigma (duda en
+    la fuerza de cada equipo) en el ajuste, juzgada en la prueba por temporadas."""
+    cortes = [r for rr in pool.map(cortes_temporada, [x for x in lista if x[1] <= 2025]) for r in rr]
+    temporadas = sorted({(r["liga"], r["temp"]) for r in cortes})
+    print(f"{len(temporadas)} temporadas completas, {len(cortes)} cortes")
+
+    def por_temporada(res):
+        d = defaultdict(lambda: np.zeros(3))
+        for r in res:
+            for _, p, y in r["zonas"]:
+                pc = np.clip(p, 1 / (2 * SIMULACIONES), 1 - 1 / (2 * SIMULACIONES))
+                d[(r["liga"], r["temp"])] += [((p - y) ** 2).sum(), -(y * np.log(pc) + (1 - y) * np.log(1 - pc)).sum(), len(p)]
+        return d
+
+    base = pool.map(simular_corte, [(r, 0.0) for r in cortes])
+    P = np.concatenate([p for r in base for _, p, _ in r["zonas"]])
+    Y = np.concatenate([y for r in base for _, _, y in r["zonas"]])
+    Z = np.concatenate([[z] * len(p) for r in base for z, p, _ in r["zonas"]])
+    print("\nCalibración de las zonas (todas las temporadas): lo que daba la web -> lo que pasó")
+    for a, b in ((0, .01), (.01, .1), (.1, .3), (.3, .5), (.5, .7), (.7, .9), (.9, .99), (.99, 1.0001)):
+        m = (P >= a) & (P < b)
+        print(f"  {100 * a:3.0f}-{min(100, 100 * b):3.0f} %: {100 * P[m].mean():5.1f} -> {100 * Y[m].mean():5.1f}   ({m.sum()})")
+    for z in ("campeón", "arriba", "descenso"):
+        print(f"  {z:9s} " + "   ".join(f"{100 * a:.0f}-{100 * b:.0f} %: {100 * P[m].mean():.1f} -> {100 * Y[m].mean():.1f} ({m.sum()})"
+                                     for a, b in ((.1, .3), (.3, .7), (.7, .9)) for m in [(Z == z) & (P >= a) & (P < b)]))
+    print("Puntos al final (Proy.): error medio, sesgo y cuántos caen en el 10-90 % de las simulaciones")
+    for c in CORTES:
+        rr = [r for r in base if r["corte"] == c]
+        media, real, dentro = (np.concatenate([r["pts"][k] for r in rr]) for k in range(3))
+        print(f"  con el {100 * c:.0f} % jugado: {np.abs(media - real).mean():.1f} puntos, sesgo {np.mean(real - media):+.2f},"
+              f" dentro {100 * dentro.mean():.0f} %")
+
+    b0 = por_temporada(base)
+    print("\nDuda en la fuerza de cada equipo (sigma) frente a ninguna: Brier y log loss de las zonas por equipo,"
+          " test pareado por temporadas")
+    for sigma in (0.03, 0.05, 0.08, 0.11, 0.15):
+        bs = por_temporada(pool.map(simular_corte, [(r, sigma) for r in cortes]))
+        partes = []
+        for nombre, f in (("ajuste", lambda k: k[1] <= FIN_AJUSTE), ("prueba", lambda k: k[1] > FIN_AJUSTE)):
+            ks = [k for k in temporadas if f(k)]
+            for i, txt in ((0, "Brier"), (1, "log loss")):
+                d = np.array([(bs[k][i] - b0[k][i]) / b0[k][2] for k in ks])
+                partes.append(f"{nombre} {txt} {d.mean():+.5f} ({d.mean() / (d.std(ddof=1) / math.sqrt(len(d))):+.1f} se)")
+        print(f"  sigma {sigma:.2f}: " + "   ".join(partes), flush=True)
+
+
 def main():
     lista = casos()
     print(f"{len(lista)} temporadas evaluables: "
@@ -576,6 +726,9 @@ def main():
             return
         if sys.argv[1:] == ["descensos"]:
             descensos(pool, lista)
+            return
+        if sys.argv[1:] == ["tabla"]:
+            tabla(pool, lista)
             return
         nuevo, _, _ = evaluar(pool, lista)
         clave = (app.FACTOR_DIARIO, app.PSEUDO_GOLES_ATAQUE, app.PSEUDO_GOLES_DEFENSA, app.ATAQUE_RECIEN_LLEGADO)
