@@ -534,9 +534,22 @@ hay (es un torneo).
   cabeceras abreviadas. Es una `<table>` de verdad, con `caption` y títulos de
   columna con su explicación (`abbr`).
 - **Lo que no sabe:** cada equipo juega lo que le queda como dicen sus fuerzas de
-  hoy, sin que cambien por el camino; las simulaciones no varían la fuerza de un
-  equipo, así que la proyección es algo más segura de sí misma de lo que debería.
-  No se ha medido contra temporadas pasadas (`afinar_liga.py` tendría con qué).
+  hoy, sin que cambien por el camino, y los desempates por enfrentamientos directos y
+  las sanciones de puntos no entran.
+- **Medida** (`python afinar_liga.py tabla`, oct 2026): 87 temporadas completas de
+  openfootball cortadas al 25, 50 y 75 % jugado, simuladas desde ahí como la web (las
+  fuerzas y la media de liga del día del corte, 4.000 veces) y comparadas con cómo
+  acabaron. Las zonas que enseña la web cuadran: de lo que daba entre un 10 y un 30 %
+  pasó el 18.2 % (daba 18.5 de media), de 30 a 50, el 39.1 (38.9), de 50 a 70, el 57.5
+  (59.7), de 70 a 90, el 77.6 (80.0) y de 90 a 99, el 95.4 (95.3). Lo más flojo: un
+  descenso que daba entre 70 y 90 % pasó el 71.9 % (192 casos). Los puntos finales se
+  desvían de la columna Proy. 6.7 de media con un cuarto de temporada jugado, 4.9 a la
+  mitad y 3.2 con tres cuartos, sin sesgo; caen en el 10-90 % de las simulaciones el 71,
+  77 y 80 % de las veces, así que al principio es algo segura de más. Se probó a mover
+  la fuerza de cada equipo al azar en cada temporada simulada (lognormal, sigma de 0.03 a
+  0.15): ayuda algo en el ajuste (0.08: -2.3 se en la log loss de las zonas), nada en la
+  prueba (-1.0 se) y empeora con 0.15. No se pone: la proyección se queda como estaba.
+  La nota de la tabla en la web lo dice.
 - Se cuenta en las visitas (`tabla`, por liga): "Tablas que más se abren".
 
 ## Compartir y favoritos (oct 2026)
@@ -1490,7 +1503,8 @@ ahí la regla de "Convenciones": elegir con unas temporadas y juzgar con otras.
 - `afinar_liga.py` (oct 2026) mide el modelo de liga de `app.py` frente al de
   antes, por liga y por temporada, con test pareado de Brier y LogLoss (~30 s), y
   con `afinar` busca los parámetros en las temporadas de ajuste y los juzga en
-  las de prueba; con `descensos`, de dónde parten los recién llegados (los que
+  las de prueba; con `tabla`, la proyección de la tabla a mitad de temporadas
+  pasadas (ver "Tabla y proyección"); con `descensos`, de dónde parten los recién llegados (los que
   bajan de la Premier a la Championship y los que suben a cada liga, con su
   fuerza de verdad en su primera temporada). Baja ~120 ficheros de openfootball (sin token) a
   `openfootball_cache/` y casa los nombres entre temporadas. La evaluación usa

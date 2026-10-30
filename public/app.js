@@ -927,6 +927,9 @@ function htmlTabla(cod, t) {
     + ' partidos) jugada ' + String(SIMULACIONES).replace(/\B(?=(\d{3})+$)/g, ".") + ' veces, cada partido con los goles esperados del modelo, como los de la semana.'
     + ' En empate a puntos, cuenta la diferencia de goles y después los goles a favor (algunas ligas desempatan antes por los enfrentamientos directos).'
     + ' Cada equipo juega como dicen sus fuerzas de hoy: fichajes, lesiones o un cambio de entrenador tardan en notarse.'
+    // medido con afinar_liga.py tabla: 87 temporadas pasadas, cortadas al 25, 50 y 75 % jugado
+    + ' Medida con 87 temporadas pasadas desde un cuarto, la mitad y tres cuartos de temporada: de lo que daba entre un 10 y un 30 %,'
+    + ' pasó el 18 %; de lo que daba entre un 70 y un 90 %, el 78 %. A mitad de temporada, los puntos finales se desvían unos 5 de la proyección.'
     + (zonas.some(z => z[0] === "Descenso") ? ' Descenso es el directo: el puesto de promoción, donde lo hay, no cuenta.' : "")
     + (POCO_FIABLES[cod] ? " " + esc(textoPocoFiable(cod, doc.nombre)) : "") + '</p></div>';
 }
