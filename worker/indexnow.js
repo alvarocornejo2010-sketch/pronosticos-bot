@@ -1,8 +1,10 @@
 // Avisar a los buscadores de las páginas nuevas (IndexNow). Lo aceptan Bing, Yandex,
 // Seznam, Naver y Yep, y de Bing beben también DuckDuckGo, Yahoo, Ecosia y la búsqueda de
 // ChatGPT; Google no (para él están el sitemap y Search Console). Gratis y sin cuenta:
-// basta con publicar la clave en /<clave>.txt (public/) y mandar las direcciones a
-// api.indexnow.org, que las reparte entre todos.
+// basta con publicar la clave en /<clave>.txt (public/) y mandar las direcciones a uno de
+// ellos, que las reparte entre todos: a Bing (www.bing.com/indexnow). Al principio iban a
+// api.indexnow.org, que el 30 oct 2026 respondió 429 ("demasiadas peticiones") las tres
+// veces, seguramente por las IP de salida de Cloudflare, que comparten muchas webs.
 //
 // Lo hace el cron en un minuto libre (planificador.js) cada HORAS_INDEXNOW, con la web al
 // día y sin la API ni el candado, como la limpieza, con lo que cambió desde la vez
@@ -10,7 +12,7 @@
 // terminaron (su página enseña ya el marcador), los equipos de unos y otros, sus ligas y
 // la portada. La primera vez van además todas las ligas y los equipos de las tablas. Lo
 // que mandó y la respuesta quedan en el documento indexnow; si falla, la vez siguiente
-// lo vuelve a mandar todo.
+// lo vuelve a mandar todo, cada vez más tarde (6, 12 y 24 h, o lo que diga Retry-After).
 
 import { INDEXNOW_CLAVE } from "./config.js";
 import { CODIGOS } from "./compartir.js";
@@ -20,13 +22,26 @@ import { isoSinMs } from "./registro.js";
 const MS_HORA = 3600000;
 export const HORAS_INDEXNOW = 3;
 const MAX_URLS = 10000;   // lo más que admite una petición
+const MAX_ESPERA_H = 48;  // lo más que se espera tras un fallo, aunque Retry-After pida más
 
-// doc: el documento indexnow tal como lo lee el planificador ({texto, actualizado}).
+// doc: el documento indexnow tal como lo lee el planificador ({texto, actualizado}). Tras
+// un fallo se espera lo que diga su espera_h; si no, HORAS_INDEXNOW. El texto solo se lee
+// pasadas esas horas: los demás minutos no cuesta nada.
 export function tocaIndexnow(doc, resumen, aj, ahora) {
   if (!aj.indexnowUrl || !resumen || resumen.estado !== "listo") return null;
   if (!doc) return "nunca se ha hecho";
   const horas = (ahora - doc.actualizado) / MS_HORA;
-  return horas >= HORAS_INDEXNOW ? `la última hace ${Math.trunc(horas)} h` : null;
+  if (horas < HORAS_INDEXNOW) return null;
+  let espera = HORAS_INDEXNOW;
+  try { espera = JSON.parse(doc.texto).espera_h || HORAS_INDEXNOW; } catch { /* sin texto: lo de siempre */ }
+  return horas >= espera ? `la última hace ${Math.trunc(horas)} h` : null;
+}
+
+// Horas que pide esperar una cabecera Retry-After (segundos o una fecha), o 0.
+export function horasRetryAfter(valor, ahora) {
+  if (!valor) return 0;
+  const s = /^\d+$/.test(valor.trim()) ? Number(valor) : (Date.parse(valor) - ahora) / 1000;
+  return Number.isFinite(s) && s > 0 ? Math.ceil(s / 3600) : 0;
 }
 
 // Las direcciones que cambiaron desde la vez anterior (previo: el documento indexnow, o
@@ -79,15 +94,22 @@ export async function avisarBuscadores(almacen, aj, previo, ahora, fetchFn = fet
           urlList: c.rutas.map((ruta) => origen + ruta) }),
       });
       doc.estado = r.status;
-      if (r.status !== 200 && r.status !== 202) doc.error = (await r.text()).slice(0, 300);
+      if (r.status !== 200 && r.status !== 202) {
+        doc.error = (await r.text()).slice(0, 300);
+        const ra = r.headers.get("Retry-After");
+        if (ra) doc.retry_after = ra.slice(0, 100);
+      }
     } catch (e) {
       doc.estado = 0;
       doc.error = String((e && e.message) || e).slice(0, 300);
     }
     if (doc.error !== undefined) {
       console.error(`IndexNow: ${doc.estado} ${doc.error}`);
+      // cada fallo seguido dobla la espera (6, 12, 24 h), y si pide más con Retry-After, eso
+      const fallos = ((previo && previo.fallos) || 0) + 1;
+      const espera = Math.max(Math.min(24, HORAS_INDEXNOW * 2 ** fallos), horasRetryAfter(doc.retry_after, ahora));
       Object.assign(doc, { al_dia: Boolean(previo && previo.al_dia), desde: previo ? previo.desde : 0,
-        enviados: previo ? previo.enviados : [] });
+        enviados: previo ? previo.enviados : [], fallos, espera_h: Math.min(MAX_ESPERA_H, espera) });
     }
   }
   await almacen.escribir([almacen.sentenciaDoc("indexnow", doc, ahora)]);

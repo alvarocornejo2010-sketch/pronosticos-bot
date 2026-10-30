@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { CODIGOS, filaResultado, paginaConTarjeta, textoPartido, veredicto } from "../worker/compartir.js";
 import { textoEquipo } from "../worker/equipos.js";
 import { textosLiga } from "../worker/ligas.js";
-import { avisarBuscadores, tocaIndexnow, HORAS_INDEXNOW } from "../worker/indexnow.js";
+import { avisarBuscadores, horasRetryAfter, tocaIndexnow, HORAS_INDEXNOW } from "../worker/indexnow.js";
 import { INDEXNOW_CLAVE } from "../worker/config.js";
 import { Reloj } from "../worker/tiempo.js";
 
@@ -121,13 +121,21 @@ assert.equal(textosLiga("PL", { partidos: [], equipos: [], ultimos: [] }, reloj)
 console.log("liga: próximos partidos, tabla en orden y enlaces a las demás ligas");
 
 // IndexNow: cuándo toca
-const aj = { indexnowUrl: "https://api.indexnow.org/indexnow", urlWeb: "https://pronosticos-bot.alvarocornejo2010.workers.dev" };
+const aj = { indexnowUrl: "https://www.bing.com/indexnow", urlWeb: "https://pronosticos-bot.alvarocornejo2010.workers.dev" };
 const listo = { estado: "listo" }, ahora = Date.parse("2026-10-29T12:00:00Z"), H = 3600000;
 assert.equal(tocaIndexnow(null, listo, aj, ahora), "nunca se ha hecho");
 assert.equal(tocaIndexnow(null, { estado: "actualizando" }, aj, ahora), null);
 assert.equal(tocaIndexnow(null, listo, { ...aj, indexnowUrl: "" }, ahora), null);
 assert.equal(tocaIndexnow({ actualizado: ahora - (HORAS_INDEXNOW * H - 60000) }, listo, aj, ahora), null);
 assert.equal(tocaIndexnow({ actualizado: ahora - HORAS_INDEXNOW * H }, listo, aj, ahora), `la última hace ${HORAS_INDEXNOW} h`);
+// tras un fallo, lo que diga su espera
+const fallido = (h) => ({ actualizado: ahora - h * H, texto: JSON.stringify({ estado: 429, espera_h: 12 }) });
+assert.equal(tocaIndexnow(fallido(6), listo, aj, ahora), null);
+assert.equal(tocaIndexnow(fallido(12), listo, aj, ahora), "la última hace 12 h");
+assert.equal(horasRetryAfter("7200", ahora), 2);
+assert.equal(horasRetryAfter("90", ahora), 1);
+assert.equal(horasRetryAfter(new Date(ahora + 5.5 * H).toUTCString(), ahora), 6);
+assert.equal(horasRetryAfter("mañana", ahora) + horasRetryAfter(null, ahora) + horasRetryAfter("0", ahora), 0);
 
 // IndexNow: qué manda. Una base de mentira con lo justo: los partidos de la ventana con
 // predicción, los resultados (con cuándo se liquidaron) y los equipos de las tablas.
@@ -148,8 +156,11 @@ const almacen = {
   },
 };
 const enviadas = [];
-let respuesta = 200;
-const falso = async (url, op) => { enviadas.push({ url, ...JSON.parse(op.body) }); return new Response("", { status: respuesta }); };
+let respuesta = 200, cabeceras = {};
+const falso = async (url, op) => {
+  enviadas.push({ url, ...JSON.parse(op.body) });
+  return new Response("", { status: respuesta, headers: cabeceras });
+};
 const ultimo = () => docs[docs.length - 1].valor;
 const origen = aj.urlWeb;
 
@@ -194,9 +205,25 @@ r = await avisarBuscadores(almacen, aj, ultimo(), ahora + 9 * H, falso);
 assert.equal(r.estado, 500);
 assert.equal(ultimo().desde, 2000);
 assert.ok(ultimo().al_dia && "error" in ultimo());
+assert.deepEqual([ultimo().fallos, ultimo().espera_h], [1, 2 * HORAS_INDEXNOW]);
+// cada fallo seguido dobla la espera, hasta 24 h, salvo que Retry-After pida más (hasta 48)
+respuesta = 429;
+r = await avisarBuscadores(almacen, aj, ultimo(), ahora + 15 * H, falso);
+assert.deepEqual([ultimo().fallos, ultimo().espera_h, ultimo().desde], [2, 4 * HORAS_INDEXNOW, 2000]);
+await avisarBuscadores(almacen, aj, ultimo(), ahora + 27 * H, falso);
+await avisarBuscadores(almacen, aj, ultimo(), ahora + 51 * H, falso);
+assert.deepEqual([ultimo().fallos, ultimo().espera_h], [4, 24]);
+cabeceras = { "Retry-After": "129600" };
+await avisarBuscadores(almacen, aj, ultimo(), ahora + 75 * H, falso);
+assert.deepEqual([ultimo().espera_h, ultimo().retry_after], [36, "129600"]);
+cabeceras = { "Retry-After": "999999" };
+await avisarBuscadores(almacen, aj, ultimo(), ahora + 111 * H, falso);
+assert.equal(ultimo().espera_h, 48);
+cabeceras = {};
 respuesta = 202;   // aceptado, la clave aún sin comprobar: vale igual
-r = await avisarBuscadores(almacen, aj, ultimo(), ahora + 12 * H, falso);
+r = await avisarBuscadores(almacen, aj, ultimo(), ahora + 160 * H, falso);
 assert.ok(enviadas.at(-1).urlList.includes(origen + "/partido/5") && r.estado === 202 && ultimo().desde === 3000);
+assert.ok(!("fallos" in ultimo()) && !("espera_h" in ultimo()));   // al llegar, la espera vuelve a ser la de siempre
 
 // la primera vez que falla, la siguiente sigue siendo la primera: van todas las ligas
 docs.length = 0;
@@ -213,5 +240,5 @@ const sinRed = async () => { throw new TypeError("fetch failed"); };
 r = await avisarBuscadores(almacen, aj, antes, ahora + 6 * H, sinRed);
 assert.deepEqual(r, { urls: 5, estado: 0 });
 assert.ok(ultimo().desde === antes.desde && ultimo().error === "fetch failed");
-console.log("IndexNow: la primera vez todo, luego solo lo nuevo, y lo que falla se vuelve a mandar");
+console.log("IndexNow: la primera vez todo, luego solo lo nuevo, y lo que falla se vuelve a mandar, cada vez más tarde");
 console.log("paginas: OK");

@@ -134,8 +134,9 @@ export function ajustes(env = {}) {
     // la dirección de la web, que va en la firma VAPID como contacto y en lo que se manda a
     // IndexNow (indexnow.js)
     urlWeb: env.URL_WEB || "https://pronosticos-bot.alvarocornejo2010.workers.dev",
-    // adónde se mandan las páginas nuevas (indexnow.js); vacío, no se mandan
-    indexnowUrl: env.INDEXNOW_URL ?? "https://api.indexnow.org/indexnow",
+    // adónde se mandan las páginas nuevas (indexnow.js); vacío, no se mandan. Bing directamente:
+    // api.indexnow.org respondió 429 a todo lo que llegaba de Cloudflare (30 oct 2026)
+    indexnowUrl: env.INDEXNOW_URL ?? "https://www.bing.com/indexnow",
     // solo en las pruebas: el origen de un servicio de avisos de mentira (http://127.0.0.1:...)
     pushPrueba: env.PUSH_PRUEBA || "",
     // El calendario de Mis equipos (calendario.js): cuántos puede haber, cuántos nuevos al
