@@ -56,6 +56,9 @@ export const VERSION_MODELO = 5;   // 3 (oct 2026): sin los playoffs de la Champ
                                    // 4 (oct 2026): los mercados de goles con ENCOGER_TOTAL
                                    // 5 (oct 2026): los mercados de goles con MENOS_CEROS
 export const FORMATO_LISTAS = 2;   // partidos_liga sin playoffs (soloLiga): las de antes se bajan otra vez
+// la validación de Cloudflare (validacion.js): una de otro formato se repite, como una de
+// otro modelo. 2 (oct 2026): con la Champions
+export const FORMATO_VALIDACION = 2;
 
 // La clave de IndexNow (indexnow.js): pública a propósito, en /<clave>.txt (public/), con
 // la que los buscadores comprueban que las direcciones que se les mandan son de esta web.

@@ -106,6 +106,35 @@ const out = {
     v.validarLiga(codigo, nombre, season, previa, ultima, arriba ? arriba.flatMap((x) => [x.local, x.visita]) : [])),
   redondeo: casos.redondeo.map(([x, n]) => m.redondear(x, n)),
 };
+// la Champions: de una vez, y por tramos como en el cron, guardando y retomando entre uno y otro
+const vueltaJSON = (x) => JSON.parse(JSON.stringify(x));
+function validarCl(caso, tramo) {
+  const champions = { fechas: v.fechasPorDia(caso.cl), equipos: new Set(caso.cl.flatMap((x) => [x.local, x.visita])) };
+  const previaDe = Object.fromEntries(caso.ligas.map((l) => [l.codigo, l.previa]));
+  const fotos = {};
+  const ligas = caso.ligas.map((l) => {
+    const arriba = c.LIGA_DE_ARRIBA[l.codigo] ? (previaDe[c.LIGA_DE_ARRIBA[l.codigo]] || []).flatMap((x) => [x.local, x.visita]) : [];
+    if (!tramo) return v.validarLiga(l.codigo, l.nombre, 2024, l.previa, l.ultima, arriba, champions, fotos);
+    let g = null, val;
+    do {
+      val = new v.ValidacionLiga(l.codigo, l.nombre, 2024, l.previa, l.ultima, g, arriba, champions);
+      val.avanzar(tramo);
+      g = vueltaJSON(val);
+    } while (!val.terminada());
+    if (!val.error) fotos[l.codigo] = vueltaJSON(val.fotos());
+    return val.resultado();
+  });
+  if (!tramo) return { ligas, fotos, cl: v.validarChampions("Champions League", 2024, caso.cl, caso.cl_previa, fotos) };
+  let g = null, val;
+  do {
+    val = new v.ValidacionChampions("Champions League", 2024, caso.cl, caso.cl_previa, fotos, g);
+    val.avanzar(tramo);
+    g = vueltaJSON(val);
+  } while (!val.terminada());
+  return { ligas, fotos, cl: val.resultado() };
+}
+out.validacion_cl = casos.validacion_cl.map((caso) => validarCl(caso, 0));
+out.validacion_cl_tramos = casos.validacion_cl.map((caso) => validarCl(caso, 7));
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -153,6 +182,26 @@ def _temporada(rnd, equipos, fuerza, n_jornadas):
                         "local": l, "visita": v,
                         "gl": goles(1.45 * fuerza[l] / fuerza[v]), "gv": goles(1.1 * fuerza[v] / fuerza[l])})
         dia += 1
+    out.sort(key=lambda m: m["fecha"])
+    return out
+
+
+def _torneo(rnd, equipos, fuerza, n, anio):
+    """Un torneo sintético: n partidos entre los equipos dados, varios algunos días,
+    con goles según la fuerza de cada uno."""
+    out, dia = [], -5
+    for k in range(n):
+        dia += rnd.choice((0, 0, 1, 2))
+        l, v = rnd.sample(equipos, 2)
+        def goles(mu):
+            x, p, s, u = 0, math.exp(-mu), math.exp(-mu), rnd.random()
+            while u > s and x < 12:
+                x += 1; p *= mu / x; s += p
+            return x
+        d = max(dia, 0)
+        out.append({"fecha": f"{anio}-{1 + (d // 28) % 12:02d}-{1 + d % 28:02d}T{18 + k % 3:02d}:00:00Z",
+                    "local": l, "visita": v,
+                    "gl": goles(1.45 * fuerza[l] / fuerza[v]), "gv": goles(1.1 * fuerza[v] / fuerza[l])})
     out.sort(key=lambda m: m["fecha"])
     return out
 
@@ -236,11 +285,29 @@ def _casos(rnd):
                              "previa": _temporada(rnd, viejos, fuerza, 46),
                              "ultima": _temporada(rnd, nuevos, fuerza, 46),
                              "arriba": _temporada(rnd, arriba, fuerza, 38) if codigo == "ELC" else None})
+    # la Champions (validar_champions): tres ligas con sus equipos de Champions (una de
+    # ellas la Championship, sin nivel propio) y equipos de fuera del plan; días de
+    # Champions antes, entre y después de los de liga. En el segundo caso, una liga sin
+    # temporada (sin fotos) y una Champions anterior corta (sin historial previo).
+    validacion_cl = []
+    for caso, (jornadas_pl, n_previa_cl) in enumerate(((30, 110), (8, 40))):
+        ligas_cl, fuerza, de_cl = [], {}, []
+        for j, (codigo, jornadas) in enumerate((("PD", 30), ("PL", jornadas_pl), ("ELC", 30))):
+            equipos = list(range(5000 + 1000 * caso + 100 * j, 5000 + 1000 * caso + 100 * j + 20))
+            fuerza.update({e: rnd.uniform(0.6, 1.6) for e in equipos})
+            ligas_cl.append({"codigo": codigo, "nombre": f"Liga {codigo}",
+                             "previa": _temporada(rnd, equipos, fuerza, 38),
+                             "ultima": _temporada(rnd, equipos, fuerza, jornadas)})
+            de_cl += equipos[:4]
+        de_cl += [90000 + 10 * caso + j for j in range(6)]
+        fuerza.update({e: rnd.uniform(0.6, 1.6) for e in de_cl if e >= 90000})
+        validacion_cl.append({"ligas": ligas_cl, "cl": _torneo(rnd, de_cl, fuerza, 130, 2024),
+                              "cl_previa": _torneo(rnd, de_cl, fuerza, n_previa_cl, 2023)})
     # redondeo: empates exactos (0.125, 2.675...), negativos y valores corrientes
     redondeo = [[x, n] for x in (0.125, 0.375, 2.675, 1.005, 12.345, 45.675, -0.125, 0.5, 1.5, 2.5)
                 for n in (0, 1, 2)] + [[rnd.uniform(0, 100), rnd.choice((1, 2, 3, 4))] for _ in range(3000)]
     return {"fuerzas": fuerzas, "compactos": compactos, "partidos": partidos, "sueltos": sueltos,
-            "champions": champions, "validacion": validaciones, "redondeo": redondeo}
+            "champions": champions, "validacion": validaciones, "validacion_cl": validacion_cl, "redondeo": redondeo}
 
 
 def _python(casos):
@@ -304,6 +371,20 @@ def _python(casos):
                 temporadas[(app.LIGA_DE_ARRIBA[c["codigo"]], c["season"] - 1)] = c["arriba"]
             validacion._cargar_temporada = lambda codigo, season: temporadas.get((codigo, season), [])
             vals.append(validacion.validar_liga(c["codigo"], c["nombre"], c["season"]))
+        vals_cl = []
+        for caso in casos["validacion_cl"]:
+            temporadas = {}
+            for l in caso["ligas"]:
+                temporadas[(l["codigo"], 2023)] = l["previa"]
+                temporadas[(l["codigo"], 2024)] = l["ultima"]
+            validacion._cargar_temporada = lambda codigo, season, torneo=False: temporadas.get((codigo, season), [])
+            info_cl = {"fechas": validacion.fechas_por_dia(caso["cl"]),
+                       "equipos": {t for m in caso["cl"] for t in (m["local"], m["visita"])}}
+            fotos = {}
+            ligas = [validacion.validar_liga(l["codigo"], l["nombre"], 2024, info_cl, fotos) for l in caso["ligas"]]
+            vals_cl.append({"ligas": ligas, "fotos": fotos,
+                            "cl": validacion.validar_champions("Champions League", 2024, caso["cl"], caso["cl_previa"],
+                                                               fotos)})
     finally:
         validacion._cargar_temporada = original
 
@@ -325,7 +406,8 @@ def _python(casos):
     })
     redondeo = [round(x, n) for x, n in casos["redondeo"]]
     return {"constantes": constantes, "fuerzas": fuerzas, "compactos": compactos, "partidos": partidos,
-            "sueltos": sueltos, "champions": champions, "validacion": vals, "redondeo": redondeo}
+            "sueltos": sueltos, "champions": champions, "validacion": vals, "validacion_cl": vals_cl,
+            "validacion_cl_tramos": vals_cl, "redondeo": redondeo}
 
 
 class Comparador:
@@ -404,7 +486,8 @@ def main():
     js = json.loads(proc.stdout)
 
     fallos = 0
-    for parte in ("constantes", "fuerzas", "compactos", "partidos", "sueltos", "champions", "validacion", "redondeo"):
+    for parte in ("constantes", "fuerzas", "compactos", "partidos", "sueltos", "champions", "validacion",
+                  "validacion_cl", "validacion_cl_tramos", "redondeo"):
         comp = Comparador()
         comp.comparar(py[parte], js[parte], parte)
         tolerables, graves = [], []

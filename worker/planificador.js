@@ -6,7 +6,7 @@
 // al día la limpieza (limpieza.js) y cada pocas horas el aviso a los buscadores de las
 // páginas nuevas (indexnow.js).
 
-import { MAX_INTENTOS_VALIDACION, VERSION_MODELO, ajustes } from "./config.js";
+import { FORMATO_VALIDACION, MAX_INTENTOS_VALIDACION, VERSION_MODELO, ajustes } from "./config.js";
 import { Almacen } from "./almacen.js";
 import { ClienteAPI, SinPresupuesto } from "./api.js";
 import { Reloj } from "./tiempo.js";
@@ -63,8 +63,10 @@ export function tocaActualizar(resumen, aj, ahora) {
 }
 
 // Una validación hecha (o empezada) con otra versión del modelo no mide lo que
-// se publica. Las de antes de que existiera la versión cuentan como la 1.
-export const deOtroModelo = (val) => Boolean(val) && (val.version_modelo ?? 1) !== VERSION_MODELO;
+// se publica, y una de otro formato (FORMATO_VALIDACION: sin la Champions) no mide
+// todo. Las de antes de que existiera la versión o el formato cuentan como la 1.
+export const deOtroModelo = (val) => Boolean(val)
+  && ((val.version_modelo ?? 1) !== VERSION_MODELO || (val.formato ?? 1) !== FORMATO_VALIDACION);
 
 // ¿Toca validar? Como _toca_validar: solo con el calendario al día, porque las
 // dos cosas compiten por las mismas 10 peticiones por minuto. Una validación
@@ -74,12 +76,12 @@ export const deOtroModelo = (val) => Boolean(val) && (val.version_modelo ?? 1) !
 // termina una temporada nueva o cambia el modelo (VERSION_MODELO).
 export function tocaValidar(resumen, val, pedido, aj, ultimaTerminada) {
   if (val && val.estado === "calculando") {
-    return deOtroModelo(val) ? "modelo nuevo: se empieza de cero" : "continuar la validación";
+    return deOtroModelo(val) ? "modelo o validación nuevos: se empieza de cero" : "continuar la validación";
   }
   if (pedido) return "pedida con /validar";
   if (!aj.autoValidar || !resumen || resumen.estado !== "listo") return null;
   if (!val || val.estado === "sin_ejecutar") return "nunca se ha ejecutado";
-  if ((val.estado === "listo" || val.estado === "error") && deOtroModelo(val)) return "modelo nuevo";
+  if ((val.estado === "listo" || val.estado === "error") && deOtroModelo(val)) return "modelo o validación nuevos";
   if (val.estado === "listo" && val.temporada < ultimaTerminada) return `ya terminó la temporada ${ultimaTerminada}`;
   if (val.estado === "error" && (val.intentos ?? 0) < MAX_INTENTOS_VALIDACION) {
     return `reintento ${(val.intentos ?? 0) + 1} de ${MAX_INTENTOS_VALIDACION} tras un error`;

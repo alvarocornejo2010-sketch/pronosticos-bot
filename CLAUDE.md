@@ -1342,9 +1342,11 @@ largos. Sin casarlos (`casar` y `ALIAS` en `afinar_champions.py`), 8 grandes de
 Las ligas se leen con `afinar_liga.cargar`, que casa además los nombres de una
 temporada a otra (ver "El modelo").
 
-La Champions no entra en la validación de la app (`validacion.py` recorre solo
-`LIGAS`): la web explica el cálculo en el detalle de cada partido, con lo que
-dice el historial de cada equipo.
+**La Champions en la validación de la app** (oct 2026, ver "Validación"): la temporada
+terminada de football-data, con su propio modelo, en Fiabilidad medida (fila UCL) y en
+el detalle de cada partido de Champions ("Medido aquí..."). La 2025/26 fue una de las
+cuatro con que se eligieron los parámetros: hasta que se valide la 2026/27, ese número
+es algo optimista.
 
 ## Validación
 
@@ -1391,6 +1393,24 @@ Además del 1X2 mide más de 2.5 y ambos marcan (`mercados` en el resultado) con
 la misma base "equipo medio". Cuesta 2
 peticiones por liga y solo la primera vez — las temporadas terminadas no cambian,
 así que quedan cacheadas en disco.
+
+**La Champions** (oct 2026, `validar_champions` y `ValidacionChampions`): sus dos
+temporadas se bajan antes que las ligas (todos los partidos, con los goles a los 90
+minutos, `goles_90`), y cada liga, al recorrer su temporada, apunta la fuerza de sus
+equipos de Champions antes de cada día de Champions (`fotos`: la de `fuerza_equipo` con
+lo jugado hasta el día anterior; los días después del último de liga, con la temporada
+entera). Luego se recorre la Champions día a día como `fuerzas_champions` en producción:
+esa fuerza atenuada, el nivel de la liga en la que jugó cada equipo esa temporada (la
+primera en el orden de `LIGAS`; uno de fuera del plan cuenta como `FACTOR_OTRA_LIGA`), su
+historial de Champions (el de la temporada anterior y el de esta hasta el día anterior) y
+la media de la Champions anclada en la anterior. Una liga sin temporada deja a sus equipos
+con fuerza 1. Sale con la misma forma que una liga (`ligas.CL` y `resumen.CL`). En el Worker
+no cuesta CPU de más: las fotos se apuntan en los pasos de cada liga (sin ajustes nuevos,
+salvo uno al final de la liga si quedan días de Champions después) y la Champions va de
+15 en 15 partidos, sin ajustar nada. `FORMATO_VALIDACION` (2, `worker/config.js`): una
+validación de otro formato se repite como una de otro modelo, para que la de producción,
+sin la Champions, se rehaga sola. `test_paridad.py` compara la Champions de los dos lados,
+también por tramos guardando y retomando.
 
 ## Mercados de goles — `ENCOGER_TOTAL = 0.6` (modelo 4) y `MENOS_CEROS = 0.02` (modelo 5, oct 2026)
 
@@ -1629,8 +1649,9 @@ Environment).
 - **Champions:** ya junta liga nacional, nivel de liga e historial en la
   Champions, medido con cuatro temporadas (ver "Champions: cómo se predice").
   Cada verano, añadir la temporada que termina a `TEMPORADAS_CL` en
-  `afinar_champions.py` y reajustar. Idea sin probar: meter la Champions en la
-  validación de la app. (Las copas nacionales no están en el plan free.)
+  `afinar_champions.py` y reajustar. Desde oct 2026 la validación de la app la mide
+  con la temporada terminada (ver "Validación"). (Las copas nacionales no están en el
+  plan free.)
 - **Championship y Brasileirão aportan poco** (+2.7% y +3.5%, tabla en
   "Validación"). La web ya lo marca ("fiabilidad baja", ver "Instalable y
   buscadores"); mejorar el modelo en ligas tan igualadas necesitaría otra
@@ -1648,7 +1669,8 @@ Environment).
 
 - `.github/workflows/pruebas.yml`, en cada PR y cada push a `main`, dos checks:
   - **Paridad Python / Worker**: `node --check` de `worker/*.js`, `public/app.js`, `public/sw.js` y `public/imagen.js`,
-    `python test_paridad.py` ("todo igual"), `node pruebas/semana.mjs` (el resumen
+    `python test_paridad.py` ("todo igual", también la validación de la Champions, de una
+    vez y por tramos), `node pruebas/semana.mjs` (el resumen
     de la semana del registro, sus cuentas por versión del modelo, también rehechas por
     partes, y los textos de la tarjeta para compartir), `node pruebas/paginas.mjs` (el texto
     ya escrito de un partido, un equipo y una liga, con los enteros de la web, escapado y con sus

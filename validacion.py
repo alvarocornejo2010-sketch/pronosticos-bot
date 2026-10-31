@@ -17,8 +17,15 @@ Además del 1X2 mide dos mercados de goles, más de 2.5 y ambos marcan, con la
 misma función que publica la web (`mercados_de_goles`) y contra la misma base
 "equipo medio". No cuesta ni una petición más: salen de los mismos resultados.
 
+La Champions (oct 2026) se mide igual, con su propio modelo (fuerzas_champions):
+la fuerza de cada equipo en su liga el día del partido, el nivel de su liga y su
+historial en la Champions. Esas fuerzas salen de la validación de cada liga, que
+las apunta al pasar por cada fecha de la Champions (fotos de los equipos que la
+juegan), y luego se recorre la Champions día a día.
+
 Se dispara con /validar?token=... y el resultado queda en /api/validacion.
-Cuesta 2 peticiones por liga, una sola vez: las temporadas terminadas no cambian.
+Cuesta 2 peticiones por liga (y 2 por la Champions), una sola vez: las temporadas
+terminadas no cambian.
 """
 import json
 import math
@@ -37,12 +44,15 @@ def _rutas():
 # ==========================================
 # DESCARGA (cacheada en disco)
 # ==========================================
-def _cargar_temporada(codigo_liga, season):
+def _cargar_temporada(codigo_liga, season, torneo=False):
+    """Los partidos terminados de una temporada: de una liga, solo la fase de liga
+    (sin playoffs) y el marcador final; de un torneo (la Champions), todos, con los
+    goles a los 90 minutos (goles_90: sin prórroga ni penaltis)."""
     import app
     _, cache_dir = _rutas()
     os.makedirs(cache_dir, exist_ok=True)
     # _liga: desde oct 2026 sin playoffs (app.solo_liga); las de antes se bajan otra vez
-    ruta = os.path.join(cache_dir, f"{codigo_liga}_{season}_liga.json")
+    ruta = os.path.join(cache_dir, f"{codigo_liga}_{season}_{'torneo' if torneo else 'liga'}.json")
 
     if os.path.exists(ruta):
         try:
@@ -58,13 +68,18 @@ def _cargar_temporada(codigo_liga, season):
         return []
 
     limpios = []
-    for m in app.solo_liga(resp.json().get("matches", [])):
-        ft = m.get("score", {}).get("fullTime", {})
-        if ft.get("home") is None or ft.get("away") is None:
+    matches = resp.json().get("matches", [])
+    for m in (matches if torneo else app.solo_liga(matches)):
+        if torneo:
+            gl, gv = app.goles_90(m)
+        else:
+            ft = m.get("score", {}).get("fullTime", {})
+            gl, gv = ft.get("home"), ft.get("away")
+        if gl is None or gv is None:
             continue
         limpios.append({"fecha": m["utcDate"],
                         "local": m["homeTeam"]["id"], "visita": m["awayTeam"]["id"],
-                        "gl": ft["home"], "gv": ft["away"]})
+                        "gl": gl, "gv": gv})
     limpios.sort(key=lambda x: x["fecha"])
     with open(ruta, "w") as f:
         json.dump(limpios, f)
@@ -225,7 +240,97 @@ def _resumen_mercado(modelo, base):
 # ==========================================
 # VALIDACIÓN DE UNA LIGA
 # ==========================================
-def validar_liga(codigo_liga, nombre, season):
+class _Medidas:
+    """Lo que se mide de cada partido, igual en una liga que en la Champions: el
+    modelo, sus dos bases (equipo medio y frecuencia) y los mercados de goles."""
+
+    def __init__(self):
+        self.modelo = _Acumulador()
+        self.base_liga = _Acumulador()
+        self.base_frec = _Acumulador()
+        self.conteo = [0, 0, 0]
+        self.mercados = {k: (_Binario(), _Binario()) for k in MERCADOS}
+
+    def anotar(self, m, xl, xv, media):
+        import app
+        y = _resultado(m)
+
+        # --- el modelo real, el mismo que publica la web ---
+        pr = app.calcular_poisson(xl, xv)
+        self.modelo.add([pr["prob_local"] / 100, pr["prob_empate"] / 100, pr["prob_visita"] / 100], y)
+
+        # --- base 1: dos equipos medios, ignora quién juega ---
+        pb = app.calcular_poisson(round(media["avg_local"], 2), round(media["avg_visita"], 2))
+        self.base_liga.add([pb["prob_local"] / 100, pb["prob_empate"] / 100, pb["prob_visita"] / 100], y)
+
+        # --- mercados de goles: los mismos números que publica la web ---
+        gm = app.mercados_de_goles(xl, xv, media)
+        gb = app.mercados_de_goles(media["avg_local"], media["avg_visita"], media)
+        for k, (clave, ocurre) in MERCADOS.items():
+            si = 1 if ocurre(m) else 0
+            self.mercados[k][0].add(gm[clave] / 100, si)
+            self.mercados[k][1].add(gb[clave] / 100, si)
+
+        # --- base 2: la frecuencia observada hasta ahora ---
+        conteo = self.conteo
+        t = sum(conteo)
+        self.base_frec.add([c / t for c in conteo] if t > 30 else [0.45, 0.26, 0.29], y)
+        conteo[y] += 1
+
+    def resultado(self, nombre, codigo, season, ancla):
+        conteo = self.conteo
+        t = sum(conteo) or 1
+        m_res, b_res = self.modelo.resumen(), self.base_liga.resumen()
+        # skill score: cuánto Brier le quita a la base. 0 = no aporta nada.
+        skill = round(100 * (1 - m_res["brier"] / b_res["brier"]), 1)
+        return {
+            "liga": nombre,
+            "codigo": codigo,
+            "temporada_evaluada": season,
+            "ancla": ancla["origen"],
+            "partidos": m_res["n"],
+            "modelo": m_res,
+            "base_equipo_medio": b_res,
+            "base_frecuencia": self.base_frec.resumen(),
+            "skill_score": skill,
+            "aporta_valor": bool(skill > 0 and m_res["logloss"] < b_res["logloss"]),
+            "reparto_real": {"1": round(100 * conteo[0] / t, 1),
+                             "X": round(100 * conteo[1] / t, 1),
+                             "2": round(100 * conteo[2] / t, 1)},
+            "calibracion": self.modelo.calibracion(),
+            "mercados": {k: _resumen_mercado(mod, base) for k, (mod, base) in self.mercados.items()},
+        }
+
+
+def _ancla(previa, season):
+    """La media de la temporada anterior, igual que en producción, o la constante
+    de respaldo si no da para ancla."""
+    import app
+    if len(previa) >= 100:
+        gl = sum(m["gl"] for m in previa); gv = sum(m["gv"] for m in previa)
+        return {"avg_local": gl / len(previa), "avg_visita": gv / len(previa),
+                "origen": f"temporada {season-1}"}
+    return {"avg_local": app.PRIOR_AVG_LOCAL, "avg_visita": app.PRIOR_AVG_VISITA,
+            "origen": "constante de respaldo"}
+
+
+def _foto(fuerzas, equipos):
+    """{equipo: [ataque, defensa]} en su liga (fuerza_equipo), de los que juegan la Champions."""
+    import app
+    foto = {}
+    for t in equipos:
+        f = app.fuerza_equipo(fuerzas, t)
+        foto[t] = [f["ataque"], f["defensa"]]
+    return foto
+
+
+def validar_liga(codigo_liga, nombre, season, champions=None, fotos=None):
+    """La temporada de una liga, partido a partido. Con champions ({"fechas": la
+    primera de cada día con Champions, "equipos": los que la juegan}) y fotos (un
+    dict), apunta además en fotos[codigo_liga] la fuerza de sus equipos de Champions
+    antes de cada día de Champions: la que tendrían en producción ese día (las
+    fuerzas antes del primer día de liga que no es anterior). Las de los días
+    después del último de liga, con la temporada entera."""
     import app
 
     previa = _cargar_temporada(codigo_liga, season - 1)
@@ -234,14 +339,7 @@ def validar_liga(codigo_liga, nombre, season):
         return {"liga": nombre, "error": f"temporada {season} no disponible "
                                          f"({len(ultima)} partidos)"}
 
-    # El ancla es la media de la temporada anterior, igual que en producción.
-    if len(previa) >= 100:
-        gl = sum(m["gl"] for m in previa); gv = sum(m["gv"] for m in previa)
-        ancla = {"avg_local": gl / len(previa), "avg_visita": gv / len(previa),
-                 "origen": f"temporada {season-1}"}
-    else:
-        ancla = {"avg_local": app.PRIOR_AVG_LOCAL, "avg_visita": app.PRIOR_AVG_VISITA,
-                 "origen": "constante de respaldo"}
+    ancla = _ancla(previa, season)
 
     # los que bajan de la liga de arriba parten de su propia fuerza (LIGA_DE_ARRIBA):
     # su temporada anterior ya la bajó la validación de esa liga, que va antes
@@ -254,63 +352,128 @@ def validar_liga(codigo_liga, nombre, season):
     hist = _Historial(previa if len(previa) >= 100 else [], ancla, app.K_LIGA,
                       codigo_liga=codigo_liga, de_arriba=de_arriba)
 
-    modelo = _Acumulador()
-    base_liga = _Acumulador()
-    base_frec = _Acumulador()
-    conteo = [0, 0, 0]
-    mercados = {k: (_Binario(), _Binario()) for k in MERCADOS}
+    equipos = sorted({t for m in ultima for t in (m["local"], m["visita"])})
+    de_cl = [t for t in equipos if champions and t in champions["equipos"]]
+    dias_cl = [(app.dia_de(f), f) for f in champions["fechas"]] if de_cl else []
+    por_dia, k = {}, 0
 
+    medidas = _Medidas()
     for m in ultima:
-        y = _resultado(m)
         fuerzas, media = hist.antes_de(m)
+        dia = app.dia_de(m["fecha"])
+        while k < len(dias_cl) and dias_cl[k][0] <= dia:
+            por_dia[dias_cl[k][0]] = _foto(fuerzas, de_cl)
+            k += 1
 
         # --- el modelo real, el mismo que publica la web ---
         xl, xv = app.calcular_xg_partido(app.fuerza_equipo(fuerzas, m["local"]),
                                          app.fuerza_equipo(fuerzas, m["visita"]), media)
-        pr = app.calcular_poisson(xl, xv)
-        modelo.add([pr["prob_local"] / 100, pr["prob_empate"] / 100, pr["prob_visita"] / 100], y)
-
-        # --- base 1: dos equipos medios, ignora quién juega ---
-        pb = app.calcular_poisson(round(media["avg_local"], 2), round(media["avg_visita"], 2))
-        base_liga.add([pb["prob_local"] / 100, pb["prob_empate"] / 100, pb["prob_visita"] / 100], y)
-
-        # --- mercados de goles: los mismos números que publica la web ---
-        gm = app.mercados_de_goles(xl, xv, media)
-        gb = app.mercados_de_goles(media["avg_local"], media["avg_visita"], media)
-        for k, (clave, ocurre) in MERCADOS.items():
-            si = 1 if ocurre(m) else 0
-            mercados[k][0].add(gm[clave] / 100, si)
-            mercados[k][1].add(gb[clave] / 100, si)
-
-        # --- base 2: la frecuencia observada hasta ahora ---
-        t = sum(conteo)
-        base_frec.add([c / t for c in conteo] if t > 30 else [0.45, 0.26, 0.29], y)
-
-        conteo[y] += 1
+        medidas.anotar(m, xl, xv, media)
         hist.registrar(m)
 
-    t = sum(conteo) or 1
-    m_res, b_res = modelo.resumen(), base_liga.resumen()
-    # skill score: cuánto Brier le quita a la base. 0 = no aporta nada.
-    skill = round(100 * (1 - m_res["brier"] / b_res["brier"]), 1)
+    if k < len(dias_cl):
+        fuerzas, _ = hist.antes_de({"fecha": dias_cl[k][1]})
+        foto = _foto(fuerzas, de_cl)
+        for d, _f in dias_cl[k:]:
+            por_dia[d] = foto
+    if fotos is not None:
+        fotos[codigo_liga] = {"equipos": equipos, "dias": por_dia}
+    return medidas.resultado(nombre, codigo_liga, season, ancla)
 
-    return {
-        "liga": nombre,
-        "codigo": codigo_liga,
-        "temporada_evaluada": season,
-        "ancla": ancla["origen"],
-        "partidos": m_res["n"],
-        "modelo": m_res,
-        "base_equipo_medio": b_res,
-        "base_frecuencia": base_frec.resumen(),
-        "skill_score": skill,
-        "aporta_valor": bool(skill > 0 and m_res["logloss"] < b_res["logloss"]),
-        "reparto_real": {"1": round(100 * conteo[0] / t, 1),
-                         "X": round(100 * conteo[1] / t, 1),
-                         "2": round(100 * conteo[2] / t, 1)},
-        "calibracion": modelo.calibracion(),
-        "mercados": {k: _resumen_mercado(mod, base) for k, (mod, base) in mercados.items()},
-    }
+
+def _historial_torneo(partidos):
+    """{equipo: [[rival, en casa (1/0), goles a favor, en contra], ...]}, en el orden de
+    los partidos (historial_de_partidos de app.py)."""
+    hist = {}
+    for m in partidos:
+        hist.setdefault(m["local"], []).append([m["visita"], 1, m["gl"], m["gv"]])
+        hist.setdefault(m["visita"], []).append([m["local"], 0, m["gv"], m["gl"]])
+    return hist
+
+
+def _lado_champions(t, dia, liga_de, fotos, actual, previo, media, ancla):
+    """Lo que fuerzas_champions da a un equipo para un partido de Champions ese día:
+    su fuerza en su liga (la foto de ese día), atenuada, el nivel de su liga y su
+    historial en la Champions (el de esta temporada hasta el día anterior, con la
+    media de hoy, y el de la anterior, con la suya), como historial_champions."""
+    import app
+    liga = liga_de.get(t)
+    factor = app.FACTOR_LIGA.get(liga, app.FACTOR_OTRA_LIGA)
+    gf = gc = esperado_f = esperado_c = 0.0
+    n = 0
+    for entradas, mu in ((actual.get(t, []), media), (previo.get(t, []), ancla)):
+        mu_l, mu_v = mu["avg_local"], mu["avg_visita"]
+        for rival, en_casa, a_favor, en_contra in entradas:
+            f_rival = app.FACTOR_LIGA.get(liga_de.get(rival), app.FACTOR_OTRA_LIGA)
+            if en_casa:
+                esperado_f += mu_l * app.ESCALA_CHAMPIONS[0] * factor / f_rival
+                esperado_c += mu_v * app.ESCALA_CHAMPIONS[1] * f_rival / factor
+            else:
+                esperado_f += mu_v * app.ESCALA_CHAMPIONS[1] * factor / f_rival
+                esperado_c += mu_l * app.ESCALA_CHAMPIONS[0] * f_rival / factor
+            gf += a_favor
+            gc += en_contra
+            n += 1
+    ataque_cl, defensa_cl = app.multiplicadores_historial(
+        {"partidos": n, "gf": gf, "gc": gc, "esperado_f": esperado_f, "esperado_c": esperado_c})
+    f = ((fotos.get(liga) or {}).get("dias", {}).get(dia) or {}).get(t) if liga else None
+    b = app.EXPONENTE_FUERZA_CHAMPIONS
+    return {"factor": factor, "ataque": f[0] ** b if f else 1.0, "defensa": f[1] ** b if f else 1.0,
+            "ataque_cl": ataque_cl, "defensa_cl": defensa_cl}
+
+
+def validar_champions(nombre, season, partidos, previa, fotos):
+    """La Champions de una temporada, día a día, con su modelo (calcular_xg_champions):
+    la media de la Champions anclada en la temporada anterior, el historial de cada
+    equipo y su fuerza en su liga ese día (fotos, de validar_liga). Cada equipo es de la
+    liga en la que jugó esa temporada (la primera en el orden de LIGAS, como
+    liga_domestica); uno de una liga fuera del plan cuenta como FACTOR_OTRA_LIGA."""
+    import app
+    if len(partidos) < 100:
+        return {"liga": nombre, "error": f"temporada {season} no disponible ({len(partidos)} partidos)"}
+    ancla = _ancla(previa, season)
+    liga_de = {}
+    for codigo in app.LIGAS.values():
+        for t in (fotos.get(codigo) or {}).get("equipos", []):
+            liga_de.setdefault(t, codigo)
+    # sin una temporada anterior completa, producción no tiene su historial
+    previo = _historial_torneo(previa) if len(previa) >= 100 else {}
+
+    medidas = _Medidas()
+    actual, pendientes = {}, []
+    gl = gv = n = 0
+    dia, media = None, None
+    k = app.K_LIGA
+    for m in partidos:
+        d = app.dia_de(m["fecha"])
+        if d != dia:
+            # lo del día anterior entra en el historial y en la media
+            for t, e in pendientes:
+                actual.setdefault(t, []).append(e)
+            pendientes = []
+            media = {"avg_local": (gl + k * ancla["avg_local"]) / (n + k),
+                     "avg_visita": (gv + k * ancla["avg_visita"]) / (n + k)}
+            dia = d
+        local = _lado_champions(m["local"], d, liga_de, fotos, actual, previo, media, ancla)
+        visita = _lado_champions(m["visita"], d, liga_de, fotos, actual, previo, media, ancla)
+        xl, xv = app.calcular_xg_champions(local, visita, media)
+        medidas.anotar(m, xl, xv, media)
+        pendientes.append((m["local"], [m["visita"], 1, m["gl"], m["gv"]]))
+        pendientes.append((m["visita"], [m["local"], 0, m["gv"], m["gl"]]))
+        gl += m["gl"]; gv += m["gv"]; n += 1
+    return medidas.resultado(nombre, "CL", season, ancla)
+
+
+def fechas_por_dia(partidos):
+    """La primera fecha de cada día con partidos, en orden."""
+    import app
+    out, visto = [], set()
+    for m in partidos:
+        d = app.dia_de(m["fecha"])
+        if d not in visto:
+            visto.add(d)
+            out.append(m["fecha"])
+    return out
 
 
 # ==========================================
@@ -354,14 +517,25 @@ def correr_validacion(season=None):
         _escribir({"estado": "calculando", "iniciado": app.ahora().isoformat(),
                    "temporada": season, "ligas": {}})
 
+        # la Champions primero: las ligas apuntan la fuerza de sus equipos en sus fechas
+        nombre_cl = next(n for n, c in app.TORNEOS.items() if c == "CL")
+        cl = _cargar_temporada("CL", season, torneo=True)
+        cl_previa = _cargar_temporada("CL", season - 1, torneo=True)
+        champions = {"fechas": fechas_por_dia(cl), "equipos": {t for m in cl for t in (m["local"], m["visita"])}}
+        fotos = {}
+
         resultados = {}
         for nombre, codigo in app.LIGAS.items():
             try:
-                resultados[codigo] = validar_liga(codigo, nombre, season)
+                resultados[codigo] = validar_liga(codigo, nombre, season, champions, fotos)
             except Exception as e:
                 resultados[codigo] = {"liga": nombre, "error": str(e)}
             _escribir({"estado": "calculando", "temporada": season,
                        "ligas": resultados, "hora": app.ahora().isoformat()})
+        try:
+            resultados["CL"] = validar_champions(nombre_cl, season, cl, cl_previa, fotos)
+        except Exception as e:
+            resultados["CL"] = {"liga": nombre_cl, "error": str(e)}
 
         ok = [r for r in resultados.values() if not r.get("error")]
         _escribir({
