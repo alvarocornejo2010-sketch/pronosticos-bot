@@ -1490,10 +1490,25 @@ Mejor en 12 de las 16 temporadas y en las 8 ligas de la prueba. Es poco: un déc
 lo que ganó `ENCOGER_TOTAL`, y el sesgo no se va del todo. Probado también y peor en el
 ajuste: otra corrección de Dixon-Coles para los mercados de goles (rho de -0.15 a +0.10,
 lo mejor es el -0.05 del 1X2), subir el total de goles un 1-4%, bajar el 0 sin cambiar la
-media de goles de cada equipo y bajarlo solo al local o solo al visitante. La Champions
-usa la misma rejilla y no se ha medido aparte (`afinar_champions.py` mide el 1X2). `goles_total`
+media de goles de cada equipo y bajarlo solo al local o solo al visitante. `goles_total`
 sigue siendo la suma de los goles esperados acercados, sin este cambio (~1% menos que la
 media de la rejilla). `python afinar_liga.py afinar` repite la búsqueda.
+
+**En la Champions** (`python afinar_champions.py goles`, oct 2026): la misma rejilla, con los
+mismos `ENCOGER_TOTAL` y `MENOS_CEROS`, medida en las cuatro Champions de openfootball (628
+partidos, con los goles esperados de la fórmula y las constantes de `app.py`). Frente a la base
+"equipo medio": más de 1.5 +1.3 %, más de 2.5 +3.1 %, más de 3.5 +2.4 %, ambos marcan +2.2 %,
+porterías a cero +7.2 / +5.5 %, gana por 2 o más +18.8 / +15.7 %, gana sin recibir gol +7.5 /
++6.2 % y el marcador -0.22 de log loss (-7.9 se): algo mejor que en las ligas, porque en la
+Champions los niveles están más separados. Los dos valores sirven: elegidos dejando fuera una
+temporada entera cada vez (t de 0.3 a 1.0 y z de -0.06 a 0.06; negativo es más ceros, y es
+lo que eligen las cuatro veces), juzgados en la que queda fuera no ganan a los de las ligas
+(-0.0002 ± 0.0033 de log loss del marcador, -0.1 se), y los goles esperados tal cual tampoco
+(+0.2 se). Lo que más se desvía: ambos marcan da 57.8 % y pasó un 53.7 %, y la portería a cero del
+local da 27.7 y pasó 31.7 (unos 2 se cada uno, con 628 partidos). Ojo: la escala y los niveles
+de la Champions se ajustaron con estos mismos partidos, así que estos skills son algo
+optimistas; la validación de la app mide la temporada terminada con los datos de
+football-data (fila UCL de Fiabilidad medida y la nota de goles de cada partido de Champions).
 
 **Lo que queda:** la ganancia en el total sigue siendo pequeña frente al ~9% del 1X2: con
 solo goles marcados y encajados, cuántos goles habrá apenas se predice mejor que con
@@ -1544,7 +1559,8 @@ ahí la regla de "Convenciones": elegir con unas temporadas y juzgar con otras.
   openfootball, en formato de texto) y las ligas nacionales de football.json, y
   compara modelos con validación cruzada y dejando fuera una temporada entera.
   Usa las funciones de `app.py` (`historial_champions`, `calcular_xg_champions`),
-  no una copia. Tampoco necesita token. Tarda ~1 minuto.
+  no una copia. Tampoco necesita token. Tarda ~1 minuto. Con `goles`, sus mercados de goles
+  (ver "Mercados de goles"), en unos segundos.
 
 ## Cloudflare: cómo se despliega
 
