@@ -41,8 +41,8 @@ def esperar(cambio, minutos=40):
     sys.exit(f"IndexNow no se mandó en {minutos} minutos del cron ({cambio})")
 
 
-def atrasar():   # como si la última vez hubiera sido hace 4 horas
-    db.execute("UPDATE documentos SET actualizado = actualizado - 4 * ? WHERE clave = 'indexnow'", (HORA,))
+def atrasar(horas=4):   # como si la última vez hubiera sido hace 4 horas
+    db.execute("UPDATE documentos SET actualizado = actualizado - ? * ? WHERE clave = 'indexnow'", (horas, HORA))
     db.commit()
 
 
@@ -107,12 +107,17 @@ db.execute("INSERT OR REPLACE INTO resultados (id, liga, utc, gl, gv, contado, l
 db.commit()
 atrasar()
 d = esperar("IndexNow falla")
-assert d["estado"] == 500 and d["desde"] == liquidado and "error" in d, d
+assert d["estado"] == 500 and d["desde"] == liquidado and "error" in d and d["espera_h"] == 6, d
 urllib.request.urlopen(API + "/__indexnow?estado=200").read()
-atrasar()
+atrasar()   # tras un fallo espera 6 horas, no 3: a las 4, nada
+n = len(recibidas())
+for _ in range(3):
+    cron()
+assert len(recibidas()) == n and json.loads(doc()[0])["estado"] == 500
+atrasar(3)
 d = esperar("después del fallo")
 assert f"{WEB}/partido/{q['id']}" in recibidas()[-1]["urlList"] and d["desde"] == liquidado + 1 and d["estado"] == 200, d
-print("si IndexNow falla, la vez siguiente lo vuelve a mandar")
+print("si IndexNow falla, lo vuelve a mandar pasadas 6 horas")
 
 db.execute("DELETE FROM resultados WHERE id IN (?, ?)", (p["id"], q["id"]))
 db.commit()

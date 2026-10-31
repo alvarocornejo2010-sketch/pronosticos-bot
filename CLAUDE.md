@@ -979,8 +979,14 @@ asistentes (ChatGPT, Perplexity...) no, así que leían una página vacía. Lo q
   `enviados` del documento `indexnow`), los que terminaron desde la vez anterior
   (`resultados.liquidado` mayor que `desde`), los equipos de unos y otros, sus ligas y la
   portada; la primera vez, además, todas las ligas y los equipos de las tablas (unas 450
-  direcciones). Si IndexNow no responde 200 o 202, se apunta (con el error) y la vez siguiente
-  va todo otra vez (`al_dia`). `INDEXNOW_URL` cambia adónde se mandan (vacío: a ningún sitio);
+  direcciones). Si IndexNow no responde 200 o 202, se apunta (con el error y el `Retry-After`,
+  si lo trae) y la vez siguiente va todo otra vez (`al_dia`), cada vez más tarde: 6, 12 y 24 h
+  (`fallos`, `espera_h`), o lo que pida `Retry-After`, hasta 48. Van a Bing
+  (`https://www.bing.com/indexnow`), que las reparte entre los demás: al principio iban a
+  `api.indexnow.org`, que el 30 oct 2026 respondió 429 ("demasiadas peticiones") las tres
+  veces, seguramente por las IP de salida de Cloudflare, que comparten muchas webs. Si Bing
+  también responde 429, queda Bing Webmaster Tools (importando la propiedad de Search
+  Console). `INDEXNOW_URL` cambia adónde se mandan (vacío: a ningún sitio);
   las pruebas lo mandan al IndexNow de mentira de `api_falsa.py`. Solo manda direcciones de
   páginas públicas, nada de quién entra.
 - **Google: Search Console, lo hace el dueño (5 minutos).** En
@@ -1647,7 +1653,7 @@ Environment).
     partes, y los textos de la tarjeta para compartir), `node pruebas/paginas.mjs` (el texto
     ya escrito de un partido, un equipo y una liga, con los enteros de la web, escapado y con sus
     enlaces; las marcas de `index.html`, una de cada; y qué se manda a IndexNow, todo la primera
-    vez y luego solo lo nuevo, sin perder nada si falla), `node
+    vez y luego solo lo nuevo, sin perder nada si falla, y cada vez más tarde), `node
     pruebas/sw.mjs` (el service worker: "Sin conexión" sin red, la web con red, y los
     avisos: su texto, adónde llevan y la pestaña que abren) y `node pruebas/push.mjs`
     (el cifrado de los avisos contra el ejemplo de RFC 8291, la firma VAPID, la hora
@@ -1708,8 +1714,8 @@ Environment).
     los calendarios de más de 120, deja los demás y no se repite antes de un día
     (`limpieza.py`). Que el cron avisa a IndexNow (el de mentira de `api_falsa.py`) con la clave
     del archivo que sirve la web: la primera vez la portada, las ligas, los partidos y los
-    equipos, luego solo lo que cambió, nada antes de 3 horas, y lo que falla, otra vez
-    (`indexnow.py`). Y la
+    equipos, luego solo lo que cambió, nada antes de 3 horas, y lo que falla, otra vez pasadas
+    6 (`indexnow.py`). Y la
     interfaz en un navegador de verdad (`interfaz.mjs`,
     Playwright): 13 vistas (semana, día, liga, por claros y por reñidos, búsqueda,
     Mis equipos, el detalle abierto, el de un partido de Mis equipos, la tabla con su
