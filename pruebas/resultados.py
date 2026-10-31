@@ -63,7 +63,7 @@ base = [f for f in glob.glob(D1 + "/**/*.sqlite", recursive=True) if "D1Database
 assert len(base) == 1, base
 db = sqlite3.connect(base[0])
 estado = json.loads(pedir("/api/estado")[2])
-partidos = [p for d in estado["dias"] for p in d["partidos"] if not p.get("pendiente")]
+partidos = [{**p, "fecha": d["fecha"]} for d in estado["dias"] for p in d["partidos"] if not p.get("pendiente")]
 # unos cuantos de varias ligas, con marcadores variados; el último, publicado después de empezar
 elegidos = sorted(partidos, key=lambda p: (p["utcDate"], p["id"]))[::7][:14]
 assert len(elegidos) >= 8, len(elegidos)
