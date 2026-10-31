@@ -36,7 +36,8 @@ ajuste los cambia mucho, se ponen en app.py y se corre otra vez (con los de
 ahora, una segunda vuelta mueve los niveles 0.02 como mucho).
 
 Uso:
-    python afinar_champions.py
+    python afinar_champions.py          el 1X2 y las constantes de la Champions
+    python afinar_champions.py goles    sus mercados de goles (ENCOGER_TOTAL y MENOS_CEROS)
 
 Descarga ~30 ficheros la primera vez y los guarda en openfootball_cache/.
 """
@@ -386,7 +387,122 @@ def validar(d, bloques, titulo):
             f"{x} {100 * (1 - por_partido[x][m].mean() / base[m].mean()):+.1f}%" for x in ("atenuado", "historial")))
 
 
+# ------------------------------------------------------------------
+# Mercados de goles
+# ------------------------------------------------------------------
+# cada mercado: qué casillas de la rejilla de marcadores cuentan y cuándo pasó
+G, TOT, DIF = afinar_liga.G, afinar_liga.TOT, afinar_liga.DIF
+CASILLAS = {
+    "más de 1.5": (TOT > 1.5, lambda gl, gv: gl + gv > 1.5),
+    "más de 2.5": (TOT > 2.5, lambda gl, gv: gl + gv > 2.5),
+    "más de 3.5": (TOT > 3.5, lambda gl, gv: gl + gv > 3.5),
+    "ambos marcan": ((G[:, None] > 0) & (G[None, :] > 0), lambda gl, gv: (gl > 0) & (gv > 0)),
+    "portería a cero L": (np.broadcast_to(G[None, :] == 0, TOT.shape), lambda gl, gv: gv == 0),
+    "portería a cero V": (np.broadcast_to(G[:, None] == 0, TOT.shape), lambda gl, gv: gl == 0),
+    "gana por 2+ L": (DIF >= 2, lambda gl, gv: gl - gv >= 2),
+    "gana por 2+ V": (DIF <= -2, lambda gl, gv: gv - gl >= 2),
+    "gana sin recibir L": ((G[:, None] > 0) & (G[None, :] == 0), lambda gl, gv: (gl > 0) & (gv == 0)),
+    "gana sin recibir V": ((G[:, None] == 0) & (G[None, :] > 0), lambda gl, gv: (gl == 0) & (gv > 0)),
+}
+T_PROBADOS = (0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+Z_PROBADOS = (-0.06, -0.04, -0.02, 0.0, 0.01, 0.02, 0.03, 0.04, 0.06)   # negativos: más ceros
+
+
+def xg_app(filas):
+    """Los goles esperados de cada partido con la fórmula y las constantes de app.py."""
+    b = app.EXPONENTE_FUERZA_CHAMPIONS
+    xs = []
+    for f in filas:
+        lado = {}
+        for x in "lv":
+            at, de = app.multiplicadores_historial(f["h_" + x])
+            lado[x] = {"ataque": f["at_" + x] ** b, "defensa": f["def_" + x] ** b, "ataque_cl": at, "defensa_cl": de,
+                       "factor": app.FACTOR_LIGA.get(f["liga_" + x], app.FACTOR_OTRA_LIGA)}
+        xs.append(app.calcular_xg_champions(lado["l"], lado["v"], {"avg_local": f["mu_l"], "avg_visita": f["mu_v"]}))
+    return np.array(xs, dtype=float)
+
+
+def rejilla_goles(xl, xv, mu_l, mu_v, t, z):
+    """La rejilla de los mercados de goles de app.mercados_de_goles, para todos los
+    partidos a la vez: el total acercado a la media (t: ENCOGER_TOTAL) y el 0 de cada
+    equipo un z más bajo (MENOS_CEROS)."""
+    total, media = xl + xv, mu_l + mu_v
+    escala = (media + t * (total - media)) / total
+    return afinar_liga.rejillas(xl * escala, xv * escala, app.RHO_EMPATES, z)
+
+
+def puntos(r, gl, gv):
+    """Brier por partido de cada mercado y log loss del marcador exacto."""
+    out = {k: (r[:, m].sum(1) - ocurre(gl, gv).astype(float)) ** 2 for k, (m, ocurre) in CASILLAS.items()}
+    i = np.arange(len(gl))
+    out["marcador"] = -np.log(r[i, np.minimum(gl, G[-1]).astype(int), np.minimum(gv, G[-1]).astype(int)])
+    return out
+
+
+def goles():
+    """Los mercados de goles de la Champions con las constantes de app.py: cuánto
+    aportan frente a la base "equipo medio", si sus % cuadran con lo que pasó y si
+    ENCOGER_TOTAL y MENOS_CEROS (elegidos con las ligas) le van bien también aquí.
+    Para eso se eligen dejando fuera una temporada entera cada vez, por la log loss
+    del marcador exacto, como en afinar_liga.py."""
+    filas = preparar()
+    xg = xg_app(filas)
+    xl, xv = xg[:, 0], xg[:, 1]
+    col = lambda k: np.array([f[k] for f in filas], dtype=float)   # noqa: E731
+    gl, gv, mu_l, mu_v = col("gl"), col("gv"), col("mu_l"), col("mu_v")
+    temp = np.array([f["temporada"] for f in filas])
+    t0, z0 = app.ENCOGER_TOTAL, app.MENOS_CEROS
+    print(f"Champions {TEMPORADAS_CL[0]} a {TEMPORADAS_CL[-1]}: {len(filas)} partidos con resultado. "
+          f"Goles por partido: {np.mean(gl + gv):.2f}; el modelo espera {np.mean(xl + xv):.2f} "
+          f"y la media de la Champions es {np.mean(mu_l + mu_v):.2f}.")
+
+    r = rejilla_goles(xl, xv, mu_l, mu_v, t0, z0)
+    app_ = puntos(r, gl, gv)
+    base = puntos(afinar_liga.rejillas(mu_l, mu_v, app.RHO_EMPATES, z0), gl, gv)
+    tal_cual = puntos(rejilla_goles(xl, xv, mu_l, mu_v, 1.0, 0.0), gl, gv)
+    print(f"\nCon las constantes de app.py (ENCOGER_TOTAL {t0}, MENOS_CEROS {z0}): skill frente a la base "
+          f"'equipo medio', diferencia de Brier con los goles esperados tal cual (sin acercar ni bajar el 0) "
+          f"y lo que daba frente a lo que pasó")
+    for k, (m, ocurre) in CASILLAS.items():
+        d, se = afinar_liga.pareado(app_[k], tal_cual[k])
+        print(f"  {k:19s} {afinar_liga.skill(app_[k], base[k]):+6.2f}%   tal cual {afinar_liga.skill(tal_cual[k], base[k]):+6.2f}%"
+              f"   {d:+.5f} ({d / se:+.1f} se)   da {100 * r[:, m].sum(1).mean():4.1f}, pasó {100 * ocurre(gl, gv).mean():4.1f}")
+    d, se = afinar_liga.pareado(app_["marcador"], base["marcador"])
+    d2, se2 = afinar_liga.pareado(app_["marcador"], tal_cual["marcador"])
+    print(f"  marcador (log loss) {app_['marcador'].mean():.4f}: frente a la base {d:+.4f} ({d / se:+.1f} se), "
+          f"frente a tal cual {d2:+.4f} ({d2 / se2:+.1f} se)")
+
+    print("\nMás de 2.5 por tramo de lo que daba (calibración)")
+    p25, si25 = r[:, TOT > 2.5].sum(1), gl + gv > 2.5
+    for lo, hi in ((0, .4), (.4, .5), (.5, .6), (.6, .7), (.7, 1.01)):
+        m = (p25 >= lo) & (p25 < hi)
+        if m.any():
+            print(f"  {100 * lo:3.0f}-{min(100, 100 * hi):3.0f} %: {m.sum():4d} partidos, daba {100 * p25[m].mean():4.1f}, pasó {100 * si25[m].mean():4.1f}")
+
+    # log loss del marcador de cada (t, z) en cada temporada
+    rejas = {(t, z): puntos(rejilla_goles(xl, xv, mu_l, mu_v, t, z), gl, gv)["marcador"]
+             for t in T_PROBADOS for z in Z_PROBADOS}
+    print("\nLog loss del marcador con todos los partidos (en la muestra), por ENCOGER_TOTAL (filas) y MENOS_CEROS (columnas):")
+    print("        " + "".join(f"{z:>8}" for z in Z_PROBADOS))
+    for t in T_PROBADOS:
+        print(f"  {t:4}  " + "".join(f"{rejas[(t, z)].mean():8.4f}" for z in Z_PROBADOS))
+
+    print("\nUna temporada fuera cada vez: (t, z) elegido con las otras tres, juzgado en la que queda fuera")
+    elegido = np.zeros(len(gl))
+    for s in sorted(set(temp.tolist())):
+        fuera = temp == s
+        t, z = min(rejas, key=lambda c: rejas[c][~fuera].mean())
+        elegido[fuera] = rejas[(t, z)][fuera]
+        d, se = afinar_liga.pareado(rejas[(t, z)][fuera], rejas[(t0, z0)][fuera])
+        print(f"  {s}/{(s + 1) % 100:02d} ({fuera.sum()} partidos): elige t {t}, z {z}; "
+              f"frente a los de app.py {d:+.4f} ({d / se:+.1f} se)")
+    d, se = afinar_liga.pareado(elegido, rejas[(t0, z0)])
+    print(f"  en total: {d:+.4f} ± {se:.4f} ({d / se:+.1f} se)")
+
+
 def main():
+    if sys.argv[1:] == ["goles"]:
+        return goles()
     filas = preparar()
     d = Datos(filas)
     otras = sum((f["liga_l"] == OTRA) + (f["liga_v"] == OTRA) for f in filas)
