@@ -11,6 +11,7 @@
 # funcionan de crear a borrar, con correo y Turnstile (cuentas.py), los avisos de Mis
 # equipos llegan cifrados y firmados al servicio de avisos de mentira (avisos.mjs) y la
 # página de cada equipo trae su tabla, su fuerza, su forma y lo que dijo la web (equipos.py),
+# el historial de aciertos suma bien cada semana y tiene su página (resultados.py),
 # el calendario de Mis equipos es un .ics bien hecho que sigue a sus equipos (ics.py), la
 # limpieza del día borra lo caducado (limpieza.py) y el cron avisa a IndexNow de las páginas
 # nuevas (indexnow.py, contra el IndexNow de mentira de la API falsa).
@@ -114,6 +115,10 @@ node --no-warnings "$REPO/pruebas/avisos.mjs" "$P_W" "$P_INS" "$P_API" "$TMP/d1"
 echo "== Página de cada equipo"
 python3 "$REPO/pruebas/equipos.py" "$P_W" "$P_INS" "$TMP/d1" "$MAX_MS"
 (cd "$REPO" && FOOTBALL_DATA_TOKEN=sin_uso UPDATE_SECRET=equipos_dummy_secret python3 -c "import app; c = app.app.test_client(); r = c.get('/api/equipo/86').get_json(); assert r['estado'] == 'no_disponible', r; assert c.get('/equipo/86').status_code == 200; print('Flask: /api/equipo responde no_disponible y /equipo/86 es la web')")
+
+echo "== Historial de aciertos"
+python3 "$REPO/pruebas/resultados.py" "$P_W" "$P_INS" "$TMP/d1" "$MAX_MS"
+(cd "$REPO" && FOOTBALL_DATA_TOKEN=sin_uso UPDATE_SECRET=resultados_dummy_secret python3 -c "import app; c = app.app.test_client(); r = c.get('/api/resultados').get_json(); assert r['estado'] == 'no_disponible', r; assert c.get('/resultados').status_code == 200 and c.get('/resultados/2026-10-26').status_code == 200; print('Flask: /api/resultados responde no_disponible y /resultados es la web')")
 
 echo "== Interfaz (Playwright)"
 node "$REPO/pruebas/interfaz.mjs" "$P_W" "$P_API"
