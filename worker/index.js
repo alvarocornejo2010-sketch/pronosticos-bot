@@ -23,6 +23,9 @@
 //                     /calendario/<clave>.ics, el calendario para suscribirse (calendario.js)
 //   /liga/PD          la web con la tarjeta y el texto de una liga: sus próximos partidos,
 //                     su tabla y lo que dijo la web (ligas.js)
+//   /api/resultados[?semana=2026-10-26]  lo que dijo la web de cada partido de una semana,
+//                     contra lo que pasó; /resultados[/2026-10-26], la web con su tarjeta
+//                     y su texto (resultados.js)
 //
 // El trabajo de verdad lo hace el cron (planificador.js), una vez por minuto.
 
@@ -42,6 +45,7 @@ import { RUTAS_AVISOS, atenderAvisos } from "./avisos.js";
 import { apiEquipo, paginaEquipo } from "./equipos.js";
 import { RUTAS_CALENDARIO, atenderCalendario, servirCalendario } from "./calendario.js";
 import { paginaLiga } from "./ligas.js";
+import { apiResultados, paginaResultados } from "./resultados.js";
 
 // Las mismas cabeceras que pone app.py a sus respuestas JSON (la web y app.js
 // llevan las suyas en public/_headers). no-store: el JSON cambia cada pocos
@@ -200,7 +204,11 @@ export default {
       "/api/visitas": (almacen) => apiVisitas(url, env, almacen),
       "/visitas": (almacen) => panelVisitas(url, env, almacen),
       "/robots.txt": async () => texto(robots(url.origin), "text/plain; charset=utf-8"),
-      "/sitemap.xml": async (almacen) => texto(await sitemap(almacen, url.origin), "application/xml; charset=utf-8"),
+      "/sitemap.xml": async (almacen) => texto(await sitemap(almacen, url.origin, env), "application/xml; charset=utf-8"),
+      "/api/resultados": async (almacen) => {
+        const d = await apiResultados(almacen, env, url.searchParams.get("semana"));
+        return d.estado === "no_encontrado" ? json(d, 404) : condicional(request, JSON.stringify(d));
+      },
     };
     for (const r of Object.keys(RUTAS_CUENTA)) rutas[r] = (almacen) => new Cuentas(request, env, almacen, CABECERAS).atender();
     for (const r of Object.keys(RUTAS_AVISOS)) rutas[r] = (almacen) => atenderAvisos(request, env, almacen, CABECERAS);
@@ -210,6 +218,7 @@ export default {
     const equipo = url.pathname.match(/^\/(api\/)?equipo\/(\d{1,9})\/?$/);
     const calendario = url.pathname.match(/^\/calendario\/([a-z2-7]{26})\.ics$/);
     const liga = url.pathname.match(/^\/liga\/([A-Z0-9]{2,4})\/?$/);
+    const resultados = url.pathname.match(/^\/resultados(?:\/(\d{4}-\d{2}-\d{2}))?\/?$/);
     const ruta = rutas[url.pathname]
       || (enlace && ((almacen) => paginaPartido(request, env, almacen, Number(enlace[1]))))
       || (equipo && (equipo[1]
@@ -220,6 +229,7 @@ export default {
         : (almacen) => paginaEquipo(request, env, almacen, Number(equipo[2]))))
       || (calendario && ((almacen) => servirCalendario(request, env, almacen, calendario[1])))
       || (liga && ((almacen) => paginaLiga(request, env, almacen, liga[1])))
+      || (resultados && ((almacen) => paginaResultados(request, env, almacen, resultados[1] || null)))
       || (tabla && (async (almacen) => (CODIGOS_TABLA.includes(tabla[1])
         ? condicional(request, (await almacen.leerDocTexto("tabla:" + tabla[1])) ?? JSON.stringify(TABLA_PENDIENTE))
         : json({ error: "no hay tabla de esa liga" }, 404))));

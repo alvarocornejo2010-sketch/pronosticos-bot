@@ -1451,6 +1451,23 @@ def pagina_liga(codigo):
     return render_template("index.html")
 
 
+@app.route("/resultados")
+@app.route("/resultados/<semana>")
+def pagina_resultados(semana=None):
+    """El historial de aciertos para compartir y para los buscadores: la misma web, que
+    lo abre. Su tarjeta y su texto solo los pone Cloudflare (worker/resultados.js)."""
+    return render_template("index.html")
+
+
+@app.route("/api/resultados")
+def api_resultados():
+    """El historial de aciertos (lo que dijo la web de cada partido de una semana,
+    contra lo que pasó) solo existe en Cloudflare: sale del registro en vivo, que
+    guarda D1."""
+    return jsonify({"estado": "no_disponible",
+                    "nota": "El historial de aciertos funciona en la versión de Cloudflare."})
+
+
 @app.route("/api/equipo/<int:id_equipo>")
 def api_equipo(id_equipo):
     """La página de cada equipo (su tabla, su fuerza y lo que dijo la web de sus

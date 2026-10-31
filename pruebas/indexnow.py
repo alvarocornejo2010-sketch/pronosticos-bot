@@ -2,10 +2,11 @@
 tablas bajadas: en un minuto libre del cron manda a IndexNow (el de mentira de api_falsa.py)
 la portada, las ligas, los partidos de la ventana con predicción y los equipos de las tablas,
 con la clave del archivo que sirve la web; no lo repite antes de 3 horas; luego manda solo lo
-que cambió (un partido que terminó, sus equipos, su liga y la portada), nada si no cambió
+que cambió (un partido que terminó, sus equipos, su liga, la portada y su semana de resultados), nada si no cambió
 nada, y si IndexNow falla, lo vuelve a mandar la vez siguiente.
 Uso: python pruebas/indexnow.py PUERTO_WORKER PUERTO_API DIR_D1"""
 import glob, json, os, re, sqlite3, sys, time, urllib.request
+from datetime import datetime, timedelta
 
 W, API, D1 = f"http://127.0.0.1:{sys.argv[1]}", f"http://127.0.0.1:{sys.argv[2]}", sys.argv[3]
 WEB = "https://pronosticos-bot.alvarocornejo2010.workers.dev"   # URL_WEB: la de producción
@@ -95,10 +96,13 @@ atrasar()
 d = esperar("un partido terminado")
 e = recibidas()[-1]
 rutas = {u[len(WEB):] for u in e["urlList"]}
+# y el historial de aciertos: /resultados y la semana del partido (de lunes a domingo, en hora de Lima)
+dia = (datetime.strptime(p["utcDate"], "%Y-%m-%dT%H:%M:%SZ") - timedelta(hours=5)).date()
+semana = (dia - timedelta(days=dia.weekday())).isoformat()
 assert rutas == {"/", f"/liga/{p['liga_codigo']}", f"/partido/{p['id']}", f"/equipo/{p['local_id']}",
-                 f"/equipo/{p['visita_id']}"}, rutas
+                 f"/equipo/{p['visita_id']}", "/resultados", f"/resultados/{semana}"}, rutas
 assert d["desde"] == liquidado and d["estado"] == 200, d
-print(f"un partido que termina: la portada, su liga, su página y la de sus dos equipos ({len(rutas)} direcciones)")
+print(f"un partido que termina: la portada, su liga, su página, la de sus dos equipos y sus resultados ({len(rutas)} direcciones)")
 
 # si IndexNow falla, se apunta sin mover nada, y la vez siguiente va otra vez
 urllib.request.urlopen(API + "/__indexnow?estado=500").read()

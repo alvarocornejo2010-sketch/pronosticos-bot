@@ -130,8 +130,8 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
   Confianza del favorito (histograma), Últimos 7 días (en cuántos acertó el
   favorito frente a lo que esperaban sus probabilidades, por tramo, y la mayor
   sorpresa) y Resultados (los últimos 8 partidos terminados del registro: lo que
-  la web le dio a lo que pasó y si acertó el favorito); los dos últimos, solo en
-  Cloudflare. Abajo, barra de estado. Entre 880 y
+  la web le dio a lo que pasó y si acertó el favorito, con un enlace al historial de
+  todas las semanas, `#/resultados`); los dos últimos, solo en Cloudflare. Abajo, barra de estado. Entre 880 y
   1179px los laterales se apilan en una sola columna. En móvil, una columna con
   pestañas fijas abajo: Partidos / Panorama / Ligas; la cabecera no es pegajosa
   (se va al bajar y las cabeceras de grupo se anclan arriba del todo).
@@ -184,10 +184,12 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
   entero que la tabla (`pctFavorito`).
 - Rutas por hash: `#/`, `#/semana`, `#/dia/2026-10-10`, `#/liga/PD`,
   `#/liga/PD/2026-10-10`, `#/liga/PD/tabla` (ver "Tabla y proyección"), `#/favoritos`,
-  `#/equipo/86` (ver "Página de cada equipo"). `#/` es toda la semana en escritorio y
-  el primer día en móvil. Y tres sin hash, para compartir y para los buscadores:
+  `#/equipo/86` (ver "Página de cada equipo"), `#/resultados` y `#/resultados/2026-10-26`
+  (ver "Historial de aciertos"). `#/` es toda la semana en escritorio y
+  el primer día en móvil. Y cuatro sin hash, para compartir y para los buscadores:
   `/partido/123` (ver "Compartir y favoritos"), `/equipo/86`, que pasa en el acto a
-  `/#/equipo/86`, y `/liga/PD`, que pasa a `/#/liga/PD` (ver "Buscadores").
+  `/#/equipo/86`, `/liga/PD`, que pasa a `/#/liga/PD` (ver "Buscadores"), y `/resultados`
+  (o `/resultados/2026-10-26`), que pasa a `/#/resultados`.
 - Tipografía: Saira (marca, títulos y todos los números) y Figtree (nombres y
   textos), de Google Fonts. Las dos tienen cifras tabulares, comprobadas en el
   navegador: las columnas de números no bailan.
@@ -249,7 +251,9 @@ equipo"). Y el calendario de Mis equipos, solo en Cloudflare: `/api/calendario` 
 `/calendario/<clave>.ics` (ver "Calendario de Mis equipos"). Y `/privacidad`, la política
 de privacidad (ver "Privacidad"). Y `/liga/PD`, la web con la tarjeta y el texto de una liga
 (en Render, la web sin ellos; ver "Buscadores"), y `/0929ae0a00d11dc89eade75a541f841f.txt`, la
-clave de IndexNow (un archivo de `public/`).
+clave de IndexNow (un archivo de `public/`). Y el historial de aciertos: `/api/resultados[?semana=
+2026-10-26]` (en Render, `no_disponible`) y `/resultados[/2026-10-26]`, la web con su tarjeta y su
+texto (en Render, la web sin ellos; ver "Historial de aciertos").
 
 **Efecto secundario de cada deploy:** el disco de Render free es efímero, cada
 deploy borra `cache.json` y `data.json`. La web dice "Todavía no hay datos"
@@ -293,7 +297,8 @@ incluidos), `actualizacion.js` (la pasada), `validacion.js`, `metricas.js`
 equipos), `push.js` (su cifrado y su firma, Web Push), `equipos.js` (la página de cada
 equipo), `calendario.js` (el calendario `.ics` de Mis equipos), `limpieza.js` (la limpieza
 del día: sesiones y calendarios caducados), `ligas.js` (la página de cada liga), `indexnow.js`
-(el aviso a los buscadores de las páginas nuevas) e `index.js` (rutas).
+(el aviso a los buscadores de las páginas nuevas), `resultados.js` (el historial de aciertos) e
+`index.js` (rutas).
 
 **El ritmo lo marca la CPU.** El plan gratis da 10 ms por ejecución y leer el
 JSON de la API cuesta ~7 ms por MB, así que en vez de una pasada de 40
@@ -333,7 +338,8 @@ equipo, `predicciones_por_local` y `predicciones_por_visita`, para su página: l
 consultas los piden con `INDEXED BY`, y si faltan, el "no such index" vuelve a pasar el
 `ESQUEMA`, como una tabla que falta), `resultados` (el marcador
 a los 90 minutos de cada partido con predicción, ya sumado al registro en
-vivo; con un índice por liga, `resultados_por_liga`, para la página de cada liga), `documentos` (`estado` que sirve `/api/estado`, `resumen`, `validacion`,
+vivo; con un índice por liga, `resultados_por_liga`, para la página de cada liga, y otro por
+fecha, `resultados_por_fecha`, para el historial de aciertos), `documentos` (`estado` que sirve `/api/estado`, `resumen`, `validacion`,
 `registro` y `registro_publico`, pedidos, temporadas terminadas compactas,
 `temporada:liga:{código}:{año}`, `tabla:{código}` que sirve `/api/tabla/...` y
 `tablas_resumen`, cuándo se bajó cada cosa, los de los avisos: `vapid`, su par
@@ -433,8 +439,9 @@ hasta que termina, `versiones` sale vacío. El total y las ligas no se tocan.
 - el registro en vivo (`/api/registro`), las visitas (`/visitas`), la tabla con
   su proyección (`/api/tabla/PD`), los avisos de Mis equipos (`/api/avisos`), la
   página de cada equipo (`/api/equipo/86`), el calendario de Mis equipos
-  (`/calendario/<clave>.ics`), el texto ya escrito de `/partido/123`, `/equipo/86` y
-  `/liga/PD` y el aviso a los buscadores (IndexNow) solo existen aquí.
+  (`/calendario/<clave>.ics`), el historial de aciertos (`/api/resultados`), el texto ya
+  escrito de `/partido/123`, `/equipo/86`, `/liga/PD` y `/resultados` y el aviso a los
+  buscadores (IndexNow) solo existen aquí.
 
 **En local:** `npm install`, copiar `.dev.vars.example` a `.dev.vars`, `npm run
 dev` y lanzar el cron a mano con
@@ -490,6 +497,9 @@ el Worker, sin JavaScript, con su propia CSP y `noindex`.
   que entraron desde la app instalada (`en_app`, `display-mode: standalone`). En
   el panel, el tablero "Compartir, favoritos y app". Los avisos los cuenta el Worker,
   no la web (ver "Avisos de Mis equipos").
+- **El historial de aciertos:** las veces que se abre `#/resultados` (`resultados`; en el tablero
+  "Compartir, favoritos y app"); las llegadas por un enlace `/resultados` van con las demás
+  (`enlace`).
 - **La página de cada equipo:** las veces que se abre (`equipo`, por equipo: solo cuenta
   si está en la tabla de una liga o juega en la semana) y que se pulsa su Compartir
   (`compartir_equipo`); las llegadas por un enlace `/equipo/86` van con las de
@@ -631,6 +641,37 @@ recalcular, con la siguiente descarga de su calendario.
   jornadas, menos de 5); el puesto de su ataque y su defensa es entre los equipos de la
   tabla de hoy. En Render no hay tabla, fuerza ni registro: la página enseña solo sus
   partidos.
+
+## Historial de aciertos (oct 2026)
+
+`#/resultados`: lo que dijo la web de cada partido, antes de empezar, contra lo que pasó, semana
+a semana (de lunes a domingo, en hora de Lima). Antes solo se veían los 8 últimos (el tablero
+Resultados); ahora todos, para quien quiera comprobar si la web acierta. Se llega desde ese
+tablero ("Todos los resultados, semana a semana") y se comparte con `/resultados`.
+
+- **Arriba, la semana:** en cuántos acertó el favorito frente a lo que esperaban sus propias
+  probabilidades, en total y por tramo de confianza (claros, intermedios y reñidos, con el
+  entero que enseña la web, como Últimos 7 días: `htmlCifraTramos` y `htmlFilaSem` son las
+  mismas), y por liga; y los enlaces a la semana anterior y a la siguiente. Debajo, cada día con
+  sus partidos, con la fila del tablero Resultados (`htmlFilaResultado`): la casilla es lo que
+  le dio a lo que pasó.
+- **`/api/resultados`** (`worker/resultados.js`) da la última semana con resultados, y
+  `?semana=2026-10-26` cualquier otra (un día cualquiera lleva a su lunes); una sin resultados o
+  mal escrita da 404 (`no_encontrado`, con la primera y la última que hay). Lleva los partidos
+  (los campos del registro, `entradaDe`, más el id de cada equipo), lo sumado (`resumirSemana`:
+  `[partidos, aciertos, esperados]` en total, por tramo y por liga; el favorito, el de la web,
+  `favoritoDe`) y las semanas vecinas. Se monta en cada petición con dos consultas por el índice
+  `resultados_por_fecha` (si falta, el "no such index" vuelve a pasar el `ESQUEMA`): la primera
+  y la última semana (un salto del índice cada una) y los partidos de la pedida (unos 150 en una
+  semana con todas las ligas). Menos de 1 ms de CPU, con ETag y 304. Solo cuenta lo publicado
+  antes de empezar (`contado`), como el registro en vivo.
+- **`/resultados` y `/resultados/2026-10-26`** son la web con su tarjeta ("Resultados: lo que
+  dijo la web y lo que pasó", con lo sumado en la descripción) y su texto ya escrito
+  (`textosResultados`): lo sumado, por tramo y por liga, cada día con sus partidos (enlazados a
+  `/partido/123`) y las semanas vecinas. Entran en el sitemap y en IndexNow (ver "Buscadores").
+  Una semana sin resultados da la tarjeta de siempre, con `noindex`.
+- **En Render** no existe (no hay registro): `/api/resultados` responde `no_disponible` y la web
+  lo dice.
 
 ## Avisos de Mis equipos (oct 2026)
 
@@ -968,7 +1009,8 @@ asistentes (ChatGPT, Perplexity...) no, así que leían una página vacía. Lo q
   cada partido" y, en la portada, "Pronósticos de fútbol: 1 X 2 y goles" (antes, "Pronósticos" a
   secas). Las frases (`veredicto`, `lineaReparto`, `queDijo`) son las de la web y las de los
   avisos: viven en `compartir.js`, una sola vez.
-- **El sitemap** lleva además las 10 ligas.
+- **El sitemap** lleva además las 10 ligas, `/resultados` y cada semana con resultados
+  (`/resultados/2026-10-26`, ver "Historial de aciertos").
 - **IndexNow** (`indexnow.js`): avisa a Bing de las páginas nuevas o cambiadas (y a Yandex,
   Seznam, Naver y Yep; de Bing beben DuckDuckGo, Yahoo, Ecosia y la búsqueda de ChatGPT), gratis y
   sin cuenta. Google no lo usa. La clave es `INDEXNOW_CLAVE` (`config.js`), pública a propósito,
@@ -977,8 +1019,9 @@ asistentes (ChatGPT, Perplexity...) no, así que leían una página vacía. Lo q
   (tras la limpieza), cada 3 h (`HORAS_INDEXNOW`) con la web `listo` y sin la API ni el candado:
   manda los partidos que entraron en la ventana con predicción (los ya mandados van en
   `enviados` del documento `indexnow`), los que terminaron desde la vez anterior
-  (`resultados.liquidado` mayor que `desde`), los equipos de unos y otros, sus ligas y la
-  portada; la primera vez, además, todas las ligas y los equipos de las tablas (unas 450
+  (`resultados.liquidado` mayor que `desde`), los equipos de unos y otros, sus ligas, la
+  portada y el historial (`/resultados` y la semana de cada partido terminado); la primera vez,
+  además, todas las ligas, los equipos de las tablas y todas las semanas (unas 450
   direcciones). Si IndexNow no responde 200 o 202, se apunta (con el error y el `Retry-After`,
   si lo trae) y la vez siguiente va todo otra vez (`al_dia`), cada vez más tarde: 6, 12 y 24 h
   (`fallos`, `espera_h`), o lo que pida `Retry-After`, hasta 48. Van a Bing
@@ -1643,7 +1686,8 @@ Environment).
   instalarla como app, el sitemap, la marca de las ligas de fiabilidad baja, las
   cuentas (ver "Cuentas"; lo que les falta, en el punto siguiente), los avisos de
   Mis equipos (ver "Avisos de Mis equipos"), la página de cada equipo (ver "Página
-  de cada equipo") y el calendario de Mis equipos (ver "Calendario de Mis equipos").
+  de cada equipo"), el calendario de Mis equipos (ver "Calendario de Mis equipos") y el historial
+  de aciertos (ver "Historial de aciertos").
 
 - **Cuentas, la versión siguiente** (ver "Cuentas"): que alguien que sepa de leyes
   revise `/privacidad` (hecha en oct 2026, ver "Privacidad"): si hace falta inscribir el
@@ -1690,8 +1734,9 @@ Environment).
     de la semana del registro, sus cuentas por versión del modelo, también rehechas por
     partes, y los textos de la tarjeta para compartir), `node pruebas/paginas.mjs` (el texto
     ya escrito de un partido, un equipo y una liga, con los enteros de la web, escapado y con sus
-    enlaces; las marcas de `index.html`, una de cada; y qué se manda a IndexNow, todo la primera
-    vez y luego solo lo nuevo, sin perder nada si falla, y cada vez más tarde), `node
+    enlaces; lo sumado de una semana de resultados y su texto; las marcas de `index.html`, una de
+    cada; y qué se manda a IndexNow, todo la primera vez y luego solo lo nuevo, sin perder nada
+    si falla, y cada vez más tarde), `node
     pruebas/sw.mjs` (el service worker: "Sin conexión" sin red, la web con red, y los
     avisos: su texto, adónde llevan y la pestaña que abren) y `node pruebas/push.mjs`
     (el cifrado de los avisos contra el ejemplo de RFC 8291, la firma VAPID, la hora
@@ -1739,7 +1784,11 @@ Environment).
     partido suyo con resultado, con ETag, 404 para uno que no existe, su tarjeta y su texto en
     `/equipo/86`, el marcador en `/partido/123` de un partido terminado, la página de su liga
     (`/liga/PD`: sus partidos con los enteros de la web, la tabla en orden y lo que dijo la web) y
-    todos los equipos en el sitemap (`equipos.py`). Que `/privacidad` se sirve
+    todos los equipos en el sitemap (`equipos.py`). Que el historial de aciertos trae cada semana
+    con sus partidos (solo lo publicado antes de empezar), lo sumado en total, por tramo y por liga
+    como lo calcula la prueba, sus vecinas, ETag y 304, 404 para una semana sin resultados, el
+    índice que se crea solo, la tarjeta y el texto de `/resultados` y cada semana en el sitemap
+    (`resultados.py`). Que `/privacidad` se sirve
   con la CSP de la web y sin JavaScript, en el Worker y en Flask (`descubrir.py`), y el
   freno por IP: a la sexta en un minuto desde la misma IP, 429, también al crear, sin
   gastar intentos (`cuentas.py`). Que el calendario de
@@ -1752,12 +1801,13 @@ Environment).
     los calendarios de más de 120, deja los demás y no se repite antes de un día
     (`limpieza.py`). Que el cron avisa a IndexNow (el de mentira de `api_falsa.py`) con la clave
     del archivo que sirve la web: la primera vez la portada, las ligas, los partidos y los
-    equipos, luego solo lo que cambió, nada antes de 3 horas, y lo que falla, otra vez pasadas
-    6 (`indexnow.py`). Y la
+    equipos, luego solo lo que cambió (con `/resultados` y la semana del partido que terminó),
+    nada antes de 3 horas, y lo que falla, otra vez pasadas 6 (`indexnow.py`). Y la
     interfaz en un navegador de verdad (`interfaz.mjs`,
-    Playwright): 13 vistas (semana, día, liga, por claros y por reñidos, búsqueda,
+    Playwright): 14 vistas (semana, día, liga, por claros y por reñidos, búsqueda,
     Mis equipos, el detalle abierto, el de un partido de Mis equipos, la tabla con su
-    proyección y la página de un equipo) en 7 anchos de 360 a 1920 px, sin texto que se salga de su caja, sin
+    proyección, la página de un equipo y el historial de resultados, con una semana de mentira)
+    en 7 anchos de 360 a 1920 px, sin texto que se salga de su caja, sin
     piezas de una fila que se pisen, sin errores de JavaScript, con la tarjeta y la
     invitación de los avisos (y activarlos y quitarlos contra el Worker, con el
     servicio de avisos del navegador de mentira), crear el calendario y sus enlaces (y quitarlo), la página de
@@ -1766,7 +1816,7 @@ Environment).
     de la rampa (el contraste, con axe en 390 y 1440), los nombres del detalle enlazando con
     la página de su equipo, el texto sin JavaScript de la portada, un partido, un equipo y una
     liga en los 7 anchos (con axe en 390 y 1440) y que la web lo cambia por lo suyo, y axe-core sin nada en la semana,
-    Mis equipos, los dos detalles, la tabla y la página de un equipo, en el móvil y en escritorio. Es lo que en oct
+    Mis equipos, los dos detalles, la tabla, la página de un equipo y el historial, en el móvil y en escritorio. Es lo que en oct
     2026 encontró la fecha bajo el escudo y "Seguir" cortado en el móvil. El job
     instala Chromium (`npx playwright install --with-deps chromium`); sin red para
     las fuentes de Google, `FUENTES=carpeta` (con `fuentes.css`, `mapa.txt` y los

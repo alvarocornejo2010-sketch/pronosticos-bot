@@ -9,15 +9,18 @@
 // Lo hace el cron en un minuto libre (planificador.js) cada HORAS_INDEXNOW, con la web al
 // día y sin la API ni el candado, como la limpieza, con lo que cambió desde la vez
 // anterior: los partidos que entraron en la ventana con su predicción, los que
-// terminaron (su página enseña ya el marcador), los equipos de unos y otros, sus ligas y
-// la portada. La primera vez van además todas las ligas y los equipos de las tablas. Lo
+// terminaron (su página enseña ya el marcador), los equipos de unos y otros, sus ligas,
+// la portada y el historial de aciertos (/resultados y la semana de cada uno). La primera
+// vez van además todas las ligas, los equipos de las tablas y todas las semanas. Lo
 // que mandó y la respuesta quedan en el documento indexnow; si falla, la vez siguiente
 // lo vuelve a mandar todo, cada vez más tarde (6, 12 y 24 h, o lo que diga Retry-After).
 
-import { INDEXNOW_CLAVE } from "./config.js";
+import { INDEXNOW_CLAVE, ajustes } from "./config.js";
 import { CODIGOS } from "./compartir.js";
 import { equiposDeTablas } from "./equipos.js";
 import { isoSinMs } from "./registro.js";
+import { lunesDe, semanasConResultados } from "./resultados.js";
+import { Reloj } from "./tiempo.js";
 
 const MS_HORA = 3600000;
 export const HORAS_INDEXNOW = 3;
@@ -48,7 +51,7 @@ export function horasRetryAfter(valor, ahora) {
 // null si nunca se hizo; hasta que una llega, al_dia es false y se manda todo), y lo que
 // hay que guardar si llegan: hasta dónde se leyeron los resultados (liquidado) y qué
 // partidos de la ventana ya se mandaron.
-export async function cambios(almacen, previo, ahora) {
+export async function cambios(almacen, previo, ahora, reloj = new Reloj(ajustes().tz)) {
   const db = almacen.db;
   const primera = !(previo && previo.al_dia);
   const desde = primera ? 0 : previo.desde;
@@ -56,7 +59,7 @@ export async function cambios(almacen, previo, ahora) {
   const [ventana, terminados] = await almacen.consultar(() => db.batch([
     db.prepare(`SELECT pa.id, pa.liga, pa.local_id, pa.visita_id FROM partidos pa JOIN predicciones pr ON pr.id = pa.id
       WHERE pa.utc > ?1`).bind(isoSinMs(ahora)),
-    db.prepare(`SELECT r.id, r.liga, r.liquidado, json_extract(p.ficha, '$.local_id') AS local_id,
+    db.prepare(`SELECT r.id, r.liga, r.utc, r.liquidado, r.contado, json_extract(p.ficha, '$.local_id') AS local_id,
       json_extract(p.ficha, '$.visita_id') AS visita_id FROM resultados r JOIN predicciones p ON p.id = r.id
       WHERE r.liquidado > ?1`).bind(desde),
   ]));
@@ -68,12 +71,20 @@ export async function cambios(almacen, previo, ahora) {
   };
   for (const f of ventana.results) if (!yaEnviados.has(Number(f.id))) apuntar(f);
   let hasta = desde;
-  for (const f of terminados.results) { apuntar(f); hasta = Math.max(hasta, f.liquidado); }
+  const semanas = new Set();
+  for (const f of terminados.results) {
+    apuntar(f);
+    hasta = Math.max(hasta, f.liquidado);
+    if (f.contado) semanas.add(lunesDe(reloj.local(Date.parse(f.utc)).fecha));
+  }
   if (primera) {
     for (const c of CODIGOS) ligas.add(c);
     for (const [id] of await equiposDeTablas(almacen)) equipos.add(id);
+    for (const s of await semanasConResultados(almacen, reloj)) semanas.add(s);
   }
   const rutas = partidos.size || primera ? ["/"] : [];
+  if (semanas.size) rutas.push("/resultados");
+  for (const s of semanas) rutas.push(`/resultados/${s}`);
   for (const c of ligas) rutas.push(`/liga/${c}`);
   for (const id of partidos) rutas.push(`/partido/${id}`);
   for (const id of equipos) rutas.push(`/equipo/${id}`);
@@ -83,7 +94,7 @@ export async function cambios(almacen, previo, ahora) {
 // Si no responde 200 o 202, se apunta igual (para no repetirlo cada minuto) sin mover lo
 // ya mandado: la vez siguiente va otra vez.
 export async function avisarBuscadores(almacen, aj, previo, ahora, fetchFn = fetch) {
-  const c = await cambios(almacen, previo, ahora);
+  const c = await cambios(almacen, previo, ahora, new Reloj(aj.tz));
   const doc = { hecha: new Date(ahora).toISOString(), urls: c.rutas.length, al_dia: true, desde: c.desde, enviados: c.enviados };
   if (c.rutas.length) {
     const origen = aj.urlWeb.replace(/\/+$/, "");

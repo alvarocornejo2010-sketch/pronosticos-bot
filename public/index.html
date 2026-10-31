@@ -746,6 +746,14 @@
                                                   max-width: 75ch; }
   .eq-sin { padding: 4px 20px 16px; }
   .eq-web .det-bloque { padding-top: 4px; }
+  /* el historial de aciertos (#/resultados): la semana arriba, cada día debajo */
+  .rs-resumen .det-bloque:first-child { padding-top: 4px; }
+  .rs-resumen .nota { margin: 10px 0 0; font-size: var(--t-13); line-height: 1.5; color: var(--tinta-3); max-width: 75ch; }
+  .rs-nav { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 16px; }
+  .rs-ligas .sem-fila { grid-template-columns: minmax(0, 10.5rem) minmax(0, 1fr) 4rem; }
+  .rs-ligas .sem-nom { flex-direction: row; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; }
+  .rs-ligas .sem-nom .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .rs-ligas .sem-nom .insignia { flex: none; height: 1.25rem; min-width: 2rem; font-size: 0.6875rem; }
   /* el detalle: cabecera con los dos equipos, luego bloques con título pequeño.
      Oro = probabilidad (cada tramo con su tono de la rampa); lo que no es una
      probabilidad (goles esperados) va en la tinta del texto. */

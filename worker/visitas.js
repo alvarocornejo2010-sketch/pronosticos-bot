@@ -11,6 +11,7 @@
 //   {t: "tabla", c: "PD"}            abrió la tabla de una liga (y terminó su proyección)
 //   {t: "equipo", id: 86}            abrió la página de un equipo
 //   {t: "compartir_equipo", id: 86}  pulsó Compartir en la página de un equipo
+//   {t: "resultados"}                abrió el historial de aciertos (#/resultados)
 //   {t: "busqueda"}                  buscó un equipo
 //   {t: "pestana", p: "panorama"}    cambió de pestaña en el móvil
 //   {t: "compartir", id: 123}        pulsó Compartir en un partido
@@ -24,8 +25,8 @@
 // "nuevo", "vuelve" y "repite" los decide el navegador, que guarda solo el día de
 // su última visita: un visitante es un navegador en un día. hace: días desde esa
 // visita. o: el dominio de la página de la que llegó (vacío si no se sabe).
-// via: "partido", "equipo" o "liga" si entró por un enlace (/partido/123, /equipo/86,
-// /liga/PD: compartido o desde un buscador). f: 1 si sigue
+// via: "partido", "equipo", "liga" o "resultados" si entró por un enlace (/partido/123,
+// /equipo/86, /liga/PD, /resultados: compartido o desde un buscador). f: 1 si sigue
 // a algún equipo. app: 1 si la abrió desde la app instalada.
 //
 // Todo lo que llega se coteja con listas fijas: nadie puede meter una clave
@@ -96,7 +97,7 @@ export function contadores(eventos, propio, hora) {
       entrada = true;   // una por petición: la web manda una sola al cargar
       sumar("visitas", "");
       sumar("hora", hora);
-      if (e.via === "partido" || e.via === "equipo" || e.via === "liga") sumar("enlace", e.via);
+      if (["partido", "equipo", "liga", "resultados"].includes(e.via)) sumar("enlace", e.via);
       if (e.v !== "nuevo" && e.v !== "vuelve") continue;
       sumar("visitantes", e.v);
       if (e.f === 1) sumar("con_favoritos", "");
@@ -107,7 +108,7 @@ export function contadores(eventos, propio, hora) {
     } else if ((e.t === "partido" || e.t === "compartir" || e.t === "imagen" || e.t === "equipo"
       || e.t === "compartir_equipo") && Number.isSafeInteger(e.id) && e.id > 0) {
       sumar(e.t, String(e.id));
-    } else if (e.t === "favorito" || e.t === "instalada") {
+    } else if (e.t === "favorito" || e.t === "instalada" || e.t === "resultados") {
       sumar(e.t, "");
     } else if ((e.t === "liga" || e.t === "tabla") && CODIGOS.has(e.c)) {
       sumar(e.t, e.c);
@@ -173,7 +174,7 @@ export async function contar(request, env, almacen, cabeceras, ahora = Date.now(
 
 const vacio = () => ({ visitas: 0, visitantes: 0, nuevos: 0, vuelven: 0, partidos: 0, busquedas: 0,
   compartidos: 0, imagenes: 0, llegadas: 0, estrellas: 0, con_favoritos: 0, instaladas: 0, en_app: 0,
-  equipos: 0, equipos_compartidos: 0 });
+  equipos: 0, equipos_compartidos: 0, resultados: 0 });
 
 function sumarDias7(dias) {
   const s = vacio();
@@ -191,7 +192,8 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
     db.prepare(`SELECT dia, tipo,
         CASE WHEN tipo IN ('partido', 'compartir', 'imagen', 'equipo', 'compartir_equipo') THEN '' ELSE clave END AS c, SUM(n) AS n
       FROM visitas WHERE dia >= ?1 AND tipo IN ('visitas', 'visitantes', 'partido', 'busqueda', 'escrituras',
-        'compartir', 'imagen', 'enlace', 'favorito', 'con_favoritos', 'instalada', 'en_app', 'equipo', 'compartir_equipo')
+        'compartir', 'imagen', 'enlace', 'favorito', 'con_favoritos', 'instalada', 'en_app', 'equipo', 'compartir_equipo',
+        'resultados')
       GROUP BY dia, tipo, c`).bind(desde30),
     db.prepare(`SELECT tipo, clave, SUM(n) AS n FROM visitas
       WHERE dia >= ?1 AND tipo IN ('origen', 'dispositivo', 'vuelta', 'hora', 'liga', 'tabla', 'pestana', 'error')
@@ -219,7 +221,8 @@ export async function resumenVisitas(almacen, env, ahora = Date.now()) {
   }
   const CAMPO = { visitas: "visitas", partido: "partidos", busqueda: "busquedas", escrituras: "escrituras",
     compartir: "compartidos", imagen: "imagenes", enlace: "llegadas", favorito: "estrellas", con_favoritos: "con_favoritos",
-    instalada: "instaladas", en_app: "en_app", equipo: "equipos", compartir_equipo: "equipos_compartidos" };
+    instalada: "instaladas", en_app: "en_app", equipo: "equipos", compartir_equipo: "equipos_compartidos",
+    resultados: "resultados" };
   for (const f of serie.results) {
     const d = porDia.get(f.dia);
     if (!d) continue;
@@ -384,7 +387,8 @@ ${lista("Errores del navegador (tipo:línea de app.js)", r.desglose.error, null)
 ${par(s.compartidos, "veces que se pulsó Compartir en un partido")}
 ${par(s.equipos_compartidos, "veces que se pulsó Compartir en la página de un equipo")}
 ${par(s.imagenes, "imágenes de un partido para historias")}
-${par(s.llegadas, "visitas que llegaron por el enlace de un partido, un equipo o una liga (compartido o de un buscador)")}
+${par(s.llegadas, "visitas que llegaron por el enlace de un partido, un equipo, una liga o los resultados (compartido o de un buscador)")}
+${par(s.resultados, "veces que se abrió el historial de resultados")}
 ${par(s.estrellas, "equipos marcados con la estrella")}
 ${par(s.con_favoritos, `visitantes que siguen a algún equipo (${pct(s.con_favoritos, s.visitantes)})`)}
 ${par(s.instaladas, "veces que se instaló como app")}
