@@ -46,6 +46,7 @@ let infoLigas = null;    // /api/ligas: medias de goles que usa el modelo
 let rutaPintada = null;
 let ligaContada = null;   // la liga en la que ya se contó la entrada (visitas)
 let equipoContado = null;   // y el equipo
+let resultadosContados = false;   // y el historial de aciertos
 
 // Los equipos que sigue quien mira, por su nombre completo, en su navegador (sin
 // cuenta). Sus partidos salen en "Mis equipos", primero en cada día y primero en
@@ -79,6 +80,9 @@ const enlaceEquipo = (location.pathname.match(/^\/equipo\/(\d{1,9})\/?$/) || [])
 if (enlaceEquipo) history.replaceState(null, "", "/#/equipo/" + enlaceEquipo);
 const enlaceLiga = (location.pathname.match(/^\/liga\/([A-Z0-9]{2,4})\/?$/) || [])[1] || null;
 if (enlaceLiga) history.replaceState(null, "", "/#/liga/" + enlaceLiga);
+// /resultados y /resultados/2026-10-26 (worker/resultados.js): a /#/resultados...
+const enlaceResultados = location.pathname.match(/^\/resultados(?:\/(\d{4}-\d{2}-\d{2}))?\/?$/);
+if (enlaceResultados) history.replaceState(null, "", "/#/resultados" + (enlaceResultados[1] ? "/" + enlaceResultados[1] : ""));
 // el título de la portada (el de index.html), para cuando se sale de la página de un equipo
 const TITULO_WEB = "Pronósticos de fútbol: 1 X 2 y goles";
 let orden = "hora";
@@ -746,6 +750,7 @@ function bloqueGrupo(clave, texto, cuenta, codLiga, clase) {
 //   #/liga/PD/2026-09-12  una liga, un día
 //   #/favoritos           los partidos de los equipos que sigues
 //   #/equipo/86           la página de un equipo (sección EQUIPO)
+//   #/resultados[/2026-10-26]  lo que dijo la web de cada partido de una semana (sección RESULTADOS)
 // ==========================================
 // Un enlace mal escrito (#/liga/%E0) no tiene que tumbar la página.
 function decodificar(s) { try { return decodeURIComponent(s); } catch (e) { return s; } }
@@ -757,6 +762,7 @@ function leerRuta() {
   if (t[0] === "semana") return { vista: "semana" };
   if (t[0] === "favoritos") return { vista: "favoritos" };
   if (t[0] === "equipo" && /^\d{1,9}$/.test(t[1] || "")) return { vista: "equipo", id: Number(t[1]) };
+  if (t[0] === "resultados") return { vista: "resultados", semana: /^\d{4}-\d{2}-\d{2}$/.test(t[1] || "") ? t[1] : null };
   return { vista: "inicio" };
 }
 // Se pinta en el acto: así quien navega (los más claros, los próximos) encuentra la
@@ -1146,6 +1152,99 @@ async function compartirEquipo(id) {
 }
 
 // ==========================================
+// RESULTADOS (#/resultados, #/resultados/2026-10-26)
+// El historial de aciertos: lo que dijo la web de cada partido de una semana (de lunes
+// a domingo, en hora de Lima), antes de empezar, contra lo que pasó. Arriba, en cuántos
+// acertó el favorito frente a lo que esperaban sus probabilidades, por tramo de confianza
+// y por liga (lo suma el servidor); debajo, cada día con sus partidos. Sale de
+// /api/resultados (worker/resultados.js, solo en Cloudflare).
+// ==========================================
+const historial = new Map();   // semana ("" = la última) → { doc, etag, pedida, cargando, error }
+const DIAS_SEM = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+const ICONO_ATRAS = '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor"'
+  + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L5 8l5 5"/></svg>';
+
+async function cargarResultados(semana) {
+  const h = historial.get(semana) || {};
+  historial.set(semana, h);
+  h.cargando = true;
+  h.pedida = Date.now();
+  try {
+    const r = await pedirSiCambio("/api/resultados" + (semana ? "?semana=" + semana : ""), h.etag);
+    if (r.status !== 304) {
+      // 404: una semana sin resultados (lo dice el cuerpo)
+      if (!r.ok && r.status !== 404) throw new Error("HTTP " + r.status);
+      h.etag = r.headers.get("ETag");
+      h.doc = await r.json();
+      h.error = null;
+    }
+  } catch (err) {
+    h.error = "No se pudieron cargar los resultados. Se reintenta en un rato.";
+  }
+  h.cargando = false;
+  render();
+}
+
+// "del 26 oct al 1 nov"
+function nombreSemana(lunes) {
+  const fin = new Date(Date.parse(lunes + "T00:00:00Z") + 6 * 86400000).toISOString().slice(0, 10);
+  return "del " + fechaCorta(lunes) + " al " + fechaCorta(fin);
+}
+
+function htmlResumenSemana(d) {
+  const nav = '<nav class="rs-nav" aria-label="Otras semanas">'
+    + (d.anterior ? '<a class="eq-ir" href="#/resultados/' + d.anterior + '">' + ICONO_ATRAS + 'Semana ' + esc(nombreSemana(d.anterior)) + '</a>' : '<span></span>')
+    + (d.siguiente ? '<a class="eq-ir" href="#/resultados/' + d.siguiente + '">Semana ' + esc(nombreSemana(d.siguiente)) + ICONO_FLECHA + '</a>' : "")
+    + '</nav>';
+  const t = d.resumen.total;
+  if (!t[0]) return htmlBloque("La semana", '<p class="nota">Ningún partido terminado con el pronóstico publicado.</p>' + nav);
+  const ligas = porLigas(d.partidos).filter(L => d.resumen.ligas[L.codigo]).map(L =>
+    htmlFilaSem(L.nombre, null, d.resumen.ligas[L.codigo], htmlInsignia(L.codigo))).join("");
+  return '<div class="det-rejilla"><div class="det-col">'
+    + htmlBloque("La semana", htmlCifraTramos(t, d.resumen.tramos)
+      + '<p class="nota">Solo cuenta lo publicado antes de empezar. Lo esperado es lo que decían las propias probabilidades:'
+      + ' si están bien medidas, el favorito acierta más o menos eso.</p>', plural(t[0], "partido", "partidos"))
+    + '</div><div class="det-col">'
+    + htmlBloque("Por liga", '<div class="sem-tramos rs-ligas" role="list">' + ligas + '</div>' + htmlLeyendaSem())
+    + '</div></div>' + nav;
+}
+
+function bloquesResultados(semana) {
+  const clave = semana || "";
+  let h = historial.get(clave);
+  if (!h || (!h.cargando && Date.now() - h.pedida > 10 * 60000)) { cargarResultados(clave); h = historial.get(clave); }
+  const d = h.doc && h.doc.estado === "listo" ? h.doc : null;
+  const out = { titulo: "Resultados", sub: d ? "semana " + nombreSemana(d.semana) : "", mezcla: true, bloques: [],
+    pestana: d ? "Resultados de la semana " + nombreSemana(d.semana) + " · Pronósticos" : "Resultados · Pronósticos" };
+  if (!d) {
+    const doc = h.doc || {};
+    out.vacio = doc.estado === "no_disponible" ? ["Solo en la versión de Cloudflare", doc.nota]
+      : doc.estado === "sin_datos" ? ["Todavía no hay resultados", doc.nota]
+      : doc.estado === "no_encontrado" ? ["No hay resultados de esa semana", "Hay desde la semana " + nombreSemana(doc.primera)
+        + " hasta la " + nombreSemana(doc.ultima) + "."]
+      : h.error ? ["No se pudieron cargar los resultados", h.error] : ["Cargando los resultados…", "Un momento."];
+    return out;
+  }
+  const resumen = htmlResumenSemana(d);
+  out.bloques.push({ id: "rs-resumen", clase: "detalle rs-resumen", html: resumen, huella: resumen });
+  const dias = new Map();
+  d.partidos.forEach(p => { if (!dias.has(p.fecha)) dias.set(p.fecha, []); dias.get(p.fecha).push(p); });
+  dias.forEach((lista, fecha) => {
+    let aciertos = 0;
+    const filas = lista.map(p => { const f = htmlFilaResultado(p); if (f.acerto) aciertos++; return f.html; }).join("");
+    const dia = DIAS_SEM[(new Date(fecha + "T00:00:00Z").getUTCDay() + 6) % 7] + " " + fechaLarga(fecha);
+    const html = htmlBloque(dia, '<div class="claros" role="list">' + filas + '</div>',
+      "acertó el favorito en " + aciertos + " de " + lista.length);
+    out.bloques.push({ id: "rs-" + fecha, clase: "detalle eq-web rs-dia", html, huella: html });
+  });
+  if (d.partidos.length) {
+    out.bloques.push({ id: "rs-nota", clase: "eq-sin", huella: "nota", html: '<p class="nota">La casilla es lo que la web le dio,'
+      + ' antes del partido, a lo que pasó. El favorito es el resultado al que daba más.</p>' });
+  }
+  return out;
+}
+
+// ==========================================
 // CONTENIDO DEL CENTRO
 // ==========================================
 function nombreDia(d) {
@@ -1166,6 +1265,7 @@ function bloquesCentro(todos, ruta) {
   }
 
   if (ruta.vista === "equipo") return bloquesEquipo(todos, ruta.id);
+  if (ruta.vista === "resultados") return bloquesResultados(ruta.semana);
 
   if (ruta.vista === "favoritos") {
     const suyos = todos.filter(esFavorito);
@@ -1459,7 +1559,9 @@ function htmlResultados() {
   const filas = lista.map(p => { const f = htmlFilaResultado(p); if (f.acerto) aciertos++; return f.html; }).join("");
   return '<section class="modulo m-resultados"><h2>Resultados <span class="meta">acertó el favorito en ' + aciertos + ' de ' + lista.length + '</span></h2>'
     + '<div class="claros" role="list">' + filas + '</div>'
-    + '<p class="nota">La casilla es lo que la web le dio, antes del partido, a lo que pasó. Liga a liga, en Fiabilidad medida, En vivo.</p></section>';
+    + '<p class="nota">La casilla es lo que la web le dio, antes del partido, a lo que pasó. Liga a liga, en Fiabilidad medida, En vivo.</p>'
+    // data-hash: en el móvil, el tablero está en Panorama y el historial en Partidos
+    + '<a class="eq-ir" href="#/resultados" data-hash="#/resultados">Todos los resultados, semana a semana' + ICONO_FLECHA + '</a></section>';
 }
 
 // Los últimos 7 días del registro en vivo: en cuántos acertó el favorito, frente a
@@ -1470,6 +1572,32 @@ const TRAMOS_SEMANA = [
   { k: "medios", nombre: "Intermedios", rango: "45–60 %" },
   { k: "renidos", nombre: "Reñidos", rango: "menos de 45 %" },
 ];
+// En cuántos acertó el favorito frente a lo que esperaban sus probabilidades: una fila
+// por grupo (un tramo de confianza, una liga), con una barra de lo que acertó y una
+// marca de lo esperado. t: [partidos, aciertos, esperados].
+const porc = (a, b) => Math.round(100 * a / b);
+function htmlFilaSem(nombre, sub, t, cabeza) {
+  const real = porc(t[1], t[0]), esperado = porc(t[2], t[0]);
+  const etiqueta = nombre + (sub ? " (" + sub + ")" : "") + ": acertó " + t[1] + " de " + t[0] + ", el " + real
+    + " %; sus probabilidades esperaban el " + esperado + " %";
+  return '<div class="sem-fila" role="listitem" aria-label="' + esc(etiqueta) + '">'
+    + '<span class="sem-nom" aria-hidden="true">' + (cabeza || "") + '<span class="t">' + esc(nombre) + '</span>'
+    + (sub ? '<small>' + esc(sub) + '</small>' : "") + '</span>'
+    + '<span class="sem-barra" aria-hidden="true"><i style="width:' + real + '%"></i>'
+    + '<b style="left:' + esperado + '%"></b></span>'
+    + '<span class="sem-val" aria-hidden="true">' + t[1] + '<small> de ' + t[0] + '</small></span></div>';
+}
+function htmlLeyendaSem() {
+  return '<p class="sem-leyenda" aria-hidden="true"><span><i class="real"></i>acertó</span><span><i class="esp"></i>esperado</span></p>';
+}
+// La cifra grande y los tres tramos: total y tramos, [partidos, aciertos, esperados].
+function htmlCifraTramos(total, tramos) {
+  const filas = TRAMOS_SEMANA.filter(T => tramos[T.k] && tramos[T.k][0]).map(T => htmlFilaSem(T.nombre, T.rango, tramos[T.k])).join("");
+  return '<p class="sem-cifra"><span class="num">' + porc(total[1], total[0]) + ' %</span><span>acertó el favorito: ' + total[1]
+    + ' de ' + total[0] + '. Sus probabilidades esperaban el ' + porc(total[2], total[0]) + ' %.</span></p>'
+    + '<div class="sem-tramos" role="list">' + filas + '</div>' + htmlLeyendaSem();
+}
+
 function htmlSemana() {
   if (!registroListo() || !(registro.semana || []).length) return "";
   const hoy = hoyLima();
@@ -1485,17 +1613,6 @@ function htmlSemana() {
     if (d.sorpresa && (!s.sorpresa || favorito(d.sorpresa) > favorito(s.sorpresa))) s.sorpresa = d.sorpresa;
   });
   if (!s.n) return "";
-  const porc = (a, b) => Math.round(100 * a / b);
-  const filas = TRAMOS_SEMANA.filter(T => s.tramos[T.k]).map(T => {
-    const t = s.tramos[T.k], real = porc(t[1], t[0]), esperado = porc(t[2], t[0]);
-    const etiqueta = T.nombre + " (" + T.rango + "): acertó " + t[1] + " de " + t[0] + ", el " + real
-      + " %; sus probabilidades esperaban el " + esperado + " %";
-    return '<div class="sem-fila" role="listitem" aria-label="' + esc(etiqueta) + '">'
-      + '<span class="sem-nom" aria-hidden="true">' + esc(T.nombre) + '<small>' + esc(T.rango) + '</small></span>'
-      + '<span class="sem-barra" aria-hidden="true"><i style="width:' + real + '%"></i>'
-      + '<b style="left:' + esperado + '%"></b></span>'
-      + '<span class="sem-val" aria-hidden="true">' + t[1] + '<small> de ' + t[0] + '</small></span></div>';
-  }).join("");
   let sorpresa = "";
   const p = s.sorpresa;
   if (p) {
@@ -1508,10 +1625,7 @@ function htmlSemana() {
       + '<span class="cuando" aria-hidden="true">' + htmlInsignia(p.liga_codigo) + '<span>' + esc(fechaCorta(p.fecha)) + '</span></span></div>';
   }
   return '<section class="modulo m-semana"><h2>Últimos 7 días <span class="meta">' + s.n + ' partido' + (s.n === 1 ? "" : "s") + '</span></h2>'
-    + '<p class="sem-cifra"><span class="num">' + porc(s.ac, s.n) + ' %</span><span>acertó el favorito: ' + s.ac + ' de ' + s.n
-    + '. Sus probabilidades esperaban el ' + porc(s.esp, s.n) + ' %.</span></p>'
-    + '<div class="sem-tramos" role="list">' + filas + '</div>'
-    + '<p class="sem-leyenda" aria-hidden="true"><span><i class="real"></i>acertó</span><span><i class="esp"></i>esperado</span></p>'
+    + htmlCifraTramos([s.n, s.ac, s.esp], s.tramos)
     + sorpresa
     + '<p class="nota">Lo esperado es lo que decían las propias probabilidades: si están bien medidas, el favorito acierta más o menos eso, ni mucho más ni mucho menos.</p></section>';
 }
@@ -1773,13 +1887,17 @@ function render() {
   if (equipoVista && equipoVista !== equipoContado) contar({ t: "equipo", id: equipoVista });
   if (!equipoVista && equipoContado) document.title = TITULO_WEB;   // sale de la página de un equipo
   equipoContado = equipoVista;
+  if (ruta.vista === "resultados" && !resultadosContados) contar({ t: "resultados" });
+  if (ruta.vista !== "resultados" && resultadosContados) document.title = TITULO_WEB;   // sale de los resultados
+  resultadosContados = ruta.vista === "resultados";
   const clave = JSON.stringify(ruta) + "|" + orden + "|" + (busqueda ? "b" : "") + "|" + mqEscritorio.matches;
   const reconstruir = clave !== rutaPintada;
   rutaPintada = clave;
   if (reconstruir) {
     vista.innerHTML = ""; vista.dataset.huella = ""; vista.scrollTop = 0;
-    // a la página de un equipo se llega desde el medio de otra (el detalle de un partido, la tabla)
-    if (equipoVista) window.scrollTo(0, 0);
+    // a la página de un equipo se llega desde el medio de otra (el detalle de un partido, la tabla),
+    // y al historial, desde el tablero Resultados
+    if (equipoVista || ruta.vista === "resultados") window.scrollTo(0, 0);
   }
 
   pintarFechas(todos, ruta);
@@ -2128,6 +2246,7 @@ function contar(evento) {
   if (enlacePartido) ev.via = "partido";
   else if (enlaceEquipo) ev.via = "equipo";
   else if (enlaceLiga) ev.via = "liga";
+  else if (enlaceResultados) ev.via = "resultados";
   if (favoritos.size) ev.f = 1;
   if (window.matchMedia("(display-mode: standalone)").matches || navigator.standalone) ev.app = 1;
   if (v === "vuelve") ev.hace = Math.round((Date.parse(hoy) - Date.parse(ultima)) / 86400000);

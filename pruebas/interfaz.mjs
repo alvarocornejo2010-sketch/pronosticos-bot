@@ -1,5 +1,5 @@
 // Revisión de la interfaz con un navegador de verdad (Playwright), contra el Worker
-// local ya lleno con la API falsa (lo deja así e2e.sh). En 13 vistas y 7 anchos,
+// local ya lleno con la API falsa (lo deja así e2e.sh). En 14 vistas y 7 anchos,
 // de 360 a 1920 px, busca:
 //   - texto que se sale de su caja sin recortarse (scrollWidth > clientWidth);
 //   - piezas de una misma fila que se pisan (la hora, el escudo, los números...);
@@ -15,7 +15,8 @@
 // la portada, de un partido, de un equipo y de una liga (el que lee quien no ejecuta
 // JavaScript) se lee en todos los anchos y la web lo cambia por lo suyo al arrancar, y pasa
 // axe-core (accesibilidad) por la semana, Mis equipos, el detalle, la tabla, la página de un
-// equipo y ese texto, en el móvil y en escritorio. Así se vio en oct 2026 que la fecha se
+// equipo, el historial de resultados (con una semana de mentira: aquí no termina ningún
+// partido) y ese texto, en el móvil y en escritorio. Así se vio en oct 2026 que la fecha se
 // metía bajo el escudo y que "Seguir" no cabía en el móvil.
 // Uso: node pruebas/interfaz.mjs PUERTO_WORKER PUERTO_API
 // Las fuentes vienen de Google; sin red, FUENTES=carpeta con fuentes.css, mapa.txt
@@ -24,6 +25,7 @@ import { chromium } from "playwright";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
+import { lunesDe, resumirSemana } from "../worker/resultados.js";
 
 const W = `http://127.0.0.1:${process.argv[2]}`;
 const API = `http://127.0.0.1:${process.argv[3]}`;   // su /push/... es el servicio de avisos de mentira (PUSH_PRUEBA)
@@ -41,6 +43,13 @@ for (const d of estado.dias) for (const p of d.partidos) for (const e of [p.loca
 const FAVORITOS = [...veces.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([e]) => e);
 // un equipo de LaLiga para su página (tiene tabla, fuerza y forma)
 const EQUIPO = estado.dias.flatMap((d) => d.partidos).find((p) => p.liga_codigo === "PD").local_id;
+// el historial de resultados, de mentira: los partidos de la semana con pronóstico, "terminados"
+const MARCADORES = [[2, 0], [1, 1], [0, 1], [3, 2], [0, 0], [1, 2], [4, 1]];
+const jugados = estado.dias.flatMap((d) => d.partidos.filter((p) => !p.pendiente).map((p) => ({ ...p, fecha: d.fecha })))
+  .slice(0, 40).map((p, i) => ({ ...p, gl: MARCADORES[i % 7][0], gv: MARCADORES[i % 7][1] }));
+const SEMANA = lunesDe(jugados[0].fecha);
+const HISTORIAL = { estado: "listo", plataforma: "cloudflare", semana: SEMANA, hasta: SEMANA, anterior: "2026-10-19",
+  siguiente: null, primera: "2026-10-19", ultima: SEMANA, resumen: resumirSemana(jugados), partidos: jugados };
 
 const VISTAS = [
   ["semana", "#/semana"], ["día", "#/dia/" + conPartidos[1].fecha], ["liga", "#/liga/PD"],
@@ -49,10 +58,12 @@ const VISTAS = [
   ["mis equipos", "#/favoritos"], ["mis equipos por claros", "#/favoritos", "claros"],
   ["detalle", "#/dia/" + conPartidos[1].fecha, "abrir"], ["tabla", "#/liga/PD/tabla", "tabla"],
   ["detalle de mis equipos", "#/favoritos", "abrir-fav"], ["equipo", "#/equipo/" + EQUIPO, "equipo"],
+  ["resultados", "#/resultados", "resultados"],
 ];
 const ANCHOS = [[360, 780], [390, 844], [768, 1024], [1024, 768], [1180, 820], [1440, 900], [1920, 1080]];
 const AXE_EN = new Set(["390/semana", "390/detalle", "390/tabla", "390/mis equipos", "390/detalle de mis equipos",
-  "1440/semana", "1440/detalle", "1440/tabla", "1440/mis equipos", "1440/detalle de mis equipos", "390/equipo", "1440/equipo"]);
+  "1440/semana", "1440/detalle", "1440/tabla", "1440/mis equipos", "1440/detalle de mis equipos", "390/equipo", "1440/equipo",
+  "390/resultados", "1440/resultados"]);
 
 // El servicio de avisos del navegador, de mentira: una suscripción con claves de verdad
 // (el Worker comprueba que son un punto de la curva) y una dirección del servicio de
@@ -124,6 +135,7 @@ for (const [ancho, alto] of ANCHOS) {
     });
   }
   await ctx.route("https://crests.football-data.org/**", (r) => r.abort());   // sin escudo: el monograma
+  await ctx.route("**/api/resultados**", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify(HISTORIAL) }));
   await ctx.addInitScript((fav) => {   // también corre en about:blank, que no tiene localStorage
     if (location.protocol.startsWith("http")) localStorage.setItem("pronosticos.favoritos", JSON.stringify(fav));
     // sin ventana, Chromium da siempre los avisos por bloqueados ("denied"): aquí, sin
@@ -136,7 +148,16 @@ for (const [ancho, alto] of ANCHOS) {
   for (const [nombre, hash, extra] of VISTAS) {
     await p.goto("about:blank");   // cada vista desde cero: cambiar solo el hash no recarga (la búsqueda seguiría puesta)
     await p.goto(W + "/" + hash);
-    await p.waitForSelector(extra === "tabla" ? ".tabla-liga" : ".fila", { timeout: 15000 });
+    await p.waitForSelector(extra === "tabla" ? ".tabla-liga" : extra === "resultados" ? ".rs-dia .res" : ".fila", { timeout: 15000 });
+    if (extra === "resultados") {
+      // la semana entera: un día por bloque, todos sus partidos, y el resumen por liga
+      const r = await p.evaluate(() => ({ dias: document.querySelectorAll(".rs-dia").length, filas: document.querySelectorAll(".rs-dia .res").length,
+        ligas: document.querySelectorAll(".rs-ligas .sem-fila").length }));
+      const dias = new Set(jugados.map((x) => x.fecha)).size, ligas = Object.keys(HISTORIAL.resumen.ligas).length;
+      if (r.dias !== dias || r.filas !== jugados.length || r.ligas !== ligas) {
+        fallo(`${ancho}px: el historial no trae sus ${dias} días, ${jugados.length} partidos y ${ligas} ligas (${JSON.stringify(r)})`);
+      }
+    }
     if (hash === "#/favoritos") await p.waitForSelector(".avisos-tarjeta", { timeout: 15000 });
     if (extra === "tabla") await p.waitForFunction(() => !document.querySelector(".tabla-sim"), null, { timeout: 30000 });
     if (extra === "equipo") {

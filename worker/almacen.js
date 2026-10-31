@@ -56,6 +56,8 @@ export const ESQUEMA = [
      liquidado INTEGER NOT NULL)`,
   // Los últimos de una liga, para su página (ligas.js), que lo pide con INDEXED BY.
   `CREATE INDEX IF NOT EXISTS resultados_por_liga ON resultados (liga, utc)`,
+  // Los de una semana, para el historial de aciertos (resultados.js), con INDEXED BY.
+  `CREATE INDEX IF NOT EXISTS resultados_por_fecha ON resultados (utc)`,
   // Documentos enteros: lo que lee la web (estado), su resumen, la validación,
   // el registro en vivo, los pedidos de /actualizar y /validar y las temporadas
   // terminadas.

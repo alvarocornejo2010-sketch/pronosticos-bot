@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { CODIGOS, filaResultado, paginaConTarjeta, textoPartido, veredicto } from "../worker/compartir.js";
 import { textoEquipo } from "../worker/equipos.js";
 import { textosLiga } from "../worker/ligas.js";
+import { lunesDe, resumirSemana, textosResultados } from "../worker/resultados.js";
 import { avisarBuscadores, horasRetryAfter, tocaIndexnow, HORAS_INDEXNOW } from "../worker/indexnow.js";
 import { INDEXNOW_CLAVE } from "../worker/config.js";
 import { Reloj } from "../worker/tiempo.js";
@@ -120,6 +121,38 @@ assert.equal(textosLiga("BSA", { partidos: [], equipos: [], ultimos: [] }, reloj
 assert.equal(textosLiga("PL", { partidos: [], equipos: [], ultimos: [] }, reloj).titulo, "Pronósticos de la Premier League");
 console.log("liga: próximos partidos, tabla en orden y enlaces a las demás ligas");
 
+// el historial de aciertos: lo sumado (el favorito con el entero de la web: 60 es claro)
+// y el texto de la semana, con sus días, sus ligas y las semanas vecinas
+const jugado = (id, liga_codigo, utcDate, p, gl, gv) => ({ ...ficha, id, liga_codigo, liga: liga_codigo, utcDate,
+  fecha: reloj.local(Date.parse(utcDate)).fecha, prob_local: p[0], prob_empate: p[1], prob_visita: p[2], gl, gv });
+const semana = [jugado(21, "PD", "2026-10-26T20:00:00Z", [59.6, 25, 15.4], 2, 0),   // 60 con los enteros: claro, acierta
+  jugado(22, "PD", "2026-10-27T01:00:00Z", [30, 40, 30], 1, 0),                   // favorito el empate: falla
+  jugado(23, "SA", "2026-11-01T18:00:00Z", [20, 30, 50], 0, 2)];                  // intermedio, acierta
+const res = resumirSemana(semana);
+assert.deepEqual(res.total, [3, 2, 1.496]);
+assert.deepEqual(res.tramos, { claros: [1, 1, 0.596], medios: [1, 1, 0.5], renidos: [1, 0, 0.4] });
+assert.deepEqual(res.ligas, { PD: [2, 1, 0.996], SA: [1, 1, 0.5] });
+assert.equal(lunesDe("2026-11-01"), "2026-10-26");
+assert.equal(lunesDe("2026-10-26"), "2026-10-26");
+const tr = textosResultados({ semana: "2026-10-26", anterior: "2026-10-19", siguiente: null, resumen: res, partidos: semana },
+  reloj, true);
+assert.equal(tr.titulo, "Resultados de la semana del 26 oct al 1 nov");
+assert.ok(tr.descripcion.startsWith("Semana del 26 oct al 1 nov: acertó el favorito en 2 de 3 (67 %); sus probabilidades esperaban 1."));
+assert.ok(tr.texto.html.includes("<b>Acertó el favorito en 2 de 3 (67 %)"), tr.texto.html);
+assert.ok(tr.texto.html.includes("Favoritos claros (60 % o más): acertó el favorito en 1 de 1 (100 %)"));
+assert.ok(tr.texto.html.includes('<a href="/liga/PD">La Liga</a>: acertó el favorito en 1 de 2'), tr.texto.html);
+// los días en hora de Lima: el de las 01:00 UTC del 27 es el lunes 26
+assert.ok(tr.texto.html.includes("<h2>Lunes 26 oct</h2>") && tr.texto.html.includes("<h2>Domingo 1 nov</h2>"));
+assert.ok(!tr.texto.html.includes("<h2>Martes"));
+assert.ok(tr.texto.html.includes('<a href="/partido/22">lun 26 oct · Inter 1-0 Shakhtar &lt;b&gt;&amp;</a>.'));
+assert.ok(tr.texto.html.includes("Sorpresa: lo más probable era el empate."));
+assert.ok(tr.texto.html.includes('<a href="/resultados/2026-10-19">Semana del 19 oct al 25 oct</a>'));
+assert.ok(!tr.texto.html.includes("Shakhtar <b>"));
+const vacia = textosResultados({ semana: "2026-10-26", anterior: null, siguiente: null, resumen: resumirSemana([]),
+  partidos: [] }, reloj, false);
+assert.ok(vacia.descripcion.includes("sin partidos terminados") && vacia.titulo.startsWith("Resultados: "));
+console.log("resultados: lo sumado por tramo y por liga, y el texto de la semana con sus días y sus vecinas");
+
 // IndexNow: cuándo toca
 const aj = { indexnowUrl: "https://www.bing.com/indexnow", urlWeb: "https://pronosticos-bot.alvarocornejo2010.workers.dev" };
 const listo = { estado: "listo" }, ahora = Date.parse("2026-10-29T12:00:00Z"), H = 3600000;
@@ -141,7 +174,7 @@ assert.equal(horasRetryAfter("mañana", ahora) + horasRetryAfter(null, ahora) + 
 // predicción, los resultados (con cuándo se liquidaron) y los equipos de las tablas.
 const base = {
   ventana: [{ id: 11, liga: "PD", local_id: 86, visita_id: 81 }, { id: 12, liga: "CL", local_id: 5, visita_id: 6 }],
-  resultados: [{ id: 3, liga: "SA", liquidado: 1000, local_id: 108, visita_id: 100 }],
+  resultados: [{ id: 3, liga: "SA", utc: "2026-10-25T18:00:00Z", contado: 1, liquidado: 1000, local_id: 108, visita_id: 100 }],
   tablas: [[86, "2026-10-29"], [81, "2026-10-29"], [108, "2026-10-28"]],
 };
 const docs = [];
@@ -152,7 +185,10 @@ const almacen = {
   db: {
     prepare: (sql) => ({ sql, bind(...a) { return { sql, a }; },
       all: async () => ({ results: base.tablas.map(([id, cuando]) => ({ id, cuando })) }) }),
-    batch: async ([v, r]) => [{ results: base.ventana }, { results: base.resultados.filter((x) => x.liquidado > r.a[0]) }],
+    batch: async ([v, r]) => (v.sql.includes("resultados_por_fecha")   // la primera y la última semana con resultados
+      ? [base.resultados.map((x) => x.utc).sort(), base.resultados.map((x) => x.utc).sort().reverse()]
+        .map((l) => ({ results: [{ utc: l[0] }] }))
+      : [{ results: base.ventana }, { results: base.resultados.filter((x) => x.liquidado > r.a[0]) }]),
   },
 };
 const enviadas = [];
@@ -164,9 +200,9 @@ const falso = async (url, op) => {
 const ultimo = () => docs[docs.length - 1].valor;
 const origen = aj.urlWeb;
 
-// la primera vez: la portada, todas las ligas, los partidos y todos los equipos
+// la primera vez: la portada, todas las ligas, los partidos, todos los equipos y los resultados
 let r = await avisarBuscadores(almacen, aj, null, ahora, falso);
-assert.deepEqual(r, { urls: 1 + CODIGOS.size + 3 + 6, estado: 200 });
+assert.deepEqual(r, { urls: 1 + CODIGOS.size + 3 + 6 + 2, estado: 200 });
 let e = enviadas.at(-1);
 assert.equal(e.url, aj.indexnowUrl);
 assert.equal(e.host, "pronosticos-bot.alvarocornejo2010.workers.dev");
@@ -175,7 +211,7 @@ assert.equal(e.keyLocation, `${origen}/${INDEXNOW_CLAVE}.txt`);
 assert.equal(e.urlList[0], origen + "/");
 for (const c of CODIGOS) assert.ok(e.urlList.includes(`${origen}/liga/${c}`), c);
 for (const x of ["/partido/11", "/partido/12", "/partido/3", "/equipo/86", "/equipo/81", "/equipo/108", "/equipo/100",
-  "/equipo/5", "/equipo/6"]) assert.ok(e.urlList.includes(origen + x), x);
+  "/equipo/5", "/equipo/6", "/resultados", "/resultados/2026-10-19"]) assert.ok(e.urlList.includes(origen + x), x);
 assert.equal(new Set(e.urlList).size, e.urlList.length);
 assert.deepEqual(ultimo(), { hecha: "2026-10-29T12:00:00.000Z", urls: r.urls, al_dia: true, desde: 1000, enviados: [11, 12],
   estado: 200 });
@@ -190,16 +226,16 @@ assert.deepEqual(ultimo().enviados, [11, 12]);
 
 // un partido nuevo en la ventana y otro que terminó: solo ellos, sus equipos, sus ligas y la portada
 base.ventana.push({ id: 13, liga: "PL", local_id: 61, visita_id: 62 });
-base.resultados.push({ id: 4, liga: "PD", liquidado: 2000, local_id: 86, visita_id: 90 });
+base.resultados.push({ id: 4, liga: "PD", utc: "2026-10-28T20:00:00Z", contado: 1, liquidado: 2000, local_id: 86, visita_id: 90 });
 r = await avisarBuscadores(almacen, aj, ultimo(), ahora + 6 * H, falso);
 e = enviadas.at(-1);
 assert.deepEqual(e.urlList.map((u) => u.slice(origen.length)).sort(), ["/", "/equipo/61", "/equipo/62", "/equipo/86",
-  "/equipo/90", "/liga/PD", "/liga/PL", "/partido/13", "/partido/4"]);
+  "/equipo/90", "/liga/PD", "/liga/PL", "/partido/13", "/partido/4", "/resultados", "/resultados/2026-10-26"]);
 assert.equal(ultimo().desde, 2000);
 assert.deepEqual(ultimo().enviados, [11, 12, 13]);
 
 // si falla, se apunta sin mover lo mandado: la vez siguiente va otra vez
-base.resultados.push({ id: 5, liga: "BL1", liquidado: 3000, local_id: 1, visita_id: 2 });
+base.resultados.push({ id: 5, liga: "BL1", utc: "2026-10-29T01:00:00Z", contado: 1, liquidado: 3000, local_id: 1, visita_id: 2 });
 respuesta = 500;
 r = await avisarBuscadores(almacen, aj, ultimo(), ahora + 9 * H, falso);
 assert.equal(r.estado, 500);
@@ -234,7 +270,7 @@ respuesta = 200;
 await avisarBuscadores(almacen, aj, ultimo(), ahora + 3 * H, falso);
 assert.ok(enviadas.at(-1).urlList.includes(origen + "/liga/BSA") && enviadas.at(-1).urlList.includes(origen + "/equipo/108"));
 // y si falla la red, también
-base.resultados.push({ id: 6, liga: "FL1", liquidado: 4000, local_id: 3, visita_id: 4 });
+base.resultados.push({ id: 6, liga: "FL1", utc: "2026-10-29T19:00:00Z", contado: 0, liquidado: 4000, local_id: 3, visita_id: 4 });
 const antes = ultimo();
 const sinRed = async () => { throw new TypeError("fetch failed"); };
 r = await avisarBuscadores(almacen, aj, antes, ahora + 6 * H, sinRed);
