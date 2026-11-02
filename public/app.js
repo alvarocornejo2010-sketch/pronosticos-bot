@@ -720,7 +720,7 @@ function bloquesDePartidos(partidos, ctx) {
     return {
       id: "p-" + p.id,
       huella: JSON.stringify(p) + "|" + JSON.stringify(ctx) + "|" + abierto + "|" + escudosRotos.size + "|" + versionFav
-        + "|" + versionAvisos,
+        + "|" + versionAvisos + "|" + (abierto ? versionPorra : 0),
       clase: "partido" + (p.pendiente ? " pendiente" : ""),
       conDia: !!ctx.conDia,
       html: htmlFila(p, ctx, abierto),
@@ -1254,6 +1254,7 @@ function bloquesResultados(semana) {
 // premios, y sin clasificación: cada uno ve solo lo suyo. Solo en Cloudflare.
 // ==========================================
 let porra = { elegidos: {}, resumen: null, ultimos: [], pedida: 0 };
+let versionPorra = 0;   // para que el detalle abierto se vuelva a pintar (bloquesDePartidos)
 const NOMBRE_SIGNO = { "1": "local", "X": "empate", "2": "visitante" };
 
 async function cargarPorra() {
@@ -1265,6 +1266,7 @@ async function cargarPorra() {
     porra = { ...d, pedida: porra.pedida };
   } catch (e) { porra.error = "No se pudo cargar tu porra. Se reintenta en un rato."; }
   porra.cargando = false;
+  versionPorra++;
   if (datos) render();
 }
 
@@ -1274,10 +1276,12 @@ async function elegirPorra(id, signo) {
   const antes = porra.elegidos[id] || null;
   const nuevo = antes === signo ? null : signo;
   if (nuevo) porra.elegidos[id] = nuevo; else delete porra.elegidos[id];
+  versionPorra++;
   render();
   try { await pedirCuenta("/porra", { id: Number(id), signo: nuevo }); }
   catch (e) {
     if (antes) porra.elegidos[id] = antes; else delete porra.elegidos[id];
+    versionPorra++;
     if (e.estado !== 401) avisar("No se guardó tu pronóstico: " + e.message);
     render();
   }
@@ -2492,6 +2496,7 @@ function ponerCuenta(c) {
   }
   try { localStorage.setItem(CLAVE_SESION, c ? "1" : "0"); } catch (e) { /* sin memoria */ }
   if (c) cargarPorra(); else porra = { elegidos: {}, resumen: null, ultimos: [], pedida: 0 };
+  versionPorra++;
   botonCuenta.toggleAttribute("data-con", !!c);
   botonCuenta.querySelector(".txt").textContent = c ? "Mi cuenta" : "Entrar";
   botonCuenta.setAttribute("aria-label", c ? "Mi cuenta" : "Entrar: guarda tus equipos");
