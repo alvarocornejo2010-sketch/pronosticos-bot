@@ -1,7 +1,8 @@
 // Las cuentas (oct 2026): usuario y contraseña, y un correo si la persona quiere, para
 // entrar con él y, el día que la web pueda mandar correos, recuperar la contraseña
 // (hoy no se verifica: eso necesita el plan de pago). La cuenta guarda los equipos que
-// sigues; la persona la puede descargar o borrar ella misma. Cada cuenta tiene un ID
+// sigues y lo que elige en la porra contra el modelo (porra.js); la persona la puede
+// descargar o borrar ella misma. Cada cuenta tiene un ID
 // (idPublico, "K7P4-QX2M") que solo sirve para identificarla, no para entrar. Crear
 // una cuenta pasa por Cloudflare Turnstile cuando están sus dos claves.
 //
@@ -23,6 +24,7 @@
 
 import { ajustes } from "./config.js";
 import { Reloj } from "./tiempo.js";
+import { SIGNOS, noSePuede, sentenciaPorra, verPorra } from "./porra.js";
 
 const ALFABETO = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";   // Crockford: sin I, L, O ni U
 export const DIAS_SESION = 180;
@@ -440,6 +442,19 @@ export class Cuentas {
     return this.json({ ok: true });
   }
 
+  // POST /api/cuenta/porra {id, signo}: lo que elige en un partido (1, X o 2; null lo
+  // quita), hasta que empieza (porra.js).
+  async porra(body, s) {
+    const id = body.id, signo = body.signo === null ? null : body.signo;
+    if (!Number.isSafeInteger(id) || id <= 0 || (signo !== null && !SIGNOS.has(signo))) {
+      return this.error("Elige 1, X o 2.", 400);
+    }
+    const no = await noSePuede(this.almacen, id, this.ahora);
+    if (no) return this.error(...no);
+    await this.guardar([sentenciaPorra(this.db, s.cuenta, id, signo, this.ahora)]);
+    return this.json({ ok: true, id, signo });
+  }
+
   // La contraseña actual (con el usuario de sal), como un intento de entrar: una
   // sesión robada no sirve para probar contraseñas. Da la respuesta de error, o null si
   // es la buena (y entonces la cuenta de fallos vuelve a 0, aunque lo que venga después
@@ -533,12 +548,13 @@ export class Cuentas {
 
   // GET /api/cuenta/datos: todo lo que hay guardado de la cuenta, para descargarlo.
   async datos(s) {
-    const [cuenta, correos, accesos, sesiones, equipos] = await this.almacen.consultar(() => this.db.batch([
+    const [cuenta, correos, accesos, sesiones, equipos, porra] = await this.almacen.consultar(() => this.db.batch([
       this.db.prepare("SELECT id, creada, vista FROM cuentas WHERE id = ?1").bind(s.cuenta),
       this.db.prepare("SELECT correo, verificado, creado FROM correos WHERE cuenta = ?1").bind(s.cuenta),
       this.db.prepare("SELECT tipo, creado FROM accesos WHERE cuenta = ?1 ORDER BY creado").bind(s.cuenta),
       this.db.prepare("SELECT hash, creada, vista FROM sesiones WHERE cuenta = ?1 ORDER BY creada").bind(s.cuenta),
       this.db.prepare("SELECT equipo, creado FROM favoritos WHERE cuenta = ?1 ORDER BY creado").bind(s.cuenta),
+      this.db.prepare("SELECT partido, signo, cuando FROM porra WHERE cuenta = ?1 ORDER BY cuando").bind(s.cuenta),
     ]));
     const c = cuenta.results[0];
     const datos = {
@@ -550,6 +566,7 @@ export class Cuentas {
       sesiones: sesiones.results.map((x) => ({ creada: iso(x.creada), ultima_vez: iso(x.vista),
         este_aparato: x.hash === s.hash })),
       equipos: equipos.results.map((e) => ({ equipo: e.equipo, desde: iso(e.creado) })),
+      porra: porra.results.map((q) => ({ partido: q.partido, eligio: q.signo, cuando: iso(q.cuando) })),
     };
     return new Response(JSON.stringify(datos, null, 2), { headers: { ...this.cabeceras,
       "Content-Type": "application/json; charset=utf-8",
@@ -561,6 +578,7 @@ export class Cuentas {
   // día: borrar la cuenta tiene que funcionar siempre (y solo se borra una vez).
   async borrar(s) {
     await this.almacen.escribir([
+      this.db.prepare("DELETE FROM porra WHERE cuenta = ?1").bind(s.cuenta),
       this.db.prepare("DELETE FROM favoritos WHERE cuenta = ?1").bind(s.cuenta),
       this.db.prepare("DELETE FROM sesiones WHERE cuenta = ?1").bind(s.cuenta),
       this.db.prepare("DELETE FROM accesos WHERE cuenta = ?1").bind(s.cuenta),
@@ -589,9 +607,10 @@ export class Cuentas {
   async despachar(ruta) {
     if (this.request.method === "GET" || this.request.method === "HEAD") {
       if (ruta === "/") return this.ver();
-      if (ruta !== "/datos") return this.error("No existe.", 404);
+      if (ruta !== "/datos" && ruta !== "/porra") return this.error("No existe.", 404);
       const s = await this.sesion();
-      return s ? this.datos(s) : this.sinSesion();
+      if (!s) return this.sinSesion();
+      return ruta === "/datos" ? this.datos(s) : this.json(await verPorra(this.almacen, s.cuenta, new Reloj(this.aj.tz), this.ahora));
     }
     if (!mismoSitio(this.request, this.url)) return this.error("Solo desde la propia web.", 403);
     const body = await cuerpoJson(this.request);
@@ -605,6 +624,7 @@ export class Cuentas {
     if (ruta === "/salir") return this.salir(body, s);
     if (!s) return this.sinSesion();
     if (ruta === "/equipo") return this.equipo(body, s);
+    if (ruta === "/porra") return this.porra(body, s);
     if (ruta === "/contrasena") return this.contrasena(body, s);
     if (ruta === "/correo") return this.correo(body, s);
     if (ruta === "/usuario") return this.ponerUsuario(body, s);
@@ -620,6 +640,7 @@ export const RUTAS_CUENTA = {
   "/api/cuenta/crear": ["POST"],
   "/api/cuenta/entrar": ["POST"],
   "/api/cuenta/equipo": ["POST"],
+  "/api/cuenta/porra": ["GET", "HEAD", "POST"],
   "/api/cuenta/contrasena": ["POST"],
   "/api/cuenta/correo": ["POST"],
   "/api/cuenta/usuario": ["POST"],
@@ -634,11 +655,14 @@ export async function resumenCuentas(almacen, desde7, ahora = Date.now()) {
   const f = await almacen.consultar(() => almacen.db.prepare(
     `SELECT count(*) AS total, coalesce(sum(vista >= ?1), 0) AS activas,
        (SELECT count(DISTINCT cuenta) FROM favoritos) AS con_equipos,
+       (SELECT count(DISTINCT cuenta) FROM porra) AS con_porra,
+       (SELECT count(*) FROM porra WHERE cuando >= ?1) AS porra_semana,
        (SELECT count(*) FROM usuarios) AS con_usuario,
        (SELECT count(*) FROM correos) AS con_correo,
        (SELECT coalesce(sum(n), 0) FROM visitas WHERE tipo = 'cuentas' AND clave = '' AND dia >= ?2) AS creadas,
        (SELECT coalesce(sum(n), 0) FROM visitas WHERE tipo = 'intentos' AND clave = '' AND dia >= ?2) AS intentos
      FROM cuentas`).bind(ahora - 7 * MS_DIA, desde7).first());
   return { total: f.total, creadas: f.creadas, activas: f.activas, con_equipos: f.con_equipos,
+    con_porra: f.con_porra, porra_semana: f.porra_semana,
     con_usuario: f.con_usuario, con_correo: f.con_correo, intentos: f.intentos };
 }

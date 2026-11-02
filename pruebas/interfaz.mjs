@@ -9,7 +9,8 @@
 // con el servicio de avisos del navegador de mentira: sin red, Chromium no puede
 // suscribirse), que crear el calendario de Mis equipos da sus enlaces (y quitarlo, que su
 // dirección deje de funcionar), que la página de privacidad se lee en todos los anchos, que
-// Fiabilidad medida, En vivo, trae una fila por versión del modelo, que el detalle de
+// Fiabilidad medida, En vivo, trae una fila por versión del modelo, que la porra deja elegir
+// en el detalle y enseña lo tuyo (con una cuenta de mentira), que el detalle de
 // un partido de un equipo seguido propone los avisos, que sus nombres enlazan con la
 // página de cada equipo y que «Cómo gana» trae sus cuatro casillas, que el texto ya escrito de
 // la portada, de un partido, de un equipo y de una liga (el que lee quien no ejecuta
@@ -286,6 +287,44 @@ for (const [ancho, alto] of ANCHOS) {
     for (const x of t) fallo(`${ancho}px, casillas de la rampa: contraste ${x}`);
   }
   await p.unroute("**/api/registro");
+
+  // la porra, con una cuenta de mentira: el bloque "Tu pronóstico" del detalle (elegir se ve
+  // en el acto) y la vista Tu porra, con un partido ya jugado
+  if (ancho === 390 || ancho === 1440) {
+    const jugado = { ...jugados[0], signo: "2" };
+    let elegido = null;
+    await p.route("**/api/cuenta", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ disponible: true,
+      cuenta: { id: "K7P4-QX2M", usuario: "prueba", correo: null, creada: "2026-10-24T00:00:00.000Z", equipos: [] } }) }));
+    await p.route("**/api/cuenta/porra", (r) => {
+      if (r.request().method() === "POST") { elegido = JSON.parse(r.request().postData()); return r.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true, ...elegido }) }); }
+      return r.fulfill({ contentType: "application/json", body: JSON.stringify({ estado: "listo", elegidos: {},
+        resumen: { jugados: 1, aciertos: 1, web: 0 }, ultimos: [jugado] }) });
+    });
+    await p.goto(W + "/#/dia/" + conPartidos[1].fecha);
+    await p.evaluate(() => localStorage.setItem("pronosticos.sesion", "1"));   // como si este navegador hubiera entrado
+    await p.reload();
+    await p.waitForSelector(".fila", { timeout: 15000 });
+    await p.waitForFunction(() => cuenta && porra.resumen, null, { timeout: 15000 });
+    await p.locator(".partido:not(.pendiente) .fila").first().click();
+    await p.locator('.det-porra [data-signo="X"]').click();
+    await p.waitForFunction(() => document.querySelector('.det-porra [data-signo="X"][aria-pressed="true"]'), null, { timeout: 5000 });
+    if (!elegido || elegido.signo !== "X") fallo(`${ancho}px: elegir en la porra no llega al servidor (${JSON.stringify(elegido)})`);
+    for (const [nombre, hash] of [["detalle con porra", null], ["tu porra", "#/porra"]]) {
+      if (hash) { await p.evaluate((h) => { location.hash = h; }, hash); await p.waitForSelector(".porra-tarjeta, #vista .res", { timeout: 15000 }); }
+      await p.evaluate(() => document.fonts.ready);
+      const r = await p.evaluate(revisar);
+      for (const x of r.fuera) fallo(`${ancho}px, ${nombre}: se sale ${x}`);
+      for (const x of r.pisadas) fallo(`${ancho}px, ${nombre}: se pisan ${x}`);
+      await p.evaluate(AXE);
+      const v = await p.evaluate(async () => (await axe.run(document, { resultTypes: ["violations"] })).violations
+        .map((x) => `${x.impact} ${x.id} (${x.nodes.length}): ${x.nodes[0].target.join(" ")}`));
+      for (const x of v) fallo(`${ancho}px, ${nombre}: accesibilidad ${x}`);
+    }
+    if (!(await p.textContent("#vista")).includes("Acertaste 1 de 1; la web, en esos mismos, 0.")) fallo(`${ancho}px: Tu porra no trae lo sumado`);
+    await p.unroute("**/api/cuenta");
+    await p.unroute("**/api/cuenta/porra");
+    await p.evaluate(() => localStorage.setItem("pronosticos.sesion", "0"));
+  }
 
   // el texto ya escrito (sin app.js, como lo lee quien no ejecuta JavaScript) de la portada, de
   // un partido, de un equipo y de una liga; y con JavaScript, que la web lo cambia por lo suyo

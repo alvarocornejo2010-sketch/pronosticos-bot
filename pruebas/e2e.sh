@@ -8,7 +8,8 @@
 # primera (calendario.py), /partido/123 lleva la tarjeta de ese partido
 # (compartir.py), la web es instalable y tiene robots.txt y sitemap
 # (descubrir.py), las visitas se cuentan como deben (visitas.py), las cuentas
-# funcionan de crear a borrar, con correo y Turnstile (cuentas.py), los avisos de Mis
+# funcionan de crear a borrar, con correo y Turnstile (cuentas.py), la porra contra el modelo
+# guarda lo que se elige y lo compara con la web (porra.py), los avisos de Mis
 # equipos llegan cifrados y firmados al servicio de avisos de mentira (avisos.mjs) y la
 # página de cada equipo trae su tabla, su fuerza, su forma y lo que dijo la web (equipos.py),
 # el historial de aciertos suma bien cada semana y tiene su página (resultados.py),
@@ -107,6 +108,9 @@ python3 "$REPO/pruebas/visitas.py" "$P_W" secreto_de_prueba_123
 
 echo "== Cuentas"
 python3 "$REPO/pruebas/cuentas.py" "$P_W" "$TMP/d1"
+
+echo "== Porra contra el modelo"
+python3 "$REPO/pruebas/porra.py" "$P_W" "$TMP/d1"
 
 echo "== Avisos de Mis equipos"
 node --no-warnings "$REPO/pruebas/avisos.mjs" "$P_W" "$P_INS" "$P_API" "$TMP/d1" "$TMP/wrangler.log" secreto_de_prueba_123 "$MAX_MS"
