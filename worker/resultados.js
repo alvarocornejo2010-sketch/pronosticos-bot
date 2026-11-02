@@ -1,6 +1,7 @@
 // El historial de aciertos: lo que dijo la web de cada partido, contra lo que pasó,
 // semana a semana (de lunes a domingo, en hora de Lima). /api/resultados da la última
-// semana con resultados y /api/resultados?semana=2026-10-26 una cualquiera; la web la
+// semana con resultados (o la anterior, si la última acaba de empezar: MIN_PARTIDOS_SEMANA)
+// y /api/resultados?semana=2026-10-26 una cualquiera; la web la
 // pinta en #/resultados (sección RESULTADOS de app.js). /resultados y
 // /resultados/2026-10-26 son la misma web con su tarjeta y su texto ya escrito, para
 // compartirla y para los buscadores (como /liga/PD en ligas.js).
@@ -25,6 +26,10 @@ const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "o
 const DIAS_LARGOS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"];
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 const mayuscula = (t) => t[0].toUpperCase() + t.slice(1);
+// Sin semana pedida, la última con resultados; pero si acaba de empezar (un lunes, con uno o
+// dos partidos) y la anterior tiene más, la anterior: un "0 %" de un partido no dice nada. La
+// que empieza sigue a un clic ("siguiente").
+export const MIN_PARTIDOS_SEMANA = 10;
 
 export const lunesDe = (fecha) => sumarDias(fecha, -diaSemana(fecha));
 // "26 oct"
@@ -74,11 +79,19 @@ export async function datosResultados(almacen, reloj, semana = null) {
   if (!ext) return { estado: "sin_datos", nota: "Todavía no ha terminado ningún partido con el pronóstico publicado." };
   const { primera, ultima } = ext;
   const valida = semana && FECHA.test(semana) && !Number.isNaN(Date.parse(semana));
-  const lunes = valida ? lunesDe(semana) : ultima;
+  const db = almacen.db;
+  let lunes = valida ? lunesDe(semana) : ultima;
   if ((semana && !valida) || lunes < primera || lunes > ultima) {
     return { estado: "no_encontrado", primera, ultima, nota: "No hay resultados de esa semana." };
   }
-  const db = almacen.db;
+  if (!semana && ultima > primera) {
+    const previa = sumarDias(ultima, -7);
+    const cuenta = (desde, hasta) => db.prepare(`SELECT count(*) AS n FROM resultados INDEXED BY resultados_por_fecha
+      WHERE utc >= ?1 AND utc < ?2 AND contado = 1`).bind(isoSinMs(inicioDia(reloj, desde)), isoSinMs(inicioDia(reloj, hasta)));
+    const [a, b] = await almacen.consultar(() => db.batch([cuenta(previa, ultima), cuenta(ultima, sumarDias(ultima, 7))]));
+    const nPrevia = a.results[0].n, nUltima = b.results[0].n;
+    if (nUltima < MIN_PARTIDOS_SEMANA && nPrevia > nUltima) lunes = previa;
+  }
   const filas = await almacen.consultar(() => db.prepare(
     `SELECT r.gl, r.gv, r.utc, ${COLUMNAS} FROM resultados r INDEXED BY resultados_por_fecha
      JOIN predicciones p ON p.id = r.id WHERE r.utc >= ?1 AND r.utc < ?2 AND r.contado = 1 ORDER BY r.utc, r.id`)

@@ -357,15 +357,18 @@ function htmlFila(p, ctx, abierto) {
     + (favoritos.has(p[lado]) ? '<span class="sigo">' + ICONO_ESTRELLA_LLENA + '</span>' : "") + '</span>';
 
   let celdas, etiqueta;
+  // lo que eligió en la porra, con un recuadro blanco (el blanco marca lo elegido)
+  const mio = !p.pendiente && cuenta ? porra.elegidos[p.id] || null : null;
+  const marca = (signo) => (g === signo ? " gana" : "") + (mio === signo ? " mia" : "");
   if (p.pendiente) {
     celdas = '<span class="c-p c-1 nada">—</span><span class="c-p c-x nada">—</span><span class="c-p c-2 nada">—</span>';
     etiqueta = p.liga + ". " + cortoDe(p, "local") + " contra " + cortoDe(p, "visita") + ", " + p.hora + ". Sin calcular todavía.";
   } else {
     const m = muestraDe(p);
     const ancho = (v) => '<i style="flex:' + v + ';background:' + tramo(v).bg + '"></i>';
-    celdas = '<span class="c-p c-1' + (g === "1" ? " gana" : "") + '" style="' + estiloTramo(r.l) + '">' + r.l + '</span>'
-      + '<span class="c-p c-x' + (g === "X" ? " gana" : "") + '" style="' + estiloTramo(r.x) + '">' + r.x + '</span>'
-      + '<span class="c-p c-2' + (g === "2" ? " gana" : "") + '" style="' + estiloTramo(r.v) + '">' + r.v + '</span>'
+    celdas = '<span class="c-p c-1' + marca("1") + '" style="' + estiloTramo(r.l) + '">' + r.l + '</span>'
+      + '<span class="c-p c-x' + marca("X") + '" style="' + estiloTramo(r.x) + '">' + r.x + '</span>'
+      + '<span class="c-p c-2' + marca("2") + '" style="' + estiloTramo(r.v) + '">' + r.v + '</span>'
       + '<span class="c-d">' + (r.l + r.x) + '</span><span class="c-d">' + (r.x + r.v) + '</span><span class="c-d">' + (r.l + r.v) + '</span>'
       + '<span class="c-xg">' + f2(p.xg_local) + "–" + f2(p.xg_visita) + '</span>'
       + '<span class="c-g">' + (conGoles(p) ? Math.round(p.prob_mas_25) : "—") + '</span>'
@@ -374,7 +377,8 @@ function htmlFila(p, ctx, abierto) {
       + '<span class="c-rep" aria-hidden="true">' + ancho(r.l) + ancho(r.x) + ancho(r.v) + '</span>';
     etiqueta = p.liga + ". " + cortoDe(p, "local") + " contra " + cortoDe(p, "visita") + ", " + p.hora + ". Local " + r.l
       + " %, empate " + r.x + " %, visitante " + r.v + " %."
-      + (conGoles(p) ? " Más de 2.5 goles " + Math.round(p.prob_mas_25) + " %, ambos marcan " + Math.round(p.prob_ambos) + " %." : "");
+      + (conGoles(p) ? " Más de 2.5 goles " + Math.round(p.prob_mas_25) + " %, ambos marcan " + Math.round(p.prob_ambos) + " %." : "")
+      + (mio ? " En tu porra elegiste " + mio + "." : "");
   }
 
   return '<button class="fila" data-id="' + esc(p.id) + '" aria-expanded="' + (abierto ? "true" : "false")
@@ -720,7 +724,7 @@ function bloquesDePartidos(partidos, ctx) {
     return {
       id: "p-" + p.id,
       huella: JSON.stringify(p) + "|" + JSON.stringify(ctx) + "|" + abierto + "|" + escudosRotos.size + "|" + versionFav
-        + "|" + versionAvisos + "|" + (abierto ? versionPorra : 0),
+        + "|" + versionAvisos + "|" + (abierto ? versionPorra : 0) + "|" + (porra.elegidos[p.id] || ""),
       clase: "partido" + (p.pendiente ? " pendiente" : ""),
       conDia: !!ctx.conDia,
       html: htmlFila(p, ctx, abierto),
@@ -1115,7 +1119,7 @@ function bloquesEquipo(todos, id) {
   const suyo = todos.find(p => p.local_id === id || p.visita_id === id);
   const nombre = d ? d.nombre : suyo ? (suyo.local_id === id ? suyo.local : suyo.visita) : null;
   const out = { titulo: nombre || "Equipo", sub: d && d.tabla ? (d.liga_nombre + " · " + d.tabla.pos + ".º") : "",
-    mezcla: true, bloques: [] };
+    mezcla: true, bloques: [], sinCabecera: true };
   // el título de la pestaña, el mismo que pone el Worker en /equipo/86 (textosEquipo)
   if (nombre) out.pestana = ((d && d.corto) || nombre) + ": próximos partidos y pronóstico · Pronósticos";
   if (!nombre) {
@@ -1127,7 +1131,8 @@ function bloquesEquipo(todos, id) {
   out.bloques.push({ id: "eq-ficha", clase: "detalle eq-ficha", html: ficha,
     huella: ficha + "|" + escudosRotos.size });
   const suyos = todos.filter(p => p.local === nombre || p.visita === nombre);
-  out.bloques.push(bloqueGrupo("eq-prox", "Próximos partidos", suyos.length, null, "dia"));
+  // sin quedarse fija: debajo va "Lo que dijo la web", que no es de sus columnas
+  out.bloques.push(bloqueGrupo("eq-prox", "Próximos partidos", suyos.length, null, "dia quieto"));
   if (suyos.length) out.bloques.push(...bloquesDePartidos(ordenar(suyos), { conDia: true }));
   else out.bloques.push({ id: "eq-sin", clase: "eq-sin", huella: "sin", html: '<p class="nota">No juega en los próximos días.</p>' });
   if (d || !e.doc || e.doc.estado !== "no_disponible") {
@@ -1217,6 +1222,7 @@ function bloquesResultados(semana) {
   if (!h || (!h.cargando && Date.now() - h.pedida > 10 * 60000)) { cargarResultados(clave); h = historial.get(clave); }
   const d = h.doc && h.doc.estado === "listo" ? h.doc : null;
   const out = { titulo: "Resultados", sub: d ? "semana " + nombreSemana(d.semana) : "", mezcla: true, bloques: [],
+    sinCabecera: true, sinOrden: true,
     pestana: d ? "Resultados de la semana " + nombreSemana(d.semana) + " · Pronósticos" : "Resultados · Pronósticos" };
   if (!d) {
     const doc = h.doc || {};
@@ -1233,7 +1239,7 @@ function bloquesResultados(semana) {
   d.partidos.forEach(p => { if (!dias.has(p.fecha)) dias.set(p.fecha, []); dias.get(p.fecha).push(p); });
   dias.forEach((lista, fecha) => {
     let aciertos = 0;
-    const filas = lista.map(p => { const f = htmlFilaResultado(p); if (f.acerto) aciertos++; return f.html; }).join("");
+    const filas = lista.map(p => { const f = htmlFilaResultado(p, null, true); if (f.acerto) aciertos++; return f.html; }).join("");
     const dia = DIAS_SEM[(new Date(fecha + "T00:00:00Z").getUTCDay() + 6) % 7] + " " + fechaLarga(fecha);
     const html = htmlBloque(dia, '<div class="claros" role="list">' + filas + '</div>',
       "acertó el favorito en " + aciertos + " de " + lista.length);
@@ -1322,7 +1328,8 @@ function filaPorra(ruta) {
 }
 
 function bloquesPorra(todos) {
-  const out = { titulo: "Tu porra", sub: "contra la web", mezcla: true, bloques: [], pestana: "Tu porra · Pronósticos" };
+  const out = { titulo: "Tu porra", sub: "contra la web", mezcla: true, bloques: [], pestana: "Tu porra · Pronósticos",
+    sinCabecera: true };
   if (!datos || datos.plataforma !== "cloudflare") {
     out.vacio = ["Solo en la versión de Cloudflare", "La porra necesita una cuenta, y las cuentas viven allí."];
     return out;
@@ -1346,18 +1353,22 @@ function bloquesPorra(todos) {
   out.bloques.push({ id: "porra-resumen", clase: "detalle eq-web", html: resumen, huella: resumen });
   const suyos = todos.filter(p => porra.elegidos[p.id]);
   out.bloques.push(bloqueGrupo("porra-prox", "Por jugar, ya elegidos", suyos.length, null, "dia"));
-  if (suyos.length) out.bloques.push(...bloquesDePartidos(ordenar(suyos), { conDia: true }));
-  else out.bloques.push({ id: "porra-sin", clase: "eq-sin", huella: "sin", html: '<p class="nota">Abre un partido de la semana'
+  if (suyos.length) {
+    out.bloques.push(...bloquesDePartidos(ordenar(suyos), { conDia: true }));
+    out.bloques.push({ id: "porra-leyenda", clase: "eq-sin", huella: "leyenda", html: '<p class="nota">El recuadro blanco es lo que'
+      + ' elegiste. Lo cambias abriendo el partido, hasta que empiece.</p>' });
+  } else out.bloques.push({ id: "porra-sin", clase: "eq-sin", huella: "sin", html: '<p class="nota">Abre un partido de la semana'
     + ' y elige 1, X o 2: saldrá aquí.</p>' });
   if ((porra.ultimos || []).length) {
     const filas = porra.ultimos.map(p => {
       const paso = p.gl > p.gv ? "1" : p.gl === p.gv ? "X" : "2", web = veredictoDe(p).signo;
-      return htmlFilaResultado(p, "Elegiste " + p.signo + (p.signo === paso ? ": acertaste" : ": fallaste")
-        + " · la web, " + web + (web === paso ? ": acertó" : ": falló")).html;
+      return htmlFilaResultado(p, ["Tú, " + p.signo + (p.signo === paso ? ": acertaste" : ": fallaste"),
+        "La web, " + web + (web === paso ? ": acertó" : ": falló")]).html;
     }).join("");
-    const jugados = htmlBloque("Ya jugados", '<div class="claros" role="list">' + filas + '</div>'
-      + '<p class="nota">La casilla es lo que la web le dio, antes del partido, a lo que pasó.</p>');
-    out.bloques.push({ id: "porra-jugados", clase: "detalle eq-web", html: jugados, huella: jugados });
+    const jugados = '<div class="claros" role="list">' + filas + '</div>'
+      + '<p class="nota">La casilla es lo que la web le dio, antes del partido, a lo que pasó.</p>';
+    out.bloques.push(bloqueGrupo("porra-jugados", "Ya jugados", porra.ultimos.length, null, "dia sin-cols"));
+    out.bloques.push({ id: "porra-jugados", clase: "detalle eq-web porra-jugados", html: jugados, huella: jugados });
   }
   return out;
 }
@@ -1652,7 +1663,9 @@ function htmlFiabilidad() {
 // Un partido terminado: lo que la web le dio a lo que pasó, el marcador y si acertó
 // el favorito (el tablero Resultados y la página de cada equipo).
 // En la porra (detalle), lo que eligió quien juega en vez del favorito de la web.
-function htmlFilaResultado(p, detalleAlt) {
+// detalleAlt: lo que va debajo del marcador en vez de "Acertó el favorito..." (una lista: una
+// línea cada uno); conHora: la hora en vez de la fecha (en una lista que ya va por días).
+function htmlFilaResultado(p, detalleAlt, conHora) {
   const r = reparto(p);
   const paso = p.gl > p.gv ? "1" : p.gl === p.gv ? "X" : "2";
   const n = paso === "1" ? r.l : paso === "2" ? r.v : r.x;
@@ -1661,15 +1674,16 @@ function htmlFilaResultado(p, detalleAlt) {
   const quien = fav === "1" ? cortoDe(p, "local") : fav === "2" ? cortoDe(p, "visita") : "el empate";
   const marcador = cortoDe(p, "local") + " " + p.gl + "–" + p.gv + " " + cortoDe(p, "visita");
   // el veredicto delante: si algo se corta, que sea el nombre
-  const detalle = detalleAlt || (acerto ? "Acertó" : "Falló") + " el favorito: " + quien;
-  const etiqueta = marcador + ". Le dio un " + n + " % a lo que pasó. " + detalle + ". " + p.liga + ", " + fechaCorta(p.fecha);
+  const lineas = detalleAlt ? [].concat(detalleAlt) : [(acerto ? "Acertó" : "Falló") + " el favorito: " + quien];
+  const cuando = conHora && p.hora ? p.hora : fechaCorta(p.fecha);
+  const etiqueta = marcador + ". Le dio un " + n + " % a lo que pasó. " + lineas.join(". ") + ". " + p.liga + ", " + cuando;
   // el marcador no se corta nunca: cada nombre se encoge por su cuenta
   return { acerto, html: '<div class="res" role="listitem" aria-label="' + esc(etiqueta) + '">'
     + '<span class="casilla" style="' + estiloTramo(n) + '" aria-hidden="true">' + n + '</span>'
     + '<span class="txt" aria-hidden="true"><span class="quien marcador"><span class="eq">' + esc(cortoDe(p, "local")) + '</span>'
     + '<b>' + p.gl + '–' + p.gv + '</b><span class="eq">' + esc(cortoDe(p, "visita")) + '</span></span>'
-    + '<span class="contra">' + esc(detalle) + '</span></span>'
-    + '<span class="cuando" aria-hidden="true">' + htmlInsignia(p.liga_codigo) + '<span>' + esc(fechaCorta(p.fecha)) + '</span></span></div>' };
+    + lineas.map(l => '<span class="contra">' + esc(l) + '</span>').join("") + '</span>'
+    + '<span class="cuando" aria-hidden="true">' + htmlInsignia(p.liga_codigo) + '<span>' + esc(cuando) + '</span></span></div>' };
 }
 
 function htmlResultados() {
@@ -2031,7 +2045,7 @@ function render() {
     const t = tablas.get(ruta.liga);
     const nombre = (t && t.doc && t.doc.nombre) || (suya ? suya.liga : ruta.liga);
     tituloEl.innerHTML = esc(nombre) + '<small>Tabla y proyección</small>';
-    centroEl.classList.remove("mezcla", "con-dia");
+    centroEl.classList.remove("mezcla", "con-dia", "sin-cab", "sin-orden");
     limpiarHueco.innerHTML = "";
     pintarTabla(ruta.liga);
     pintarLigasPane(todos, ruta);
@@ -2044,6 +2058,10 @@ function render() {
   if (c.pestana && document.title !== c.pestana) document.title = c.pestana;
   centroEl.classList.toggle("mezcla", !!c.mezcla);
   centroEl.classList.toggle("con-dia", c.bloques.some(b => b.conDia));
+  // vistas que empiezan con una tarjeta y no con la tabla: sin su cabecera de columnas (y, en
+  // el historial, sin el orden, que ahí no ordena nada)
+  centroEl.classList.toggle("sin-cab", !!c.sinCabecera);
+  centroEl.classList.toggle("sin-orden", !!c.sinOrden);
   limpiarHueco.innerHTML = busqueda ? '<button class="limpiar" id="limpiar">Limpiar búsqueda</button>' : "";
   if (c.vacio) {
     vista.innerHTML = '<div class="vacio"><h2>' + esc(c.vacio[0]) + '</h2><p>' + esc(c.vacio[1]) + '</p></div>'

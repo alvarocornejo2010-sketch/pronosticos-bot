@@ -321,6 +321,22 @@ for (const [ancho, alto] of ANCHOS) {
       for (const x of v) fallo(`${ancho}px, ${nombre}: accesibilidad ${x}`);
     }
     if (!(await p.textContent("#vista")).includes("Acertaste 1 de 1; la web, en esos mismos, 0.")) fallo(`${ancho}px: Tu porra no trae lo sumado`);
+    // lo elegido, con su recuadro en la fila; los jugados, con su propia cabecera y lo de cada uno en
+    // su línea; y sin la cabecera de columnas de la tabla, que aquí no va con nada
+    const vp = await p.evaluate((id) => ({
+      mia: [...document.querySelectorAll(`#vista .fila[data-id="${id}"] .c-p.mia`)].map((c) => c.classList.contains("c-x")),
+      etiqueta: document.querySelector(`#vista .fila[data-id="${id}"]`)?.getAttribute("aria-label") || "",
+      grupos: [...document.querySelectorAll("#vista .grupo .txt")].map((g) => g.textContent),
+      lineas: [...document.querySelectorAll("#vista .porra-jugados .res .contra")].map((c) => c.textContent),
+      cab: getComputedStyle(document.querySelector(".cab-tabla")).display,
+    }), elegido.id);
+    if (vp.mia.length !== 1 || !vp.mia[0] || !vp.etiqueta.includes("elegiste X")) fallo(`${ancho}px: Tu porra no marca lo elegido (${JSON.stringify(vp)})`);
+    if (vp.grupos.join("|") !== "Por jugar, ya elegidos|Ya jugados") fallo(`${ancho}px: Tu porra, cabeceras ${vp.grupos.join("|")}`);
+    const probs = [jugado.prob_local, jugado.prob_empate, jugado.prob_visita];
+    const web = "1X2"[probs.indexOf(Math.max(...probs))], paso = jugado.gl > jugado.gv ? "1" : jugado.gl === jugado.gv ? "X" : "2";
+    if (vp.lineas.join("|") !== `Tú, 2: ${paso === "2" ? "acertaste" : "fallaste"}|La web, ${web}: ${web === paso ? "acertó" : "falló"}`)
+      fallo(`${ancho}px: Tu porra, los jugados dicen ${vp.lineas.join("|")}`);
+    if (vp.cab !== "none") fallo(`${ancho}px: Tu porra lleva la cabecera de la tabla`);
     await p.unroute("**/api/cuenta");
     await p.unroute("**/api/cuenta/porra");
     await p.evaluate(() => localStorage.setItem("pronosticos.sesion", "0"));
