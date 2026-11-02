@@ -31,7 +31,7 @@ db = sqlite3.connect(base[0])
 assert pedir("/api/cuenta")[0] == 200   # que existan las tablas de las cuentas (y la de la porra)
 ahora = int(time.time() * 1000)
 token = base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
-cuenta = "porra-de-prueba"
+cuenta = os.urandom(16).hex()   # como las de verdad (idPublico lee el hexadecimal)
 # cuentas.py deja gastado el tope de escrituras de las cuentas del día (lo prueba): otro día
 db.execute("DELETE FROM visitas WHERE tipo = 'escrituras_cuentas'")
 db.execute("INSERT INTO cuentas (id, creada, vista) VALUES (?, ?, ?)", (cuenta, ahora, ahora))
