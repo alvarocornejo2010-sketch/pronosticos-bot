@@ -690,6 +690,18 @@
                 background: var(--panel-alto); border: 1px solid var(--linea); border-radius: var(--r-tarjeta); }
   .det-avisos p { flex: 1 1 14rem; margin: 0; color: var(--tinta-2); font-size: var(--t-14); }
   .det-avisos .error { flex-basis: 100%; }
+  /* la porra contra el modelo: los tres botones en el detalle de un partido por jugar */
+  .det-porra { display: grid; gap: 10px; margin: 14px 0 0; padding: 12px 14px;
+               background: var(--panel-alto); border: 1px solid var(--linea); border-radius: var(--r-tarjeta); }
+  .det-porra p { margin: 0; color: var(--tinta-2); font-size: var(--t-14); line-height: 1.45; }
+  .det-porra p b { color: var(--tinta); }
+  .det-porra > .accion { justify-self: start; }
+  .porra-botones { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .porra-botones .accion { justify-content: center; min-width: 0; padding: 0 10px; }
+  .porra-botones .accion b { flex: none; font-family: var(--f-disp); font-size: var(--t-16); font-weight: 800; }
+  .porra-botones .accion span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .porra-ir a { color: var(--tinta); font-weight: 600; }
+  .porra-ins { font-family: var(--f-disp); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.02em; }
   /* la página de cada equipo (#/equipo/86): su ficha arriba, sus próximos partidos y lo
      que dijo la web. Los nombres de equipo enlazan con ella desde el detalle y la tabla. */
   .det-eq a.n, .tabla-liga a.nom { color: inherit; text-decoration: underline; text-decoration-color: var(--linea-viva);

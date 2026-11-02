@@ -125,6 +125,14 @@ export const ESQUEMA = [
      equipo TEXT NOT NULL,
      creado INTEGER NOT NULL,
      PRIMARY KEY (cuenta, equipo)) WITHOUT ROWID`,
+  // La porra contra el modelo (porra.js): lo que eligió cada cuenta (1, X o 2) en cada
+  // partido, y cuándo.
+  `CREATE TABLE IF NOT EXISTS porra (
+     cuenta  TEXT NOT NULL,
+     partido INTEGER NOT NULL,
+     signo   TEXT NOT NULL,
+     cuando  INTEGER NOT NULL,
+     PRIMARY KEY (cuenta, partido)) WITHOUT ROWID`,
   // Los avisos de Mis equipos (avisos.js): cada navegador suscrito (su dirección en el
   // servicio de avisos, sus dos claves y los equipos que sigue, en JSON), qué avisos de
   // cada partido ya se pusieron en cola (para no repetirlos) y la cola de lo que falta

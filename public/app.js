@@ -409,7 +409,7 @@ function htmlDetalle(p) {
       + htmlBloque("Ambos marcan", htmlAmbosMarcan(p))
       + ((p.marcadores || []).length ? htmlBloque("Marcadores más probables", htmlMarcadores(p)) : "")
     : "";
-  return '<div class="detalle">' + htmlCabeceraDetalle(p) + htmlVeredicto(p) + avisos + htmlInvitacionAvisos(p)
+  return '<div class="detalle">' + htmlCabeceraDetalle(p) + htmlVeredicto(p) + avisos + htmlPorra(p) + htmlInvitacionAvisos(p)
     + '<div class="det-rejilla' + (goles ? "" : " una") + '"><div class="det-col">' + resultado + '</div>'
     + (goles ? '<div class="det-col">' + goles + '</div>' : "") + '</div>'
     + htmlComoSeCalculo(p, m) + '</div>';
@@ -751,6 +751,7 @@ function bloqueGrupo(clave, texto, cuenta, codLiga, clase) {
 //   #/favoritos           los partidos de los equipos que sigues
 //   #/equipo/86           la página de un equipo (sección EQUIPO)
 //   #/resultados[/2026-10-26]  lo que dijo la web de cada partido de una semana (sección RESULTADOS)
+//   #/porra               lo que eligió quien tiene cuenta, contra la web (sección PORRA)
 // ==========================================
 // Un enlace mal escrito (#/liga/%E0) no tiene que tumbar la página.
 function decodificar(s) { try { return decodeURIComponent(s); } catch (e) { return s; } }
@@ -762,6 +763,7 @@ function leerRuta() {
   if (t[0] === "semana") return { vista: "semana" };
   if (t[0] === "favoritos") return { vista: "favoritos" };
   if (t[0] === "equipo" && /^\d{1,9}$/.test(t[1] || "")) return { vista: "equipo", id: Number(t[1]) };
+  if (t[0] === "porra") return { vista: "porra" };
   if (t[0] === "resultados") return { vista: "resultados", semana: /^\d{4}-\d{2}-\d{2}$/.test(t[1] || "") ? t[1] : null };
   return { vista: "inicio" };
 }
@@ -1245,6 +1247,118 @@ function bloquesResultados(semana) {
 }
 
 // ==========================================
+// PORRA (#/porra y el bloque "Tu pronóstico" del detalle)
+// La porra contra el modelo (worker/porra.js): con la cuenta abierta, quien quiera elige
+// 1, X o 2 en cada partido antes de que empiece (y lo cambia hasta entonces), y al
+// terminar se ve en cuántos acertó frente a la web en esos mismos partidos. Sin dinero ni
+// premios, y sin clasificación: cada uno ve solo lo suyo. Solo en Cloudflare.
+// ==========================================
+let porra = { elegidos: {}, resumen: null, ultimos: [], pedida: 0 };
+const NOMBRE_SIGNO = { "1": "local", "X": "empate", "2": "visitante" };
+
+async function cargarPorra() {
+  if (!cuenta || porra.cargando) return;
+  porra.cargando = true;
+  porra.pedida = Date.now();
+  try {
+    const d = await pedirCuenta("/porra");
+    porra = { ...d, pedida: porra.pedida };
+  } catch (e) { porra.error = "No se pudo cargar tu porra. Se reintenta en un rato."; }
+  porra.cargando = false;
+  if (datos) render();
+}
+
+// Elegir (o quitar, si ya era ese) lo de un partido. Se ve al momento; si el servidor no
+// lo acepta, vuelve atrás y lo dice.
+async function elegirPorra(id, signo) {
+  const antes = porra.elegidos[id] || null;
+  const nuevo = antes === signo ? null : signo;
+  if (nuevo) porra.elegidos[id] = nuevo; else delete porra.elegidos[id];
+  render();
+  try { await pedirCuenta("/porra", { id: Number(id), signo: nuevo }); }
+  catch (e) {
+    if (antes) porra.elegidos[id] = antes; else delete porra.elegidos[id];
+    if (e.estado !== 401) avisar("No se guardó tu pronóstico: " + e.message);
+    render();
+  }
+}
+
+// "Acertaste 7 de 12; la web, en esos mismos, 6."
+function frasePorra(r) {
+  return "Acertaste " + r.aciertos + " de " + r.jugados + "; la web, en esos mismos, " + r.web + ".";
+}
+
+// En el detalle de un partido por jugar: los tres botones con la cuenta abierta, o la
+// invitación a jugar sin ella.
+function htmlPorra(p) {
+  if (!datos || datos.plataforma !== "cloudflare" || p.pendiente || Date.parse(p.utcDate) <= Date.now()) return "";
+  if (!cuenta) {
+    return '<div class="det-porra"><p><b>Juega contra la web.</b> Elige 1, X o 2 antes de cada partido y mira si aciertas'
+      + ' más que ella. Gratis, sin dinero ni premios.</p><button class="accion" data-abrir-cuenta>Entrar o crear cuenta</button></div>';
+  }
+  const mio = porra.elegidos[p.id] || null;
+  const boton = (signo, texto) => '<button class="accion" data-porra="' + p.id + '" data-signo="'
+    + signo + '" aria-pressed="' + (mio === signo) + '"><b>' + signo + '</b><span>' + esc(texto) + '</span></button>';
+  const r = porra.resumen;
+  return '<div class="det-porra"><p><b>Tu pronóstico.</b> ' + (mio ? "Elegiste " + mio + " (" + NOMBRE_SIGNO[mio]
+    + "): puedes cambiarlo hasta que empiece." : "Elige antes de que empiece; la web dice lo de arriba.") + '</p>'
+    + '<div class="porra-botones" role="group" aria-label="Tu pronóstico para este partido">'
+    + boton("1", cortoDe(p, "local")) + boton("X", "Empate") + boton("2", cortoDe(p, "visita")) + '</div>'
+    + '<p class="porra-ir"><a href="#/porra" data-hash="#/porra">Tu porra</a>' + (r && r.jugados ? ": " + esc(frasePorra(r)) : "") + '</p></div>';
+}
+
+// La fila de Tu porra en el tablero de Ligas, con la cuenta abierta.
+function filaPorra(ruta) {
+  if (!cuenta || !datos || datos.plataforma !== "cloudflare") return "";
+  const r = porra.resumen, n = Object.keys(porra.elegidos).length;
+  return '<button class="liga-fila" data-hash="#/porra" aria-current="' + (ruta.vista === "porra") + '">'
+    + '<span class="insignia grande todas porra-ins" aria-hidden="true">1X2</span><span class="nom">Tu porra</span>'
+    + '<span class="stats">' + (r && r.jugados ? r.aciertos + " de " + r.jugados + " · la web, " + r.web : "Contra la web") + '</span>'
+    + '<span class="n">' + n + '</span></button>';
+}
+
+function bloquesPorra(todos) {
+  const out = { titulo: "Tu porra", sub: "contra la web", mezcla: true, bloques: [], pestana: "Tu porra · Pronósticos" };
+  if (!datos || datos.plataforma !== "cloudflare") {
+    out.vacio = ["Solo en la versión de Cloudflare", "La porra necesita una cuenta, y las cuentas viven allí."];
+    return out;
+  }
+  if (!cuenta) {
+    out.vacio = ["Juega contra la web", "Con una cuenta (gratis), elige 1, X o 2 antes de cada partido y mira si aciertas"
+      + " más que ella. Sin dinero ni premios: solo tú ves lo tuyo."];
+    out.extra = [{ clase: "avisos-tarjeta porra-tarjeta", html: '<div><div class="botones"><button class="accion principal"'
+      + ' data-abrir-cuenta>Entrar o crear cuenta</button></div></div>' }];
+    return out;
+  }
+  if (!porra.cargando && Date.now() - porra.pedida > 10 * 60000) cargarPorra();
+  const r = porra.resumen;
+  const resumen = htmlBloque("Tú contra la web", r && r.jugados
+    ? '<p class="sem-cifra"><span class="num">' + porc(r.aciertos, r.jugados) + ' %</span><span>' + esc(frasePorra(r))
+      + ' La web acertó el ' + porc(r.web, r.jugados) + ' %.</span></p>'
+    : '<p class="nota">' + (porra.error ? esc(porra.error) : porra.resumen ? "Todavía no ha terminado ningún partido que"
+      + " elegiste. Abre uno de la semana y elige 1, X o 2." : "Cargando tu porra…") + '</p>', r && r.jugados ? plural(r.jugados, "partido", "partidos") : "")
+    + '<p class="nota">La web juega con su favorito: el resultado al que daba más, antes de empezar. Solo cuentan los partidos'
+    + ' que terminaron con su pronóstico publicado.</p>';
+  out.bloques.push({ id: "porra-resumen", clase: "detalle eq-web", html: resumen, huella: resumen });
+  const suyos = todos.filter(p => porra.elegidos[p.id]);
+  out.bloques.push(bloqueGrupo("porra-prox", "Por jugar, ya elegidos", suyos.length, null, "dia"));
+  if (suyos.length) out.bloques.push(...bloquesDePartidos(ordenar(suyos), { conDia: true }));
+  else out.bloques.push({ id: "porra-sin", clase: "eq-sin", huella: "sin", html: '<p class="nota">Abre un partido de la semana'
+    + ' y elige 1, X o 2: saldrá aquí.</p>' });
+  if ((porra.ultimos || []).length) {
+    const filas = porra.ultimos.map(p => {
+      const paso = p.gl > p.gv ? "1" : p.gl === p.gv ? "X" : "2", web = veredictoDe(p).signo;
+      return htmlFilaResultado(p, "Elegiste " + p.signo + (p.signo === paso ? ": acertaste" : ": fallaste")
+        + " · la web, " + web + (web === paso ? ": acertó" : ": falló")).html;
+    }).join("");
+    const jugados = htmlBloque("Ya jugados", '<div class="claros" role="list">' + filas + '</div>'
+      + '<p class="nota">La casilla es lo que la web le dio, antes del partido, a lo que pasó.</p>');
+    out.bloques.push({ id: "porra-jugados", clase: "detalle eq-web", html: jugados, huella: jugados });
+  }
+  return out;
+}
+
+// ==========================================
 // CONTENIDO DEL CENTRO
 // ==========================================
 function nombreDia(d) {
@@ -1266,6 +1380,7 @@ function bloquesCentro(todos, ruta) {
 
   if (ruta.vista === "equipo") return bloquesEquipo(todos, ruta.id);
   if (ruta.vista === "resultados") return bloquesResultados(ruta.semana);
+  if (ruta.vista === "porra") return bloquesPorra(todos);
 
   if (ruta.vista === "favoritos") {
     const suyos = todos.filter(esFavorito);
@@ -1532,7 +1647,8 @@ function htmlFiabilidad() {
  *  antes de empezar, a lo que pasó, y si acertó el favorito. */
 // Un partido terminado: lo que la web le dio a lo que pasó, el marcador y si acertó
 // el favorito (el tablero Resultados y la página de cada equipo).
-function htmlFilaResultado(p) {
+// En la porra (detalle), lo que eligió quien juega en vez del favorito de la web.
+function htmlFilaResultado(p, detalleAlt) {
   const r = reparto(p);
   const paso = p.gl > p.gv ? "1" : p.gl === p.gv ? "X" : "2";
   const n = paso === "1" ? r.l : paso === "2" ? r.v : r.x;
@@ -1541,7 +1657,7 @@ function htmlFilaResultado(p) {
   const quien = fav === "1" ? cortoDe(p, "local") : fav === "2" ? cortoDe(p, "visita") : "el empate";
   const marcador = cortoDe(p, "local") + " " + p.gl + "–" + p.gv + " " + cortoDe(p, "visita");
   // el veredicto delante: si algo se corta, que sea el nombre
-  const detalle = (acerto ? "Acertó" : "Falló") + " el favorito: " + quien;
+  const detalle = detalleAlt || (acerto ? "Acertó" : "Falló") + " el favorito: " + quien;
   const etiqueta = marcador + ". Le dio un " + n + " % a lo que pasó. " + detalle + ". " + p.liga + ", " + fechaCorta(p.fecha);
   // el marcador no se corta nunca: cada nombre se encoge por su cuenta
   return { acerto, html: '<div class="res" role="listitem" aria-label="' + esc(etiqueta) + '">'
@@ -1663,7 +1779,7 @@ function pintarLigasPane(todos, ruta) {
     + '<span class="insignia grande todas">' + ICONO_TODAS + '</span><span class="nom">Todas las ligas</span>'
     + '<span class="stats">' + ligas.length + (ligas.length === 1 ? " competición" : " competiciones") + ' esta semana</span>'
     + '<span class="n">' + todos.length + '</span></button>'
-    + filaFav + filas + '</div></section>' + htmlFiabilidad()
+    + filaFav + filaPorra(ruta) + filas + '</div></section>' + htmlFiabilidad()
     + '<p class="pie-izq">Datos de football-data.org · <a href="/privacidad">Privacidad</a></p>';
   if (paneLigas.dataset.huella === html) return;
   paneLigas.dataset.huella = html;
@@ -2116,6 +2232,9 @@ document.addEventListener("click", (e) => {
   if (img) { imagenPartido(img.dataset.imagen, img); return; }
   const av = t.closest("[data-avisos]");
   if (av) { accionAvisos(av.dataset.avisos); return; }
+  const qu = t.closest("[data-porra]");
+  if (qu) { elegirPorra(qu.dataset.porra, qu.dataset.signo); return; }
+  if (t.closest("[data-abrir-cuenta]")) { abrirCuenta(); return; }
   const cal = t.closest("[data-calendario]");
   if (cal) { accionCalendario(cal.dataset.calendario); return; }
 
@@ -2372,6 +2491,7 @@ function ponerCuenta(c) {
     if (datos) render();
   }
   try { localStorage.setItem(CLAVE_SESION, c ? "1" : "0"); } catch (e) { /* sin memoria */ }
+  if (c) cargarPorra(); else porra = { elegidos: {}, resumen: null, ultimos: [], pedida: 0 };
   botonCuenta.toggleAttribute("data-con", !!c);
   botonCuenta.querySelector(".txt").textContent = c ? "Mi cuenta" : "Entrar";
   botonCuenta.setAttribute("aria-label", c ? "Mi cuenta" : "Entrar: guarda tus equipos");
