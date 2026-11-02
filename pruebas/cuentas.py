@@ -351,7 +351,7 @@ db.close()
 
 # el panel de visitas las cuenta (creadas: también las borradas; la de la primera versión no pasó por crear)
 v = json.load(urllib.request.urlopen(W + "/api/visitas?token=secreto_de_prueba_123"))
-assert v["cuentas"] == {"total": 3, "creadas": 4, "activas": 3, "con_equipos": 1, "con_usuario": 3, "con_correo": 2,
+assert v["cuentas"] == {"total": 3, "creadas": 4, "activas": 3, "con_equipos": 1, "con_porra": 0, "porra_semana": 0, "con_usuario": 3, "con_correo": 2,
                         "intentos": 120}, v["cuentas"]
 print("panel de visitas: 4 creadas esta semana, 3 quedan, todas con usuario y 2 con correo; 120 intentos de entrar")
 print("cuentas: OK")
