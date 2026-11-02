@@ -185,7 +185,7 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
 - Rutas por hash: `#/`, `#/semana`, `#/dia/2026-10-10`, `#/liga/PD`,
   `#/liga/PD/2026-10-10`, `#/liga/PD/tabla` (ver "Tabla y proyección"), `#/favoritos`,
   `#/equipo/86` (ver "Página de cada equipo"), `#/resultados` y `#/resultados/2026-10-26`
-  (ver "Historial de aciertos"). `#/` es toda la semana en escritorio y
+  (ver "Historial de aciertos"), `#/porra` (ver "Porra contra el modelo"). `#/` es toda la semana en escritorio y
   el primer día en móvil. Y cuatro sin hash, para compartir y para los buscadores:
   `/partido/123` (ver "Compartir y favoritos"), `/equipo/86`, que pasa en el acto a
   `/#/equipo/86`, `/liga/PD`, que pasa a `/#/liga/PD` (ver "Buscadores"), y `/resultados`
@@ -240,8 +240,8 @@ web con la tarjeta de ese partido para compartir (en Render, la web sin tarjeta;
 ver "Compartir y favoritos"), y `/robots.txt` y `/sitemap.xml` para los buscadores
 (ver "Instalable y buscadores"). Y las cuentas: `/api/cuenta` (la de la sesión;
 en Render, `disponible: false`) y, solo en Cloudflare, `/api/cuenta/crear`,
-`/entrar`, `/equipo`, `/contrasena`, `/correo`, `/usuario`, `/salir`, `/borrar` (POST) y
-`/datos` (ver "Cuentas"). Y `/api/tabla/PD`, la tabla de una liga y lo que le falta
+`/entrar`, `/equipo`, `/contrasena`, `/correo`, `/usuario`, `/salir`, `/borrar` (POST),
+`/datos` (ver "Cuentas") y `/porra` (GET y POST, ver "Porra contra el modelo"). Y `/api/tabla/PD`, la tabla de una liga y lo que le falta
 de temporada (en Render, `no_disponible`; ver "Tabla y proyección"). Y los avisos de
 Mis equipos: `/api/avisos` (la clave pública VAPID; en Render, `disponible: false`) y,
 solo en Cloudflare, `/api/avisos/alta` y `/api/avisos/baja` (POST; ver "Avisos de Mis
@@ -297,8 +297,8 @@ incluidos), `actualizacion.js` (la pasada), `validacion.js`, `metricas.js`
 equipos), `push.js` (su cifrado y su firma, Web Push), `equipos.js` (la página de cada
 equipo), `calendario.js` (el calendario `.ics` de Mis equipos), `limpieza.js` (la limpieza
 del día: sesiones y calendarios caducados), `ligas.js` (la página de cada liga), `indexnow.js`
-(el aviso a los buscadores de las páginas nuevas), `resultados.js` (el historial de aciertos) e
-`index.js` (rutas).
+(el aviso a los buscadores de las páginas nuevas), `resultados.js` (el historial de aciertos),
+`porra.js` (la porra contra el modelo) e `index.js` (rutas).
 
 **El ritmo lo marca la CPU.** El plan gratis da 10 ms por ejecución y leer el
 JSON de la API cuesta ~7 ms por MB, así que en vez de una pasada de 40
@@ -347,8 +347,8 @@ de claves, y `avisos_resumen`, cuándo volver a mirar, `limpieza`, cuándo se hi
 del día y qué borró, e `indexnow`, cuándo se avisó a los buscadores y qué) y
 `candado` (que dos pasadas no se pisen, hora de la última petición, pasadas
 muertas), `visitas` (los contadores de visitas por día, ver "Visitas"), las de
-las cuentas: `cuentas`, `usuarios`, `correos`, `accesos`, `sesiones` y `favoritos` (ver
-"Cuentas"), y las de los avisos: `suscripciones`, `avisos` y `envios` (ver "Avisos de
+las cuentas: `cuentas`, `usuarios`, `correos`, `accesos`, `sesiones`, `favoritos` y `porra` (ver
+"Cuentas" y "Porra contra el modelo"), y las de los avisos: `suscripciones`, `avisos` y `envios` (ver "Avisos de
 Mis equipos"), y `calendarios` (ver "Calendario de Mis equipos").
 
 **Si una pasada muere** (lo más probable, por CPU) deja el candado puesto; la
@@ -672,6 +672,37 @@ tablero ("Todos los resultados, semana a semana") y se comparte con `/resultados
   Una semana sin resultados da la tarjeta de siempre, con `noindex`.
 - **En Render** no existe (no hay registro): `/api/resultados` responde `no_disponible` y la web
   lo dice.
+
+## Porra contra el modelo (nov 2026)
+
+Un juego gratis, sin dinero ni premios: con la cuenta abierta, cada uno elige 1, X o 2 en los
+partidos que aún no han empezado y luego ve en cuántos acertó frente a la web en esos mismos
+partidos. Sin clasificación pública: cada uno ve solo lo suyo (así no hay que enseñar usuarios ni
+cambiar la política más allá de decir que se guarda lo elegido).
+
+- **En la web** (sección PORRA de `app.js`): en el detalle de cada partido por jugar, "Tu
+  pronóstico", tres botones (1 con el local, X empate, 2 con el visitante); tocar el elegido lo
+  quita. Se ve en el acto y, si el servidor no lo acepta, vuelve atrás y lo dice. Sin cuenta,
+  una invitación a entrar o crearla. `#/porra` ("Tu porra", también en el tablero de Ligas con la
+  cuenta abierta): lo sumado ("Acertaste 7 de 12; la web, en esos mismos, 6"), los partidos por
+  jugar ya elegidos (las filas de siempre) y los ya jugados, con la fila del tablero Resultados
+  (`htmlFilaResultado`, con lo que eligió y lo que dijo la web). Se pide al entrar y cada 10
+  minutos con la vista abierta.
+- **En el Worker** (`worker/porra.js`, rutas en `cuentas.js`): `GET /api/cuenta/porra` da lo
+  elegido en los partidos por jugar, lo sumado y los 30 últimos jugados; `POST` con `{id, signo}`
+  (null lo quita) guarda o cambia una fila de la tabla `porra` (cuenta, partido, signo, cuándo).
+  Solo se puede elegir en un partido que aún está en la ventana, no ha empezado y tiene el
+  pronóstico de la web publicado (si no, no hay con qué comparar); cada elección cuenta en el
+  tope de escrituras de las cuentas (`MAX_ESCRITURAS_CUENTAS_DIA`). La web juega con su favorito
+  (`favoritoDe`: el mayor, y si empatan, el primero), y solo cuentan los partidos con el
+  pronóstico publicado antes de empezar (`resultados.contado`), los del registro en vivo. Lo
+  sumado se cuenta al pedirlo, con lo que ya hay en `resultados`: cero peticiones a la API y
+  nada en el cron.
+- **Datos:** la descarga de "Mi cuenta" lleva lo elegido (`porra`) y borrar la cuenta lo borra.
+  La política de privacidad lo dice. En el panel de visitas, cuántas cuentas juegan y cuántos
+  partidos se eligieron en la semana.
+- **Lo que queda:** una clasificación entre jugadores (con un apodo aparte del usuario, que hoy
+  no se enseña a nadie) si hay gente que juega.
 
 ## Avisos de Mis equipos (oct 2026)
 
@@ -1679,15 +1710,14 @@ Environment).
   llegan desde buscadores (origen Google u "Otros buscadores", y las llegadas por enlace) y en
   Search Console con qué búsquedas. Ideas ya habladas para después: un dominio propio (más fácil
   de recordar y la regla de límite de peticiones; ojo, `canonical`, `og:url` y `og:image` de
-  `index.html` llevan workers.dev) y, si hay gente que vuelve, una porra gratis
-  contra el modelo con las cuentas que ya hay (sin dinero ni premios). Hecho en
+  `index.html` llevan workers.dev). Hecho en
   oct 2026: el texto ya escrito de cada página, la página de cada liga e IndexNow (ver
   "Buscadores"), el enlace con vista previa, los favoritos, el resumen de la semana,
   instalarla como app, el sitemap, la marca de las ligas de fiabilidad baja, las
   cuentas (ver "Cuentas"; lo que les falta, en el punto siguiente), los avisos de
   Mis equipos (ver "Avisos de Mis equipos"), la página de cada equipo (ver "Página
-  de cada equipo"), el calendario de Mis equipos (ver "Calendario de Mis equipos") y el historial
-  de aciertos (ver "Historial de aciertos").
+  de cada equipo"), el calendario de Mis equipos (ver "Calendario de Mis equipos"), el historial
+  de aciertos (ver "Historial de aciertos") y la porra (ver "Porra contra el modelo").
 
 - **Cuentas, la versión siguiente** (ver "Cuentas"): que alguien que sepa de leyes
   revise `/privacidad` (hecha en oct 2026, ver "Privacidad"): si hace falta inscribir el
@@ -1771,7 +1801,10 @@ Environment).
     versión que se pasa a usuario, el correo (crear, entrar, cambiar y quitar),
     Turnstile y los tres topes (`cuentas.py`, con `MAX_CUENTAS_DIA=4`,
     `MAX_INTENTOS_DIA=120`, `MAX_ESCRITURAS_CUENTAS_DIA=600` y el Turnstile de mentira
-    de `api_falsa.py`, `/turnstile/v0/siteverify`, por `TURNSTILE_VERIFICAR`). Que los
+    de `api_falsa.py`, `/turnstile/v0/siteverify`, por `TURNSTILE_VERIFICAR`). Que la porra
+    guarda, cambia y quita lo elegido, no deja elegir en un partido empezado o sin pronóstico, ni
+    sin sesión o desde otra web, suma bien con un resultado (también la web), no cuenta lo
+    publicado tarde, va en la descarga de datos y se borra con la cuenta (`porra.py`). Que los
     avisos de Mis equipos llegan (`avisos.mjs`, con el servicio de avisos de mentira
     de `api_falsa.py`, `/push/<id>`, y `AVISO_ANTES_MIN` de dos semanas para que toquen
     todos los de la semana): cuatro navegadores de mentira se suscriben, cada aviso se
@@ -1812,7 +1845,8 @@ Environment).
     invitación de los avisos (y activarlos y quitarlos contra el Worker, con el
     servicio de avisos del navegador de mentira), crear el calendario y sus enlaces (y quitarlo), la página de
     privacidad en los 7 anchos (con axe en 390 y 1440), Fiabilidad medida → En vivo con tres
-    versiones del modelo (con un registro de mentira; axe en 390 y 1440), una casilla de cada tramo
+    versiones del modelo (con un registro de mentira; axe en 390 y 1440), la porra con una cuenta de
+    mentira (elegir en el detalle y Tu porra, con axe en 390 y 1440), una casilla de cada tramo
     de la rampa (el contraste, con axe en 390 y 1440), los nombres del detalle enlazando con
     la página de su equipo, el texto sin JavaScript de la portada, un partido, un equipo y una
     liga en los 7 anchos (con axe en 390 y 1440) y que la web lo cambia por lo suyo, y axe-core sin nada en la semana,
