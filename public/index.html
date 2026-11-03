@@ -709,6 +709,22 @@
   .porra-botones .accion span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .porra-ir a { color: var(--tinta); font-weight: 600; }
   .porra-ins { font-family: var(--f-disp); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.02em; }
+  /* la clasificación de la porra y el apodo con que se sale en ella */
+  .porra-invita .avisos-tarjeta { grid-template-columns: minmax(0, 1fr); }
+  .clasif-periodos { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+  .clasif .eq { max-width: none; overflow: hidden; text-overflow: ellipsis; }
+  .clasif tr.mia th, .clasif tr.mia td { background: var(--panel-alto); }
+  .clasif .tu { color: var(--tinta-3); font-weight: 400; }
+  .clasif td.n b { font-family: var(--f-disp); font-size: var(--t-16); font-weight: 800; }
+  form.apodo { display: grid; gap: 10px; max-width: 30rem; }
+  form.apodo .campo { display: flex; flex-direction: column; gap: 6px; }
+  form.apodo .campo span { font-size: var(--t-14); font-weight: 600; color: var(--tinta); }
+  form.apodo input { width: 100%; min-width: 0; height: 2.75rem; padding: 0 12px; border: 1px solid var(--linea-viva);
+    border-radius: var(--r-control); background: var(--fondo); color: var(--tinta); font: inherit; font-size: var(--t-16); }
+  form.apodo input:focus { outline: 2px solid var(--tinta-2); outline-offset: 1px; }
+  form.apodo .botones { display: flex; flex-wrap: wrap; gap: 8px; }
+  form.apodo small { font-size: var(--t-13); line-height: 1.45; color: var(--tinta-3); }
+  form.apodo .error { margin: 0; color: var(--critico); font-weight: 600; }
   /* la página de cada equipo (#/equipo/86): su ficha arriba, sus próximos partidos y lo
      que dijo la web. Los nombres de equipo enlazan con ella desde el detalle y la tabla. */
   .det-eq a.n, .tabla-liga a.nom { color: inherit; text-decoration: underline; text-decoration-color: var(--linea-viva);

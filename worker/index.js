@@ -26,6 +26,8 @@
 //   /api/resultados[?semana=2026-10-26]  lo que dijo la web de cada partido de una semana,
 //                     contra lo que pasó; /resultados[/2026-10-26], la web con su tarjeta
 //                     y su texto (resultados.js)
+//   /api/porra/clasificacion?periodo=semana|pasada|siempre  la clasificación de la porra:
+//                     quien quiere sale con su apodo (porra.js)
 //
 // El trabajo de verdad lo hace el cron (planificador.js), una vez por minuto.
 
@@ -46,6 +48,7 @@ import { apiEquipo, paginaEquipo } from "./equipos.js";
 import { RUTAS_CALENDARIO, atenderCalendario, servirCalendario } from "./calendario.js";
 import { paginaLiga } from "./ligas.js";
 import { apiResultados, paginaResultados } from "./resultados.js";
+import { apiClasificacion } from "./porra.js";
 
 // Las mismas cabeceras que pone app.py a sus respuestas JSON (la web y app.js
 // llevan las suyas en public/_headers). no-store: el JSON cambia cada pocos
@@ -209,6 +212,8 @@ export default {
         const d = await apiResultados(almacen, env, url.searchParams.get("semana"));
         return d.estado === "no_encontrado" ? json(d, 404) : condicional(request, JSON.stringify(d));
       },
+      "/api/porra/clasificacion": async (almacen) =>
+        condicional(request, JSON.stringify(await apiClasificacion(almacen, env, url.searchParams.get("periodo")))),
     };
     for (const r of Object.keys(RUTAS_CUENTA)) rutas[r] = (almacen) => new Cuentas(request, env, almacen, CABECERAS).atender();
     for (const r of Object.keys(RUTAS_AVISOS)) rutas[r] = (almacen) => atenderAvisos(request, env, almacen, CABECERAS);

@@ -1468,6 +1468,14 @@ def api_resultados():
                     "nota": "El historial de aciertos funciona en la versión de Cloudflare."})
 
 
+@app.route("/api/porra/clasificacion")
+def api_clasificacion():
+    """La clasificación de la porra solo existe en Cloudflare: la porra va con las
+    cuentas, que viven en D1."""
+    return jsonify({"estado": "no_disponible",
+                    "nota": "La porra funciona en la versión de Cloudflare."})
+
+
 @app.route("/api/equipo/<int:id_equipo>")
 def api_equipo(id_equipo):
     """La página de cada equipo (su tabla, su fuerza y lo que dijo la web de sus

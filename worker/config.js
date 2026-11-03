@@ -121,6 +121,9 @@ export function ajustes(env = {}) {
     // intentos de entrar (o de cambiar la contraseña) en un día, aparte: así los
     // fallos no gastan lo de las estrellas. Cada uno, unas dos escrituras.
     maxIntentosDia: num("MAX_INTENTOS_DIA", 3000),
+    // minutos que vale la clasificación de la porra ya contada (porra.js): pedirla es leer
+    // una fila; contarla, todas las elecciones del periodo de los que salen en ella
+    minutosClasificacion: num("MINUTOS_CLASIFICACION", 10),
     // Cloudflare Turnstile al crear una cuenta (cuentas.js): solo con las dos claves.
     // La del sitio es pública (wrangler.jsonc); la secreta va en el panel.
     turnstileSitio: env.TURNSTILE_SITEKEY || "",

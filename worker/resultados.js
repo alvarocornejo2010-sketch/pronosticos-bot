@@ -37,7 +37,7 @@ const diaMes = (fecha) => `${+fecha.slice(8, 10)} ${MESES[+fecha.slice(5, 7) - 1
 export const nombreSemana = (lunes) => `del ${diaMes(lunes)} al ${diaMes(sumarDias(lunes, 6))}`;
 
 // El instante (ms UTC) en que empieza un día en la hora local.
-function inicioDia(reloj, fecha) {
+export function inicioDia(reloj, fecha) {
   const ms = Date.parse(fecha + "T00:00:00Z");
   return ms - reloj.desfase(ms) * 60000;
 }
