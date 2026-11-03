@@ -86,7 +86,11 @@ st, cab, cuerpo = pedir("/api/resultados")
 assert st == 200 and cab["Content-Type"].startswith("application/json") and cab["ETag"], (st, cuerpo[:300])
 assert "resultados_por_fecha" in {f[0] for f in db.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
 d = json.loads(cuerpo)
-assert (d["estado"], d["semana"], d["primera"], d["ultima"]) == ("listo", semanas[-1], semanas[0], semanas[-1]), d
+# sin semana, la última; o la anterior si la última acaba de empezar (menos de 10) y la anterior tiene más
+n_sem = {s: sum(lunes(p["utcDate"]) == s for p in contados) for s in semanas}
+previa = (date.fromisoformat(semanas[-1]) - timedelta(days=7)).isoformat()
+defecto = previa if len(semanas) > 1 and n_sem[semanas[-1]] < 10 and n_sem.get(previa, 0) > n_sem[semanas[-1]] else semanas[-1]
+assert (d["estado"], d["semana"], d["primera"], d["ultima"]) == ("listo", defecto, semanas[0], semanas[-1]), (d, n_sem)
 for i, s in enumerate(semanas):
     st, _, cuerpo = pedir(f"/api/resultados?semana={s}")
     d = json.loads(cuerpo)
@@ -104,6 +108,16 @@ for i, s in enumerate(semanas):
     assert d["resumen"]["tramos"] == esperado["tramos"], (d["resumen"]["tramos"], esperado["tramos"])
     t = esperado["total"]
     print(f"semana {s}: {t[0]} partidos, acertó el favorito en {t[1]} (esperaban {t[2]:.2f}), {len(esperado['ligas'])} ligas")
+# con la última semana bien llena, sin semana sale la última (las de prueba se quitan al final)
+if defecto != semanas[-1]:
+    extra = [p for p in partidos if p not in elegidos and lunes(p["utcDate"]) == semanas[-1]][:10]
+    db.executemany("INSERT INTO resultados (id, liga, utc, gl, gv, contado, liquidado) VALUES (?, ?, ?, 1, 0, 1, 99)",
+                   [(p["id"], p["liga_codigo"], p["utcDate"]) for p in extra])
+    db.commit()
+    assert json.loads(pedir("/api/resultados")[2])["semana"] == (semanas[-1] if len(extra) + n_sem[semanas[-1]] >= 10 else defecto)
+    db.execute(f"DELETE FROM resultados WHERE id IN ({','.join('?' * len(extra))})", [p["id"] for p in extra])
+    db.commit()
+    print(f"sin semana: la anterior ({defecto}), porque la última lleva {n_sem[semanas[-1]]}; con 10 o más, la última")
 # un día cualquiera de la semana lleva a su lunes
 otro = (date.fromisoformat(semanas[0]) + timedelta(days=3)).isoformat()
 assert json.loads(pedir(f"/api/resultados?semana={otro}")[2])["semana"] == semanas[0]
@@ -133,7 +147,8 @@ for x in d["partidos"]:
     assert f'<li><a href="/partido/{x["id"]}">' in texto and f"{e(x.get('local_corto') or x['local'])} {x['gl']}-{x['gv']}" in texto, x["id"]
 assert "<h2>Por liga</h2>" in texto and texto.count('<li><a href="/partido/') == len(d["partidos"])
 if len(semanas) > 1:
-    assert f'<a href="/resultados/{semanas[-2]}">' in texto
+    for v in (d["anterior"], d["siguiente"]):   # sus vecinas
+        assert not v or f'<a href="/resultados/{v}">' in texto, v
     st, _, pag = pedir(f"/resultados/{semanas[0]}")
     assert st == 200 and f'<link rel="canonical" href="{W}/resultados/{semanas[0]}">' in pag
     assert og(pag, "title").startswith("Resultados de la semana del "), og(pag, "title")

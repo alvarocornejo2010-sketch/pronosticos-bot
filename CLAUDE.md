@@ -626,7 +626,8 @@ recalcular, con la siguiente descarga de su calendario.
   marca y cuánto encaja frente a un equipo medio de su liga contra los mismos rivales
   (sus fuerzas del modelo, `fuerzaEquipo`, en %) y su puesto en las dos cosas.
 - **Luego, sus próximos partidos** de la ventana, por su nombre (como Mis equipos), con
-  las filas de siempre: se abren ahí mismo.
+  las filas de siempre: se abren ahí mismo. Su cabecera no se queda fija (`.grupo.quieto`): se
+  quedaba encima de "Lo que dijo la web". La página va sin la cabecera de columnas de la tabla.
 - **Al final, lo que dijo la web** de sus últimos 6 partidos con resultado (de todas las
   competiciones; solo lo publicado antes de empezar, `contado`), con la fila del tablero
   Resultados (`htmlFilaResultado`): la casilla es lo que le dio a lo que pasó.
@@ -653,9 +654,12 @@ tablero ("Todos los resultados, semana a semana") y se comparte con `/resultados
   probabilidades, en total y por tramo de confianza (claros, intermedios y reñidos, con el
   entero que enseña la web, como Últimos 7 días: `htmlCifraTramos` y `htmlFilaSem` son las
   mismas), y por liga; y los enlaces a la semana anterior y a la siguiente. Debajo, cada día con
-  sus partidos, con la fila del tablero Resultados (`htmlFilaResultado`): la casilla es lo que
-  le dio a lo que pasó.
-- **`/api/resultados`** (`worker/resultados.js`) da la última semana con resultados, y
+  sus partidos, con la fila del tablero Resultados (`htmlFilaResultado`, con la hora en vez de la
+  fecha): la casilla es lo que le dio a lo que pasó. Sin la cabecera de columnas de la tabla ni el
+  orden Hora / Claros / Reñidos (`sinCabecera`, `sinOrden`): no van con nada de lo que enseña.
+- **`/api/resultados`** (`worker/resultados.js`) da la última semana con resultados (o la anterior,
+  si la última lleva menos de 10, `MIN_PARTIDOS_SEMANA`, y la anterior más: un lunes, la semana nueva
+  tenía un partido y salía un "0 %" enorme que no decía nada; la nueva sigue a un clic), y
   `?semana=2026-10-26` cualquier otra (un día cualquiera lleva a su lunes); una sin resultados o
   mal escrita da 404 (`no_encontrado`, con la primera y la última que hay). Lleva los partidos
   (los campos del registro, `entradaDe`, más el id de cada equipo), lo sumado (`resumirSemana`:
@@ -685,9 +689,12 @@ cambiar la política más allá de decir que se guarda lo elegido).
   quita. Se ve en el acto y, si el servidor no lo acepta, vuelve atrás y lo dice. Sin cuenta,
   una invitación a entrar o crearla. `#/porra` ("Tu porra", también en el tablero de Ligas con la
   cuenta abierta): lo sumado ("Acertaste 7 de 12; la web, en esos mismos, 6"), los partidos por
-  jugar ya elegidos (las filas de siempre) y los ya jugados, con la fila del tablero Resultados
-  (`htmlFilaResultado`, con lo que eligió y lo que dijo la web). Se pide al entrar y cada 10
-  minutos con la vista abierta.
+  jugar ya elegidos (las filas de siempre) y los ya jugados, con su propia cabecera ("Ya jugados":
+  si no, la de "Por jugar" se quedaba pegada encima) y la fila del tablero Resultados
+  (`htmlFilaResultado`, con lo que eligió y lo que dijo la web, cada cosa en su línea: en una sola
+  se cortaba en el móvil). Lo elegido se marca en la fila de cada partido, en todas las vistas, con
+  un recuadro blanco en su casilla (`.c-p.mia`; el blanco marca lo elegido), y su etiqueta lo dice.
+  Se pide al entrar y cada 10 minutos con la vista abierta.
 - **En el Worker** (`worker/porra.js`, rutas en `cuentas.js`): `GET /api/cuenta/porra` da lo
   elegido en los partidos por jugar, lo sumado y los 30 últimos jugados; `POST` con `{id, signo}`
   (null lo quita) guarda o cambia una fila de la tabla `porra` (cuenta, partido, signo, cuándo).
@@ -1820,8 +1827,8 @@ Environment).
     todos los equipos en el sitemap (`equipos.py`). Que el historial de aciertos trae cada semana
     con sus partidos (solo lo publicado antes de empezar), lo sumado en total, por tramo y por liga
     como lo calcula la prueba, sus vecinas, ETag y 304, 404 para una semana sin resultados, el
-    índice que se crea solo, la tarjeta y el texto de `/resultados` y cada semana en el sitemap
-    (`resultados.py`). Que `/privacidad` se sirve
+    índice que se crea solo, la tarjeta y el texto de `/resultados` y cada semana en el sitemap, y que sin
+    semana sale la anterior si la última acaba de empezar (`resultados.py`). Que `/privacidad` se sirve
   con la CSP de la web y sin JavaScript, en el Worker y en Flask (`descubrir.py`), y el
   freno por IP: a la sexta en un minuto desde la misma IP, 429, también al crear, sin
   gastar intentos (`cuentas.py`). Que el calendario de
@@ -1846,7 +1853,8 @@ Environment).
     servicio de avisos del navegador de mentira), crear el calendario y sus enlaces (y quitarlo), la página de
     privacidad en los 7 anchos (con axe en 390 y 1440), Fiabilidad medida → En vivo con tres
     versiones del modelo (con un registro de mentira; axe en 390 y 1440), la porra con una cuenta de
-    mentira (elegir en el detalle y Tu porra, con axe en 390 y 1440), una casilla de cada tramo
+    mentira (elegir en el detalle y Tu porra, con axe en 390 y 1440; el recuadro de lo elegido, la cabecera
+    de "Ya jugados", lo de cada uno en su línea y sin la cabecera de la tabla), una casilla de cada tramo
     de la rampa (el contraste, con axe en 390 y 1440), los nombres del detalle enlazando con
     la página de su equipo, el texto sin JavaScript de la portada, un partido, un equipo y una
     liga en los 7 anchos (con axe en 390 y 1440) y que la web lo cambia por lo suyo, y axe-core sin nada en la semana,
