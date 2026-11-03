@@ -685,14 +685,16 @@ partidos. Lo que elige cada uno solo lo ve él; desde el 3 nov 2026 hay una clas
 sale solo quien elige un apodo (ver más abajo).
 
 - **En la web** (sección PORRA de `app.js`): en el detalle de cada partido por jugar, "Tu
-  pronóstico", tres botones (1 con el local, X empate, 2 con el visitante); tocar el elegido lo
-  quita. Se ve en el acto y, si el servidor no lo acepta, vuelve atrás y lo dice. Sin cuenta,
+  pronóstico", tres botones (1 con el local, X empate, 2 con el visitante; con el panel central de
+  menos de 560px, uno debajo de otro: en tres columnas el 3 nov no cabía "Real Madrid" a 390px); tocar
+  el elegido lo quita. Se ve en el acto y, si el servidor no lo acepta, vuelve atrás y lo dice. Sin cuenta,
   una invitación a entrar o crearla. `#/porra` ("Tu porra", también en el tablero de Ligas con la
   cuenta abierta): lo sumado ("Acertaste 7 de 12; la web, en esos mismos, 6"), los partidos por
-  jugar ya elegidos (las filas de siempre) y los ya jugados, con su propia cabecera ("Ya jugados":
-  si no, la de "Por jugar" se quedaba pegada encima) y la fila del tablero Resultados
+  jugar ya elegidos ("Por jugar", las filas de siempre) y los ya jugados, con su propia cabecera ("Ya
+  jugados": si no, la de "Por jugar" se quedaba pegada encima) y la fila del tablero Resultados
   (`htmlFilaResultado`, con lo que eligió y lo que dijo la web, cada cosa en su línea: en una sola
-  se cortaba en el móvil). Lo elegido se marca en la fila de cada partido, en todas las vistas, con
+  se cortaba en el móvil; y si los dos nombres no caben, el visitante baja a otra línea, en esa fila
+  en todas partes: "Sassu… 2–4 Fiorent…" no decía quién jugó). Lo elegido se marca en la fila de cada partido, en todas las vistas, con
   un recuadro blanco en su casilla (`.c-p.mia`; el blanco marca lo elegido), y su etiqueta lo dice.
   Se pide al entrar y cada 10 minutos con la vista abierta.
 - **En el Worker** (`worker/porra.js`, rutas en `cuentas.js`): `GET /api/cuenta/porra` da lo
@@ -724,8 +726,10 @@ sale solo quien elige un apodo (ver más abajo).
   Contarla lee todas las elecciones del periodo, así que se guarda en el documento
   `clasificacion:<periodo>` `MINUTOS_CLASIFICACION` (10) minutos: pedirla es leer una fila. Poner,
   cambiar o quitar un apodo la tira, para verse al momento. La web la pide al abrir `#/porra` y cada 10
-  minutos con la vista abierta; marca la fila propia ("(tú)") y, debajo, el formulario del apodo. Un lunes,
-  "Esta semana" aún no tiene nada: si nadie eligió periodo, sale la pasada. Sin cuenta, `#/porra` ("La
+  minutos con la vista abierta; marca la fila propia ("(tú)"), con el apodo entero (en dos líneas si
+  hace falta) y, debajo, el formulario del apodo (uno que no se acepta, repetido por ejemplo, se queda en el
+  campo con el error, para corregirlo). Un lunes,
+  "Esta semana" aún no tiene nada: si nadie eligió periodo, sale la "Semana pasada". Sin cuenta, `#/porra` ("La
   porra") enseña la invitación y la clasificación, y el detalle de cada partido enlaza con ella. La
   descarga de datos lleva el apodo y borrar la cuenta lo borra; la política de privacidad dice que el
   apodo y los aciertos los ve cualquiera. En el panel de visitas, cuántos salen. En Render,
@@ -1877,7 +1881,8 @@ Environment).
     versiones del modelo (con un registro de mentira; axe en 390 y 1440), la porra con una cuenta de
     mentira (elegir en el detalle y Tu porra, con axe en 390 y 1440; el recuadro de lo elegido, la cabecera
     de "Ya jugados", lo de cada uno en su línea, sin la cabecera de la tabla, y la clasificación con la fila
-    propia marcada y el apodo, que se cambia), una casilla de cada tramo
+    propia marcada y los apodos enteros; el apodo, que se cambia, y uno repetido, que da error y se queda en el
+    campo; y que los botones de la porra no cortan los nombres), una casilla de cada tramo
     de la rampa (el contraste, con axe en 390 y 1440), los nombres del detalle enlazando con
     la página de su equipo, el texto sin JavaScript de la portada, un partido, un equipo y una
     liga en los 7 anchos (con axe en 390 y 1440) y que la web lo cambia por lo suyo, y axe-core sin nada en la semana,

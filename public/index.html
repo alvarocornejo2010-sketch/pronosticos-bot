@@ -707,12 +707,19 @@
   .porra-botones .accion { justify-content: center; min-width: 0; padding: 0 10px; }
   .porra-botones .accion b { flex: none; font-family: var(--f-disp); font-size: var(--t-16); font-weight: 800; }
   .porra-botones .accion span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* con el panel estrecho, uno debajo de otro: en tres columnas no cabía ni "Real Madrid" (390px) */
+  @container centro (max-width: 559px) {
+    .porra-botones { grid-template-columns: minmax(0, 1fr); }
+    .porra-botones .accion { justify-content: flex-start; padding: 0 14px; }
+    .porra-botones .accion b { width: 1.25rem; text-align: center; }
+  }
   .porra-ir a { color: var(--tinta); font-weight: 600; }
   .porra-ins { font-family: var(--f-disp); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.02em; }
   /* la clasificación de la porra y el apodo con que se sale en ella */
   .porra-invita .avisos-tarjeta { grid-template-columns: minmax(0, 1fr); }
   .clasif-periodos { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
-  .clasif .eq { max-width: none; overflow: hidden; text-overflow: ellipsis; }
+  /* el apodo entero, en dos líneas si hace falta: cortado ("Gol de Media Canc…") no se sabe quién es */
+  .tabla-liga.clasif th.eq { max-width: none; white-space: normal; overflow-wrap: anywhere; }
   .clasif tr.mia th, .clasif tr.mia td { background: var(--panel-alto); }
   .clasif .tu { color: var(--tinta-3); font-weight: 400; }
   .clasif td.n b { font-family: var(--f-disp); font-size: var(--t-16); font-weight: 800; }
@@ -967,7 +974,8 @@
   .claro .cuando, .res .cuando { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: var(--t-13); color: var(--tinta-2);
                    white-space: nowrap; }
   .claro .cuando .insignia, .res .cuando .insignia { height: 1.25rem; min-width: 2rem; font-size: 0.6875rem; }
-  .res .marcador { display: flex; gap: 6px; }
+  /* si no caben los dos nombres, el visitante baja a otra línea: cortados ("Sassu… 2–4 Fiorent…") no se sabía quién jugó */
+  .res .marcador { display: flex; flex-wrap: wrap; gap: 0 6px; }
   .res .marcador .eq { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .res .marcador b { flex: none; font-family: var(--f-disp); font-stretch: 88%; font-weight: 800; font-variant-numeric: tabular-nums; }
 
