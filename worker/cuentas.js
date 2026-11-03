@@ -1,7 +1,8 @@
 // Las cuentas (oct 2026): usuario y contraseña, y un correo si la persona quiere, para
 // entrar con él y, el día que la web pueda mandar correos, recuperar la contraseña
 // (hoy no se verifica: eso necesita el plan de pago). La cuenta guarda los equipos que
-// sigues y lo que elige en la porra contra el modelo (porra.js); la persona la puede
+// sigues, lo que elige en la porra contra el modelo y, si quiere salir en su clasificación,
+// su apodo (porra.js); la persona la puede
 // descargar o borrar ella misma. Cada cuenta tiene un ID
 // (idPublico, "K7P4-QX2M") que solo sirve para identificarla, no para entrar. Crear
 // una cuenta pasa por Cloudflare Turnstile cuando están sus dos claves.
@@ -24,7 +25,7 @@
 
 import { ajustes } from "./config.js";
 import { Reloj } from "./tiempo.js";
-import { SIGNOS, noSePuede, sentenciaPorra, verPorra } from "./porra.js";
+import { SIGNOS, normalizarApodo, noSePuede, sentenciaApodo, sentenciaPorra, verPorra } from "./porra.js";
 
 const ALFABETO = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";   // Crockford: sin I, L, O ni U
 export const DIAS_SESION = 180;
@@ -455,6 +456,27 @@ export class Cuentas {
     return this.json({ ok: true, id, signo });
   }
 
+  // POST /api/cuenta/apodo {apodo}: el apodo con que sale en la clasificación de la porra
+  // (null lo quita y deja de salir). Distinto de su usuario y de los de los demás.
+  async apodo(body, s) {
+    // la clasificación guardada se tira: quien pone, cambia o quita su apodo se ve al momento
+    const tirar = this.db.prepare("DELETE FROM documentos WHERE clave LIKE 'clasificacion:%'");
+    if (body.apodo === null) {
+      await this.guardar([sentenciaApodo(this.db, s.cuenta, null, this.ahora), tirar]);
+      return this.json({ ok: true, apodo: null });
+    }
+    if (typeof body.apodo !== "string") return this.error("Falta el apodo.", 400);
+    const [a, mal] = normalizarApodo(body.apodo, s.usuario);
+    if (!a) return this.error(mal, 400);
+    try {
+      await this.guardar([sentenciaApodo(this.db, s.cuenta, a, this.ahora), tirar]);
+    } catch (e) {
+      if (/UNIQUE/i.test(String(e && e.message))) return this.error("Ese apodo ya lo usa otra persona: elige otro.", 409);
+      throw e;
+    }
+    return this.json({ ok: true, apodo: a.apodo });
+  }
+
   // La contraseña actual (con el usuario de sal), como un intento de entrar: una
   // sesión robada no sirve para probar contraseñas. Da la respuesta de error, o null si
   // es la buena (y entonces la cuenta de fallos vuelve a 0, aunque lo que venga después
@@ -548,13 +570,14 @@ export class Cuentas {
 
   // GET /api/cuenta/datos: todo lo que hay guardado de la cuenta, para descargarlo.
   async datos(s) {
-    const [cuenta, correos, accesos, sesiones, equipos, porra] = await this.almacen.consultar(() => this.db.batch([
+    const [cuenta, correos, accesos, sesiones, equipos, porra, apodo] = await this.almacen.consultar(() => this.db.batch([
       this.db.prepare("SELECT id, creada, vista FROM cuentas WHERE id = ?1").bind(s.cuenta),
       this.db.prepare("SELECT correo, verificado, creado FROM correos WHERE cuenta = ?1").bind(s.cuenta),
       this.db.prepare("SELECT tipo, creado FROM accesos WHERE cuenta = ?1 ORDER BY creado").bind(s.cuenta),
       this.db.prepare("SELECT hash, creada, vista FROM sesiones WHERE cuenta = ?1 ORDER BY creada").bind(s.cuenta),
       this.db.prepare("SELECT equipo, creado FROM favoritos WHERE cuenta = ?1 ORDER BY creado").bind(s.cuenta),
       this.db.prepare("SELECT partido, signo, cuando FROM porra WHERE cuenta = ?1 ORDER BY cuando").bind(s.cuenta),
+      this.db.prepare("SELECT apodo, desde FROM apodos WHERE cuenta = ?1").bind(s.cuenta),
     ]));
     const c = cuenta.results[0];
     const datos = {
@@ -567,6 +590,7 @@ export class Cuentas {
         este_aparato: x.hash === s.hash })),
       equipos: equipos.results.map((e) => ({ equipo: e.equipo, desde: iso(e.creado) })),
       porra: porra.results.map((q) => ({ partido: q.partido, eligio: q.signo, cuando: iso(q.cuando) })),
+      apodo: apodo.results.map((a) => ({ apodo: a.apodo, desde: iso(a.desde) }))[0] ?? null,
     };
     return new Response(JSON.stringify(datos, null, 2), { headers: { ...this.cabeceras,
       "Content-Type": "application/json; charset=utf-8",
@@ -579,6 +603,7 @@ export class Cuentas {
   async borrar(s) {
     await this.almacen.escribir([
       this.db.prepare("DELETE FROM porra WHERE cuenta = ?1").bind(s.cuenta),
+      this.db.prepare("DELETE FROM apodos WHERE cuenta = ?1").bind(s.cuenta),
       this.db.prepare("DELETE FROM favoritos WHERE cuenta = ?1").bind(s.cuenta),
       this.db.prepare("DELETE FROM sesiones WHERE cuenta = ?1").bind(s.cuenta),
       this.db.prepare("DELETE FROM accesos WHERE cuenta = ?1").bind(s.cuenta),
@@ -625,6 +650,7 @@ export class Cuentas {
     if (!s) return this.sinSesion();
     if (ruta === "/equipo") return this.equipo(body, s);
     if (ruta === "/porra") return this.porra(body, s);
+    if (ruta === "/apodo") return this.apodo(body, s);
     if (ruta === "/contrasena") return this.contrasena(body, s);
     if (ruta === "/correo") return this.correo(body, s);
     if (ruta === "/usuario") return this.ponerUsuario(body, s);
@@ -641,6 +667,7 @@ export const RUTAS_CUENTA = {
   "/api/cuenta/entrar": ["POST"],
   "/api/cuenta/equipo": ["POST"],
   "/api/cuenta/porra": ["GET", "HEAD", "POST"],
+  "/api/cuenta/apodo": ["POST"],
   "/api/cuenta/contrasena": ["POST"],
   "/api/cuenta/correo": ["POST"],
   "/api/cuenta/usuario": ["POST"],
@@ -657,12 +684,13 @@ export async function resumenCuentas(almacen, desde7, ahora = Date.now()) {
        (SELECT count(DISTINCT cuenta) FROM favoritos) AS con_equipos,
        (SELECT count(DISTINCT cuenta) FROM porra) AS con_porra,
        (SELECT count(*) FROM porra WHERE cuando >= ?1) AS porra_semana,
+       (SELECT count(*) FROM apodos) AS con_apodo,
        (SELECT count(*) FROM usuarios) AS con_usuario,
        (SELECT count(*) FROM correos) AS con_correo,
        (SELECT coalesce(sum(n), 0) FROM visitas WHERE tipo = 'cuentas' AND clave = '' AND dia >= ?2) AS creadas,
        (SELECT coalesce(sum(n), 0) FROM visitas WHERE tipo = 'intentos' AND clave = '' AND dia >= ?2) AS intentos
      FROM cuentas`).bind(ahora - 7 * MS_DIA, desde7).first());
   return { total: f.total, creadas: f.creadas, activas: f.activas, con_equipos: f.con_equipos,
-    con_porra: f.con_porra, porra_semana: f.porra_semana,
+    con_porra: f.con_porra, porra_semana: f.porra_semana, con_apodo: f.con_apodo,
     con_usuario: f.con_usuario, con_correo: f.con_correo, intentos: f.intentos };
 }

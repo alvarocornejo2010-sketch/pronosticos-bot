@@ -1304,7 +1304,8 @@ function htmlPorra(p) {
   if (!datos || datos.plataforma !== "cloudflare" || p.pendiente || Date.parse(p.utcDate) <= Date.now()) return "";
   if (!cuenta) {
     return '<div class="det-porra"><p><b>Juega contra la web.</b> Elige 1, X o 2 antes de cada partido y mira si aciertas'
-      + ' más que ella. Gratis, sin dinero ni premios.</p><button class="accion" data-abrir-cuenta>Entrar o crear cuenta</button></div>';
+      + ' más que ella. Gratis, sin dinero ni premios.</p><button class="accion" data-abrir-cuenta>Entrar o crear cuenta</button>'
+      + '<p class="porra-ir"><a href="#/porra" data-hash="#/porra">Ver la clasificación</a></p></div>';
   }
   const mio = porra.elegidos[p.id] || null;
   const boton = (signo, texto) => '<button class="accion" data-porra="' + p.id + '" data-signo="'
@@ -1327,18 +1328,103 @@ function filaPorra(ruta) {
     + '<span class="n">' + n + '</span></button>';
 }
 
+// ---- La clasificación (worker/porra.js): quien quiere sale con un apodo, que no es su
+// usuario. Esta semana, la pasada o desde siempre; se pide al abrir Tu porra y cada 10
+// minutos con la vista abierta (el servidor la guarda otros tantos).
+const clasif = new Map();   // periodo → { doc, etag, pedida, cargando, error }
+const PERIODOS_CLASIF = { semana: "Esta semana", pasada: "La pasada", siempre: "Siempre" };
+let periodoClasif = "semana", periodoElegido = false;
+let apodoError = "", apodoGuardando = false;
+
+async function cargarClasificacion(p) {
+  const h = clasif.get(p) || {};
+  clasif.set(p, h);
+  h.cargando = true;
+  h.pedida = Date.now();
+  try {
+    const r = await pedirSiCambio("/api/porra/clasificacion?periodo=" + p, h.etag);
+    if (r.status !== 304) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      h.etag = r.headers.get("ETag");
+      h.doc = await r.json();
+      h.error = null;
+    }
+  } catch (e) { h.error = "No se pudo cargar la clasificación. Se reintenta en un rato."; }
+  h.cargando = false;
+  render();
+}
+
+function htmlClasificacion() {
+  let h = clasif.get(periodoClasif);
+  if (!h || (!h.cargando && Date.now() - h.pedida > 10 * 60000)) { cargarClasificacion(periodoClasif); h = clasif.get(periodoClasif); }
+  const d = h.doc && h.doc.estado === "listo" ? h.doc : null;
+  // un lunes, esta semana aún no tiene nada: si nadie eligió otro periodo, la pasada
+  if (d && !d.filas.length && periodoClasif === "semana" && !periodoElegido) { periodoClasif = "pasada"; return htmlClasificacion(); }
+  const botones = '<div class="clasif-periodos" role="group" aria-label="Periodo de la clasificación">'
+    + Object.keys(PERIODOS_CLASIF).map(k => '<button class="accion" data-clasif="' + k + '" aria-pressed="' + (k === periodoClasif)
+      + '">' + PERIODOS_CLASIF[k] + '</button>').join("") + '</div>';
+  const cuando = d && d.desde ? "del " + fechaCorta(d.desde) + " al " + fechaCorta(d.hasta) : periodoClasif === "siempre" ? "desde el principio" : "";
+  let cuerpo;
+  if (!d) cuerpo = '<p class="nota">' + esc(h.error || "Cargando la clasificación…") + '</p>';
+  else if (!d.filas.length) {
+    cuerpo = '<p class="nota">' + (periodoClasif === "siempre" ? "Todavía no sale nadie: elige un apodo y sé el primero."
+      : "Nadie con apodo tiene todavía partidos terminados en esa semana.") + '</p>';
+  } else {
+    const mio = cuenta ? porra.apodo : null;
+    cuerpo = '<div class="tabla-desliza"><table class="tabla-liga clasif"><caption class="oculto">Clasificación de la porra, '
+      + esc(PERIODOS_CLASIF[periodoClasif].toLowerCase()) + (cuando ? ", " + esc(cuando) : "") + '</caption>'
+      + '<thead><tr><th scope="col" class="pos"><abbr title="Puesto">#</abbr></th><th scope="col">Apodo</th>'
+      + '<th scope="col" class="n">Aciertos</th><th scope="col" class="n"><abbr title="Lo que acertó la web en esos mismos partidos">La web</abbr></th></tr></thead><tbody>'
+      + d.filas.map(f => '<tr' + (f.apodo === mio ? ' class="mia"' : "") + '><td class="pos">' + f.puesto + '</td>'
+        + '<th scope="row" class="eq">' + esc(f.apodo) + (f.apodo === mio ? ' <span class="tu">(tú)</span>' : "") + '</th>'
+        + '<td class="n"><b>' + f.aciertos + '</b> de ' + f.jugados + '</td><td class="n">' + f.web + '</td></tr>').join("")
+      + '</tbody></table></div>' + (d.mas ? '<p class="nota">Salen los 100 primeros.</p>' : "");
+  }
+  return htmlBloque("Clasificación", botones + cuerpo + '<p class="nota">Con los mismos aciertos va delante quien jugó menos'
+    + ' partidos. La web, en los mismos partidos de cada uno. Solo sale quien elige un apodo.</p>', cuando);
+}
+
+// El apodo: ponerlo, cambiarlo o quitárselo (y dejar de salir).
+function htmlApodo() {
+  const a = porra.apodo;
+  return '<form class="apodo" data-apodo novalidate><label class="campo"><span>' + (a ? "Sales como «" + esc(a) + "». Cambiar el apodo"
+    : "Para salir en la clasificación, elige un apodo") + '</span><input name="apodo" maxlength="20" autocomplete="off"'
+    + ' spellcheck="false" value="' + esc(a || "") + '"></label>'
+    + '<div class="botones"><button class="accion principal" type="submit"' + (apodoGuardando ? " disabled" : "") + '>'
+    + (a ? "Cambiar" : "Salir en la clasificación") + '</button>'
+    + (a ? '<button class="accion" type="button" data-quitar-apodo' + (apodoGuardando ? " disabled" : "") + '>Quitarme</button>' : "")
+    + '</div><small>No es tu usuario: ese sirve para entrar y no lo ve nadie. El apodo y tus aciertos los ve quien abra'
+    + ' la clasificación. Puedes cambiarlo o quitarlo cuando quieras.</small>'
+    + (apodoError ? '<p class="error" role="alert">' + esc(apodoError) + '</p>' : "") + '</form>';
+}
+
+async function guardarApodo(valor) {
+  if (apodoGuardando) return;
+  apodoGuardando = true; apodoError = "";
+  render();
+  try {
+    const r = await pedirCuenta("/apodo", { apodo: valor });
+    porra.apodo = r.apodo;
+    clasif.forEach(h => { h.pedida = 0; });   // la del servidor ya se tiró: se pide otra vez
+  } catch (e) { apodoError = e.estado === 401 ? "" : e.message.charAt(0).toUpperCase() + e.message.slice(1); }
+  apodoGuardando = false;
+  render();
+}
+
 function bloquesPorra(todos) {
-  const out = { titulo: "Tu porra", sub: "contra la web", mezcla: true, bloques: [], pestana: "Tu porra · Pronósticos",
-    sinCabecera: true };
+  const out = { titulo: cuenta ? "Tu porra" : "La porra", sub: "contra la web", mezcla: true, bloques: [],
+    pestana: (cuenta ? "Tu porra" : "La porra") + " · Pronósticos", sinCabecera: true, sinOrden: !cuenta };
   if (!datos || datos.plataforma !== "cloudflare") {
     out.vacio = ["Solo en la versión de Cloudflare", "La porra necesita una cuenta, y las cuentas viven allí."];
     return out;
   }
+  const tabla = htmlClasificacion();
+  const bloqueClasif = { id: "porra-clasif", clase: "detalle eq-web porra-clasif", html: tabla, huella: tabla };
   if (!cuenta) {
-    out.vacio = ["Juega contra la web", "Con una cuenta (gratis), elige 1, X o 2 antes de cada partido y mira si aciertas"
-      + " más que ella. Sin dinero ni premios: solo tú ves lo tuyo."];
-    out.extra = [{ clase: "avisos-tarjeta porra-tarjeta", html: '<div><div class="botones"><button class="accion principal"'
-      + ' data-abrir-cuenta>Entrar o crear cuenta</button></div></div>' }];
+    const inv = '<div class="avisos-tarjeta porra-tarjeta"><div><h2>Juega contra la web</h2><p>Con una cuenta (gratis), elige 1, X'
+      + ' o 2 antes de cada partido y mira si aciertas más que ella. Sin dinero ni premios; si quieres, sales en la clasificación'
+      + ' con un apodo.</p><div class="botones"><button class="accion principal" data-abrir-cuenta>Entrar o crear cuenta</button></div></div></div>';
+    out.bloques.push({ id: "porra-invita", clase: "porra-invita", html: inv, huella: inv }, bloqueClasif);
     return out;
   }
   if (!porra.cargando && Date.now() - porra.pedida > 10 * 60000) cargarPorra();
@@ -1351,6 +1437,8 @@ function bloquesPorra(todos) {
     + '<p class="nota">La web juega con su favorito: el resultado al que daba más, antes de empezar. Solo cuentan los partidos'
     + ' que terminaron con su pronóstico publicado.</p>';
   out.bloques.push({ id: "porra-resumen", clase: "detalle eq-web", html: resumen, huella: resumen });
+  const apodo = htmlApodo();
+  out.bloques.push(bloqueClasif, { id: "porra-apodo", clase: "detalle eq-web porra-apodo", html: apodo, huella: apodo });
   const suyos = todos.filter(p => porra.elegidos[p.id]);
   out.bloques.push(bloqueGrupo("porra-prox", "Por jugar, ya elegidos", suyos.length, null, "dia"));
   if (suyos.length) {
@@ -2237,6 +2325,14 @@ function abrirPartido(fecha, id) {
 }
 
 // Delegación: un solo listener que sobrevive a cualquier repintado.
+// El formulario del apodo de la porra (Tu porra): el único de la vista central.
+vista.addEventListener("submit", (e) => {
+  const f = e.target.closest("form[data-apodo]");
+  if (!f) return;
+  e.preventDefault();
+  guardarApodo(f.elements.apodo.value);
+});
+
 document.addEventListener("click", (e) => {
   const t = e.target;
   const pest = t.closest(".pestanas button");
@@ -2256,6 +2352,9 @@ document.addEventListener("click", (e) => {
   if (av) { accionAvisos(av.dataset.avisos); return; }
   const qu = t.closest("[data-porra]");
   if (qu) { elegirPorra(qu.dataset.porra, qu.dataset.signo); return; }
+  const cl = t.closest("[data-clasif]");
+  if (cl) { periodoClasif = cl.dataset.clasif; periodoElegido = true; render(); return; }
+  if (t.closest("[data-quitar-apodo]")) { guardarApodo(null); return; }
   if (t.closest("[data-abrir-cuenta]")) { abrirCuenta(); return; }
   const cal = t.closest("[data-calendario]");
   if (cal) { accionCalendario(cal.dataset.calendario); return; }

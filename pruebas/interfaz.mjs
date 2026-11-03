@@ -298,8 +298,17 @@ for (const [ancho, alto] of ANCHOS) {
     await p.route("**/api/cuenta/porra", (r) => {
       if (r.request().method() === "POST") { elegido = JSON.parse(r.request().postData()); return r.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true, ...elegido }) }); }
       return r.fulfill({ contentType: "application/json", body: JSON.stringify({ estado: "listo", elegidos: {},
-        resumen: { jugados: 1, aciertos: 1, web: 0 }, ultimos: [jugado] }) });
+        resumen: { jugados: 1, aciertos: 1, web: 0 }, ultimos: [jugado], apodo: "Yo Mismo" }) });
     });
+    // la clasificación, con su fila marcada; y el apodo, que se cambia
+    let apodoMandado = null;
+    await p.route("**/api/porra/clasificacion**", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({
+      estado: "listo", periodo: "semana", desde: "2026-11-02", hasta: "2026-11-08", mas: false,
+      filas: [{ puesto: 1, apodo: "La Pulga de Breña", jugados: 14, aciertos: 9, web: 8 },
+              { puesto: 2, apodo: "Yo Mismo", jugados: 12, aciertos: 7, web: 7 },
+              { puesto: 2, apodo: "Otro", jugados: 12, aciertos: 7, web: 6 }] }) }));
+    await p.route("**/api/cuenta/apodo", (r) => { apodoMandado = JSON.parse(r.request().postData()).apodo;
+      return r.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true, apodo: apodoMandado.trim() }) }); });
     await p.goto(W + "/#/dia/" + conPartidos[1].fecha);
     await p.evaluate(() => localStorage.setItem("pronosticos.sesion", "1"));   // como si este navegador hubiera entrado
     await p.reload();
@@ -337,6 +346,20 @@ for (const [ancho, alto] of ANCHOS) {
     if (vp.lineas.join("|") !== `Tú, 2: ${paso === "2" ? "acertaste" : "fallaste"}|La web, ${web}: ${web === paso ? "acertó" : "falló"}`)
       fallo(`${ancho}px: Tu porra, los jugados dicen ${vp.lineas.join("|")}`);
     if (vp.cab !== "none") fallo(`${ancho}px: Tu porra lleva la cabecera de la tabla`);
+    const cl = await p.evaluate(() => ({
+      filas: [...document.querySelectorAll("#vista .clasif tbody tr")].map((f) => f.textContent.replace(/\s+/g, " ").trim()),
+      mia: document.querySelector("#vista .clasif tr.mia")?.textContent || "",
+      form: document.querySelector("#vista form.apodo .campo span")?.textContent || "",
+    }));
+    if (cl.filas.length !== 3 || !cl.mia.includes("Yo Mismo (tú)") || !cl.form.includes("Sales como «Yo Mismo»"))
+      fallo(`${ancho}px: la clasificación (${JSON.stringify(cl)})`);
+    await p.fill("#vista form.apodo input", "Nuevo Apodo");
+    await p.click("#vista form.apodo button[type=submit]");
+    await p.waitForFunction(() => document.querySelector("#vista form.apodo .campo span")?.textContent.includes("«Nuevo Apodo»"), null, { timeout: 5000 })
+      .catch(() => fallo(`${ancho}px: cambiar el apodo no se ve`));
+    if (apodoMandado !== "Nuevo Apodo") fallo(`${ancho}px: el apodo no llega al servidor (${apodoMandado})`);
+    await p.unroute("**/api/porra/clasificacion**");
+    await p.unroute("**/api/cuenta/apodo");
     await p.unroute("**/api/cuenta");
     await p.unroute("**/api/cuenta/porra");
     await p.evaluate(() => localStorage.setItem("pronosticos.sesion", "0"));

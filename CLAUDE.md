@@ -241,7 +241,7 @@ ver "Compartir y favoritos"), y `/robots.txt` y `/sitemap.xml` para los buscador
 (ver "Instalable y buscadores"). Y las cuentas: `/api/cuenta` (la de la sesión;
 en Render, `disponible: false`) y, solo en Cloudflare, `/api/cuenta/crear`,
 `/entrar`, `/equipo`, `/contrasena`, `/correo`, `/usuario`, `/salir`, `/borrar` (POST),
-`/datos` (ver "Cuentas") y `/porra` (GET y POST, ver "Porra contra el modelo"). Y `/api/tabla/PD`, la tabla de una liga y lo que le falta
+`/datos` (ver "Cuentas"), `/porra` (GET y POST) y `/apodo` (POST), y `/api/porra/clasificacion` (ver "Porra contra el modelo"). Y `/api/tabla/PD`, la tabla de una liga y lo que le falta
 de temporada (en Render, `no_disponible`; ver "Tabla y proyección"). Y los avisos de
 Mis equipos: `/api/avisos` (la clave pública VAPID; en Render, `disponible: false`) y,
 solo en Cloudflare, `/api/avisos/alta` y `/api/avisos/baja` (POST; ver "Avisos de Mis
@@ -347,7 +347,7 @@ de claves, y `avisos_resumen`, cuándo volver a mirar, `limpieza`, cuándo se hi
 del día y qué borró, e `indexnow`, cuándo se avisó a los buscadores y qué) y
 `candado` (que dos pasadas no se pisen, hora de la última petición, pasadas
 muertas), `visitas` (los contadores de visitas por día, ver "Visitas"), las de
-las cuentas: `cuentas`, `usuarios`, `correos`, `accesos`, `sesiones`, `favoritos` y `porra` (ver
+las cuentas: `cuentas`, `usuarios`, `correos`, `accesos`, `sesiones`, `favoritos`, `porra` y `apodos` (ver
 "Cuentas" y "Porra contra el modelo"), y las de los avisos: `suscripciones`, `avisos` y `envios` (ver "Avisos de
 Mis equipos"), y `calendarios` (ver "Calendario de Mis equipos").
 
@@ -681,8 +681,8 @@ tablero ("Todos los resultados, semana a semana") y se comparte con `/resultados
 
 Un juego gratis, sin dinero ni premios: con la cuenta abierta, cada uno elige 1, X o 2 en los
 partidos que aún no han empezado y luego ve en cuántos acertó frente a la web en esos mismos
-partidos. Sin clasificación pública: cada uno ve solo lo suyo (así no hay que enseñar usuarios ni
-cambiar la política más allá de decir que se guarda lo elegido).
+partidos. Lo que elige cada uno solo lo ve él; desde el 3 nov 2026 hay una clasificación, en la que
+sale solo quien elige un apodo (ver más abajo).
 
 - **En la web** (sección PORRA de `app.js`): en el detalle de cada partido por jugar, "Tu
   pronóstico", tres botones (1 con el local, X empate, 2 con el visitante); tocar el elegido lo
@@ -708,8 +708,28 @@ cambiar la política más allá de decir que se guarda lo elegido).
 - **Datos:** la descarga de "Mi cuenta" lleva lo elegido (`porra`) y borrar la cuenta lo borra.
   La política de privacidad lo dice. En el panel de visitas, cuántas cuentas juegan y cuántos
   partidos se eligieron en la semana.
-- **Lo que queda:** una clasificación entre jugadores (con un apodo aparte del usuario, que hoy
-  no se enseña a nadie) si hay gente que juega.
+- **La clasificación** (nov 2026, `#/porra`, también sin cuenta): quien quiere sale con un **apodo**
+  (tabla `apodos`: cuenta, el apodo como lo escribió, su clave y desde cuándo; `POST /api/cuenta/apodo`
+  con `{apodo}`, null lo quita). El apodo no es el usuario: el usuario sirve para entrar y no se enseña
+  a nadie (enseñarlo dejaría a cualquiera bloquear esa cuenta probando contraseñas), así que uno igual
+  a su usuario no vale. De 3 a 20 letras (con tildes y ñ), números, espacios, punto o guion; su clave
+  (sin tildes, mayúsculas ni signos, `claveApodo`) no se repite entre cuentas (índice único
+  `apodos_por_clave`; repetido da 409) y no puede llevar unos pocos insultos ni hacerse pasar por la web
+  (`PROHIBIDOS`, en `porra.js`). Para quitar uno a mano: `DELETE FROM apodos WHERE clave = '...'` en D1.
+  `GET /api/porra/clasificacion?periodo=semana|pasada|siempre` (pública, con ETag) cuenta en D1, con una
+  consulta, los partidos terminados de cada uno con apodo (solo `contado`) en el periodo: jugados, sus
+  aciertos y los de la web en esos mismos (su favorito, en SQL como `favoritoDe`; `porra.py` comprueba que
+  coincide con lo sumado de Tu porra), por aciertos y, con los mismos, menos partidos jugados (comparten
+  puesto si empatan en las dos cosas). Los 100 primeros. Las semanas, de lunes a domingo en hora de Lima.
+  Contarla lee todas las elecciones del periodo, así que se guarda en el documento
+  `clasificacion:<periodo>` `MINUTOS_CLASIFICACION` (10) minutos: pedirla es leer una fila. Poner,
+  cambiar o quitar un apodo la tira, para verse al momento. La web la pide al abrir `#/porra` y cada 10
+  minutos con la vista abierta; marca la fila propia ("(tú)") y, debajo, el formulario del apodo. Un lunes,
+  "Esta semana" aún no tiene nada: si nadie eligió periodo, sale la pasada. Sin cuenta, `#/porra` ("La
+  porra") enseña la invitación y la clasificación, y el detalle de cada partido enlaza con ella. La
+  descarga de datos lleva el apodo y borrar la cuenta lo borra; la política de privacidad dice que el
+  apodo y los aciertos los ve cualquiera. En el panel de visitas, cuántos salen. En Render,
+  `/api/porra/clasificacion` responde `no_disponible`.
 
 ## Avisos de Mis equipos (oct 2026)
 
@@ -935,7 +955,7 @@ es lo que pidió el dueño del proyecto; lo que cueste dinero (mandar correos) e
   entrar, los que ya había en el navegador se suman; al salir o borrar la cuenta,
   los del navegador se quedan. Hasta 60, como en el navegador.
 - **Todo lo hace la persona sola**, en "Mi cuenta": cambiar la contraseña,
-  descargar sus datos (`/api/cuenta/datos`: un JSON con todo lo guardado, sin la
+  descargar sus datos (`/api/cuenta/datos`: un JSON con todo lo guardado (también lo elegido en la porra y el apodo), sin la
   contraseña ni los tokens), cerrar sesión en este aparato o en todos, y **borrar
   la cuenta** (con confirmación en la misma ventana): se borran en el acto la cuenta,
   su usuario (que queda libre), sesiones y equipos. D1 guarda copias de los
@@ -1811,7 +1831,9 @@ Environment).
     de `api_falsa.py`, `/turnstile/v0/siteverify`, por `TURNSTILE_VERIFICAR`). Que la porra
     guarda, cambia y quita lo elegido, no deja elegir en un partido empezado o sin pronóstico, ni
     sin sesión o desde otra web, suma bien con un resultado (también la web), no cuenta lo
-    publicado tarde, va en la descarga de datos y se borra con la cuenta (`porra.py`). Que los
+    publicado tarde, va en la descarga de datos y se borra con la cuenta; el apodo (lo que no vale, el propio
+    usuario, repetido entre cuentas) y la clasificación con dos cuentas, en orden, con ETag y cada partido en su
+    semana, y que quitarse el apodo saca de ella al momento (`porra.py`, con `MINUTOS_CLASIFICACION=0`). Que los
     avisos de Mis equipos llegan (`avisos.mjs`, con el servicio de avisos de mentira
     de `api_falsa.py`, `/push/<id>`, y `AVISO_ANTES_MIN` de dos semanas para que toquen
     todos los de la semana): cuatro navegadores de mentira se suscriben, cada aviso se
@@ -1854,7 +1876,8 @@ Environment).
     privacidad en los 7 anchos (con axe en 390 y 1440), Fiabilidad medida → En vivo con tres
     versiones del modelo (con un registro de mentira; axe en 390 y 1440), la porra con una cuenta de
     mentira (elegir en el detalle y Tu porra, con axe en 390 y 1440; el recuadro de lo elegido, la cabecera
-    de "Ya jugados", lo de cada uno en su línea y sin la cabecera de la tabla), una casilla de cada tramo
+    de "Ya jugados", lo de cada uno en su línea, sin la cabecera de la tabla, y la clasificación con la fila
+    propia marcada y el apodo, que se cambia), una casilla de cada tramo
     de la rampa (el contraste, con axe en 390 y 1440), los nombres del detalle enlazando con
     la página de su equipo, el texto sin JavaScript de la portada, un partido, un equipo y una
     liga en los 7 anchos (con axe en 390 y 1440) y que la web lo cambia por lo suyo, y axe-core sin nada en la semana,

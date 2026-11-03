@@ -133,6 +133,14 @@ export const ESQUEMA = [
      signo   TEXT NOT NULL,
      cuando  INTEGER NOT NULL,
      PRIMARY KEY (cuenta, partido)) WITHOUT ROWID`,
+  // El apodo con que sale una cuenta en la clasificación de la porra (porra.js), si quiere
+  // salir: el que escribió y su clave (sin tildes, mayúsculas ni signos), que no se repite.
+  `CREATE TABLE IF NOT EXISTS apodos (
+     cuenta TEXT PRIMARY KEY,
+     clave  TEXT NOT NULL,
+     apodo  TEXT NOT NULL,
+     desde  INTEGER NOT NULL) WITHOUT ROWID`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS apodos_por_clave ON apodos (clave)`,
   // Los avisos de Mis equipos (avisos.js): cada navegador suscrito (su dirección en el
   // servicio de avisos, sus dos claves y los equipos que sigue, en JSON), qué avisos de
   // cada partido ya se pusieron en cola (para no repetirlos) y la cola de lo que falta
