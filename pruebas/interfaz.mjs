@@ -304,10 +304,11 @@ for (const [ancho, alto] of ANCHOS) {
     let apodoMandado = null;
     await p.route("**/api/porra/clasificacion**", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({
       estado: "listo", periodo: "semana", desde: "2026-11-02", hasta: "2026-11-08", mas: false,
-      filas: [{ puesto: 1, apodo: "La Pulga de Breña", jugados: 14, aciertos: 9, web: 8 },
+      filas: [{ puesto: 1, apodo: "Gol de Media Cancha1", jugados: 14, aciertos: 9, web: 8 },
               { puesto: 2, apodo: "Yo Mismo", jugados: 12, aciertos: 7, web: 7 },
               { puesto: 2, apodo: "Otro", jugados: 12, aciertos: 7, web: 6 }] }) }));
     await p.route("**/api/cuenta/apodo", (r) => { apodoMandado = JSON.parse(r.request().postData()).apodo;
+      if (apodoMandado === "Otro") return r.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "Ese apodo ya lo usa otra persona: elige otro." }) });
       return r.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true, apodo: apodoMandado.trim() }) }); });
     await p.goto(W + "/#/dia/" + conPartidos[1].fecha);
     await p.evaluate(() => localStorage.setItem("pronosticos.sesion", "1"));   // como si este navegador hubiera entrado
@@ -317,6 +318,9 @@ for (const [ancho, alto] of ANCHOS) {
     await p.locator(".partido:not(.pendiente) .fila").first().click();
     await p.locator('.det-porra [data-signo="X"]').click();
     await p.waitForFunction(() => document.querySelector('.det-porra [data-signo="X"][aria-pressed="true"]'), null, { timeout: 5000 });
+    const cortados = await p.evaluate(() => [...document.querySelectorAll(".porra-botones .accion span")]
+      .filter((s) => s.scrollWidth > s.clientWidth + 1).map((s) => s.textContent));
+    if (cortados.length) fallo(`${ancho}px: los botones de la porra cortan ${cortados.join(", ")}`);
     if (!elegido || elegido.signo !== "X") fallo(`${ancho}px: elegir en la porra no llega al servidor (${JSON.stringify(elegido)})`);
     for (const [nombre, hash] of [["detalle con porra", null], ["tu porra", "#/porra"]]) {
       if (hash) { await p.evaluate((h) => { location.hash = h; }, hash); await p.waitForSelector(".porra-tarjeta, #vista .res", { timeout: 15000 }); }
@@ -340,7 +344,7 @@ for (const [ancho, alto] of ANCHOS) {
       cab: getComputedStyle(document.querySelector(".cab-tabla")).display,
     }), elegido.id);
     if (vp.mia.length !== 1 || !vp.mia[0] || !vp.etiqueta.includes("elegiste X")) fallo(`${ancho}px: Tu porra no marca lo elegido (${JSON.stringify(vp)})`);
-    if (vp.grupos.join("|") !== "Por jugar, ya elegidos|Ya jugados") fallo(`${ancho}px: Tu porra, cabeceras ${vp.grupos.join("|")}`);
+    if (vp.grupos.join("|") !== "Por jugar|Ya jugados") fallo(`${ancho}px: Tu porra, cabeceras ${vp.grupos.join("|")}`);
     const probs = [jugado.prob_local, jugado.prob_empate, jugado.prob_visita];
     const web = "1X2"[probs.indexOf(Math.max(...probs))], paso = jugado.gl > jugado.gv ? "1" : jugado.gl === jugado.gv ? "X" : "2";
     if (vp.lineas.join("|") !== `Tú, 2: ${paso === "2" ? "acertaste" : "fallaste"}|La web, ${web}: ${web === paso ? "acertó" : "falló"}`)
@@ -358,6 +362,15 @@ for (const [ancho, alto] of ANCHOS) {
     await p.waitForFunction(() => document.querySelector("#vista form.apodo .campo span")?.textContent.includes("«Nuevo Apodo»"), null, { timeout: 5000 })
       .catch(() => fallo(`${ancho}px: cambiar el apodo no se ve`));
     if (apodoMandado !== "Nuevo Apodo") fallo(`${ancho}px: el apodo no llega al servidor (${apodoMandado})`);
+    // uno repetido: el error, y lo escrito se queda en el campo para corregirlo
+    await p.fill("#vista form.apodo input", "Otro");
+    await p.click("#vista form.apodo button[type=submit]");
+    await p.waitForSelector("#vista form.apodo .error", { timeout: 5000 }).catch(() => fallo(`${ancho}px: el apodo repetido no da error`));
+    const queda = await p.inputValue("#vista form.apodo input");
+    if (queda !== "Otro") fallo(`${ancho}px: tras el error, el campo del apodo dice «${queda}»`);
+    // el apodo entero, sin cortar
+    const apodoCortado = await p.evaluate(() => [...document.querySelectorAll("#vista .clasif th.eq")].some((t) => t.scrollWidth > t.clientWidth + 1));
+    if (apodoCortado) fallo(`${ancho}px: la clasificación corta un apodo`);
     await p.unroute("**/api/porra/clasificacion**");
     await p.unroute("**/api/cuenta/apodo");
     await p.unroute("**/api/cuenta");

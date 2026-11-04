@@ -1332,9 +1332,10 @@ function filaPorra(ruta) {
 // usuario. Esta semana, la pasada o desde siempre; se pide al abrir Tu porra y cada 10
 // minutos con la vista abierta (el servidor la guarda otros tantos).
 const clasif = new Map();   // periodo → { doc, etag, pedida, cargando, error }
-const PERIODOS_CLASIF = { semana: "Esta semana", pasada: "La pasada", siempre: "Siempre" };
+const PERIODOS_CLASIF = { semana: "Esta semana", pasada: "Semana pasada", siempre: "Siempre" };
 let periodoClasif = "semana", periodoElegido = false;
 let apodoError = "", apodoGuardando = false;
+let apodoEscrito = null;   // lo que se mandó y no se aceptó: se queda en el campo para corregirlo
 
 async function cargarClasificacion(p) {
   const h = clasif.get(p) || {};
@@ -1389,7 +1390,7 @@ function htmlApodo() {
   const a = porra.apodo;
   return '<form class="apodo" data-apodo novalidate><label class="campo"><span>' + (a ? "Sales como «" + esc(a) + "». Cambiar el apodo"
     : "Para salir en la clasificación, elige un apodo") + '</span><input name="apodo" maxlength="20" autocomplete="off"'
-    + ' spellcheck="false" value="' + esc(a || "") + '"></label>'
+    + ' spellcheck="false" value="' + esc(apodoEscrito ?? a ?? "") + '"></label>'
     + '<div class="botones"><button class="accion principal" type="submit"' + (apodoGuardando ? " disabled" : "") + '>'
     + (a ? "Cambiar" : "Salir en la clasificación") + '</button>'
     + (a ? '<button class="accion" type="button" data-quitar-apodo' + (apodoGuardando ? " disabled" : "") + '>Quitarme</button>' : "")
@@ -1400,11 +1401,11 @@ function htmlApodo() {
 
 async function guardarApodo(valor) {
   if (apodoGuardando) return;
-  apodoGuardando = true; apodoError = "";
+  apodoGuardando = true; apodoError = ""; apodoEscrito = valor;
   render();
   try {
     const r = await pedirCuenta("/apodo", { apodo: valor });
-    porra.apodo = r.apodo;
+    porra.apodo = r.apodo; apodoEscrito = null;
     clasif.forEach(h => { h.pedida = 0; });   // la del servidor ya se tiró: se pide otra vez
   } catch (e) { apodoError = e.estado === 401 ? "" : e.message.charAt(0).toUpperCase() + e.message.slice(1); }
   apodoGuardando = false;
@@ -1440,7 +1441,7 @@ function bloquesPorra(todos) {
   const apodo = htmlApodo();
   out.bloques.push(bloqueClasif, { id: "porra-apodo", clase: "detalle eq-web porra-apodo", html: apodo, huella: apodo });
   const suyos = todos.filter(p => porra.elegidos[p.id]);
-  out.bloques.push(bloqueGrupo("porra-prox", "Por jugar, ya elegidos", suyos.length, null, "dia"));
+  out.bloques.push(bloqueGrupo("porra-prox", "Por jugar", suyos.length, null, "dia"));
   if (suyos.length) {
     out.bloques.push(...bloquesDePartidos(ordenar(suyos), { conDia: true }));
     out.bloques.push({ id: "porra-leyenda", clase: "eq-sin", huella: "leyenda", html: '<p class="nota">El recuadro blanco es lo que'
