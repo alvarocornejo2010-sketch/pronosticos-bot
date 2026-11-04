@@ -51,10 +51,12 @@ assert locs[0] == W + "/" and len(locs) == len(set(locs)), locs[:3]
 CODIGOS = {"CL", "PD", "PL", "FL1", "BL1", "SA", "DED", "PPL", "ELC", "BSA"}
 assert {l for l in locs if "/liga/" in l} == {f"{W}/liga/{c}" for c in CODIGOS}
 # los equipos de las tablas también van (los mira equipos.py)
-partidos = {l for l in locs[1:] if "/equipo/" not in l and "/liga/" not in l}
+# y la porra (/porra, con su tarjeta: la mira porra.py)
+assert W + "/porra" in locs, locs[-3:]
+partidos = {l for l in locs[1:] if "/equipo/" not in l and "/liga/" not in l and l != W + "/porra"}
 assert partidos == por_jugar, (len(partidos), len(por_jugar), partidos ^ por_jugar)
 print(f"buscadores: robots.txt apunta al sitemap; el sitemap trae la portada, las 10 ligas, los {len(por_jugar)} partidos"
-      f" por jugar y {len(locs) - 11 - len(partidos)} equipos")
+      f" por jugar, {len(locs) - 12 - len(partidos)} equipos y la porra")
 # la portada, sin JavaScript: qué es la web y un enlace a cada liga
 _, portada = pedir("/")
 portada = portada.decode()

@@ -210,7 +210,7 @@
     .lateral { display: flex; flex-direction: column; grid-area: lat; overflow-y: auto; min-height: 0; scrollbar-width: thin;
                background: var(--panel); border-radius: var(--r-tablero); }
     .pane-izq, .pane-der { display: contents; }
-    .m-ligas { order: 1; } .m-claros { order: 2; } .m-confianza { order: 3; } .m-fiab { order: 4; } .m-resultados { order: 5; }
+    .m-ligas { order: 1; } .m-claros { order: 2; } .m-porra { order: 2; } .m-confianza { order: 3; } .m-fiab { order: 4; } .m-resultados { order: 5; }
     .estado-barra { display: flex; grid-area: estado; }
     .pestanas { display: none !important; }
   }
@@ -730,6 +730,10 @@
     border-radius: var(--r-control); background: var(--fondo); color: var(--tinta); font: inherit; font-size: var(--t-16); }
   form.apodo input:focus { outline: 2px solid var(--tinta-2); outline-offset: 1px; }
   form.apodo .botones { display: flex; flex-wrap: wrap; gap: 8px; }
+  /* el tablero La porra de Panorama y el botón Compartir de Tu porra */
+  .eq-web > .botones { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .m-porra .porra-que, .m-porra .porra-tuyo { margin: 0 0 10px; font-size: var(--t-14); line-height: 1.45; color: var(--tinta-2); }
+  .m-porra .porra-tuyo b { color: var(--tinta); }
   form.apodo small { font-size: var(--t-13); line-height: 1.45; color: var(--tinta-3); }
   form.apodo .error { margin: 0; color: var(--critico); font-weight: 600; }
   /* la página de cada equipo (#/equipo/86): su ficha arriba, sus próximos partidos y lo

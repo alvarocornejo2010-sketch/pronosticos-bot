@@ -11,6 +11,7 @@ import { textoEquipo } from "../worker/equipos.js";
 import { textosLiga } from "../worker/ligas.js";
 import { lunesDe, resumirSemana, textosResultados } from "../worker/resultados.js";
 import { avisarBuscadores, horasRetryAfter, tocaIndexnow, HORAS_INDEXNOW } from "../worker/indexnow.js";
+import { textosPorra } from "../worker/porra.js";
 import { INDEXNOW_CLAVE } from "../worker/config.js";
 import { Reloj } from "../worker/tiempo.js";
 
@@ -277,4 +278,21 @@ r = await avisarBuscadores(almacen, aj, antes, ahora + 6 * H, sinRed);
 assert.deepEqual(r, { urls: 5, estado: 0 });
 assert.ok(ultimo().desde === antes.desde && ultimo().error === "fetch failed");
 console.log("IndexNow: la primera vez todo, luego solo lo nuevo, y lo que falla se vuelve a mandar, cada vez más tarde");
+// /porra: qué es y la clasificación (la primera con alguien), con los apodos escapados; sin
+// nadie, la invitación
+const tp = textosPorra({ periodo: "pasada", desde: "2026-10-26", hasta: "2026-11-01", filas: [
+  { puesto: 1, apodo: "Pepe <b>&", jugados: 3, aciertos: 2, web: 1 }, { puesto: 1, apodo: "Otro", jugados: 3, aciertos: 2, web: 2 },
+  { puesto: 3, apodo: "Uno", jugados: 1, aciertos: 1, web: 0 }] });
+assert.equal(tp.titulo, "La porra: juega contra la web");
+assert.equal(tp.texto.h1, "La porra contra la web");
+assert.ok(tp.texto.html.includes("<h2>Clasificación, semana del 26 oct al 1 nov</h2>"), tp.texto.html);
+assert.ok(tp.texto.html.includes("<li>1. Pepe &lt;b&gt;&amp;: 2 aciertos de 3; la web, 1.</li><li>1. Otro: 2 aciertos de 3; la web, 2.</li>"
+  + "<li>3. Uno: 1 acierto de 1; la web, 0.</li>"), tp.texto.html);
+assert.ok(!tp.texto.html.includes("<b>&"));
+const ts = textosPorra({ periodo: "siempre", desde: null, hasta: null, filas: [{ puesto: 1, apodo: "Uno", jugados: 1, aciertos: 1, web: 1 }] });
+assert.ok(ts.texto.html.includes("<h2>Clasificación, desde el principio</h2>"), ts.texto.html);
+for (const vacia of [null, { periodo: "siempre", desde: null, filas: [] }]) {
+  assert.ok(textosPorra(vacia).texto.html.includes("Todavía no sale nadie en la clasificación"));
+}
+console.log("/porra: qué es, la clasificación con los apodos escapados, y sin nadie la invitación");
 console.log("paginas: OK");

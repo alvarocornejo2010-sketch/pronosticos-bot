@@ -1,7 +1,8 @@
 // La porra contra el modelo: con la cuenta abierta, cada uno elige 1, X o 2 en los
 // partidos que aún no han empezado, y al terminar se compara su acierto con el de la web
 // en esos mismos partidos (su favorito, el de la ficha publicada antes de empezar). Sin
-// dinero ni premios, y sin clasificación pública: cada uno ve solo lo suyo.
+// dinero ni premios. Lo que elige cada uno solo lo ve él; en la clasificación (abajo) sale
+// solo quien elige un apodo, con sus aciertos.
 //
 // Se guarda en la tabla porra (cuenta, partido, signo y cuándo lo eligió). Elegir o
 // cambiar es una fila, que cuenta en el tope de escrituras de las cuentas
@@ -21,8 +22,8 @@
 
 import { ajustes } from "./config.js";
 import { CAMPOS_PARTIDO, entradaDe, isoSinMs } from "./registro.js";
-import { favoritoDe } from "./compartir.js";
-import { inicioDia, lunesDe } from "./resultados.js";
+import { cuantos, esc, etiquetasOg, favoritoDe, paginaConTarjeta } from "./compartir.js";
+import { inicioDia, lunesDe, nombreSemana } from "./resultados.js";
 import { Reloj, sumarDias } from "./tiempo.js";
 
 export const SIGNOS = new Set(["1", "X", "2"]);
@@ -173,4 +174,46 @@ export async function apiClasificacion(almacen, env, periodo, ahora = Date.now()
   const d = await contarClasificacion(almacen, reloj, p, ahora);
   await almacen.escribir([almacen.sentenciaDoc(clave, { ...d, lunes, contada: ahora }, ahora)]);
   return d;
+}
+
+// /porra (nov 2026): la web con la tarjeta de la porra, para compartirla (el botón
+// Compartir de Tu porra) y para los buscadores, y su texto ya escrito: qué es y la
+// clasificación de esta semana (o la pasada, o desde siempre, la primera que tenga a
+// alguien). La web la abre en #/porra. Solo lee lo guardado (apiClasificacion).
+const NOMBRE_PERIODO = { semana: "esta semana", pasada: "la semana pasada", siempre: "desde el principio" };
+const MAX_TEXTO = 10;
+
+export function textosPorra(d) {
+  const titulo = "La porra: juega contra la web";
+  const descripcion = "Elige 1, X o 2 antes de cada partido y mira si aciertas más que la web. "
+    + "Gratis, sin dinero ni premios, con clasificación cada semana.";
+  const p = ['<p>Con una cuenta (gratis) eliges 1, X o 2 en cada partido antes de que empiece, y al terminar se ve'
+    + " en cuántos acertaste y en cuántos la web, que juega con su favorito, en esos mismos partidos. Sin dinero ni"
+    + " premios. Quien quiere sale en la clasificación con un apodo.</p>"];
+  if (d && d.filas && d.filas.length) {
+    const cuando = d.desde ? nombreSemana(d.desde) : NOMBRE_PERIODO[d.periodo];
+    p.push(`<h2>Clasificación, ${esc(d.desde ? (d.periodo === "pasada" ? "semana " : "esta semana, ") + cuando : cuando)}</h2>`,
+      "<ul>" + d.filas.slice(0, MAX_TEXTO).map((f) => `<li>${f.puesto}. ${esc(f.apodo)}: `
+        + `${cuantos(f.aciertos, "acierto", "aciertos")} de ${f.jugados}; la web, ${f.web}.</li>`).join("") + "</ul>");
+  } else {
+    p.push("<p>Todavía no sale nadie en la clasificación: el primero que elija un apodo y acierte, va arriba.</p>");
+  }
+  p.push('<p class="enlaces"><a href="/">Los partidos de esta semana</a> · '
+    + '<a href="/resultados">Lo que dijo la web, semana a semana</a></p>');
+  return { titulo, descripcion, texto: { h1: "La porra contra la web", html: `<div class="escrito">${p.join("")}</div>` } };
+}
+
+export async function paginaPorra(request, env, almacen, ahora = Date.now()) {
+  let d = null;
+  try {
+    for (const periodo of PERIODOS) {
+      d = await apiClasificacion(almacen, env, periodo, ahora);
+      if (d.filas.length) break;
+    }
+  } catch (e) {
+    console.error(`/porra: ${(e && e.stack) || e}`);
+  }
+  const t = textosPorra(d);
+  const og = etiquetasOg(new URL(request.url).origin, "/porra", t.titulo, t.descripcion);
+  return paginaConTarjeta(request, env, og, t.texto);
 }

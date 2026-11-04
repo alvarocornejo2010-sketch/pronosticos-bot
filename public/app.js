@@ -83,6 +83,9 @@ if (enlaceLiga) history.replaceState(null, "", "/#/liga/" + enlaceLiga);
 // /resultados y /resultados/2026-10-26 (worker/resultados.js): a /#/resultados...
 const enlaceResultados = location.pathname.match(/^\/resultados(?:\/(\d{4}-\d{2}-\d{2}))?\/?$/);
 if (enlaceResultados) history.replaceState(null, "", "/#/resultados" + (enlaceResultados[1] ? "/" + enlaceResultados[1] : ""));
+// /porra (worker/porra.js, con su tarjeta para compartirla): a /#/porra
+const enlacePorra = /^\/porra\/?$/.test(location.pathname);
+if (enlacePorra) history.replaceState(null, "", "/#/porra");
 // el título de la portada (el de index.html), para cuando se sale de la página de un equipo
 const TITULO_WEB = "Pronósticos de fútbol: 1 X 2 y goles";
 let orden = "hora";
@@ -1318,15 +1321,41 @@ function htmlPorra(p) {
     + '<p class="porra-ir"><a href="#/porra" data-hash="#/porra">Tu porra</a>' + (r && r.jugados ? ": " + esc(frasePorra(r)) : "") + '</p></div>';
 }
 
-// La fila de Tu porra en el tablero de Ligas, con la cuenta abierta.
+// La fila de la porra en el tablero de Ligas: Tu porra con la cuenta abierta, con lo
+// sumado y cuántos tiene elegidos; sin ella, La porra, la invitación (nov 2026: antes solo
+// salía con cuenta, y sin cuenta casi nadie llegaba a saber que existe).
 function filaPorra(ruta) {
-  if (!cuenta || !datos || datos.plataforma !== "cloudflare") return "";
+  if (!datos || datos.plataforma !== "cloudflare") return "";
   const r = porra.resumen, n = Object.keys(porra.elegidos).length;
   return '<button class="liga-fila" data-hash="#/porra" aria-current="' + (ruta.vista === "porra") + '">'
-    + '<span class="insignia grande todas porra-ins" aria-hidden="true">1X2</span><span class="nom">Tu porra</span>'
-    + '<span class="stats">' + (r && r.jugados ? r.aciertos + " de " + r.jugados + " · la web, " + r.web : "Contra la web") + '</span>'
-    + '<span class="n">' + n + '</span></button>';
+    + '<span class="insignia grande todas porra-ins" aria-hidden="true">1X2</span><span class="nom">' + (cuenta ? "Tu porra" : "La porra") + '</span>'
+    + '<span class="stats">' + (cuenta && r && r.jugados ? r.aciertos + " de " + r.jugados + " · la web, " + r.web : "Juega contra la web") + '</span>'
+    + (cuenta ? '<span class="n">' + n + '</span>' : "") + '</button>';
 }
+
+// La porra en la tira de ligas del móvil, después de Mis equipos.
+function chipPorra(ruta) {
+  if (!datos || datos.plataforma !== "cloudflare") return "";
+  return '<button data-hash="#/porra" aria-current="' + (ruta.vista === "porra") + '">'
+    + '<span class="insignia redonda todas porra-ins" aria-hidden="true">1X2</span>' + (cuenta ? "Tu porra" : "La porra") + '</button>';
+}
+
+// Compartir la porra: lo sumado, si ya hay, y el enlace a /porra (con su tarjeta).
+async function compartirPorra() {
+  const r = cuenta && porra.resumen;
+  const url = location.origin + "/porra";
+  const texto = r && r.jugados
+    ? "En la porra contra la web acerté " + r.aciertos + " de " + r.jugados + "; la web, " + r.web + ". ¿Le ganas?"
+    : "Juega contra la web: elige 1, X o 2 antes de cada partido y mira si aciertas más que ella. Gratis.";
+  contar({ t: "compartir_porra" });
+  if (navigator.share) {
+    try { await navigator.share({ title: "La porra contra la web", text: texto, url: url }); return; }
+    catch (err) { if (err && err.name === "AbortError") return; }
+  }
+  try { await navigator.clipboard.writeText(texto + " " + url); avisar("Copiado: pégalo en WhatsApp o donde quieras."); }
+  catch (err) { avisar("Copia este enlace: " + url); }
+}
+const BOTON_COMPARTIR_PORRA = '<button class="accion" data-compartir-porra>' + ICONO_COMPARTIR + '<span>Compartir</span></button>';
 
 // ---- La clasificación (worker/porra.js): quien quiere sale con un apodo, que no es su
 // usuario. Esta semana, la pasada o desde siempre; se pide al abrir Tu porra y cada 10
@@ -1355,6 +1384,45 @@ async function cargarClasificacion(p) {
   render();
 }
 
+// La tabla de la clasificación (también los primeros, en el tablero La porra), con la fila
+// propia marcada.
+function htmlTablaClasif(filas, caption) {
+  const mio = cuenta ? porra.apodo : null;
+  return '<div class="tabla-desliza"><table class="tabla-liga clasif"><caption class="oculto">' + esc(caption) + '</caption>'
+    + '<thead><tr><th scope="col" class="pos"><abbr title="Puesto">#</abbr></th><th scope="col">Apodo</th>'
+    + '<th scope="col" class="n">Aciertos</th><th scope="col" class="n"><abbr title="Lo que acertó la web en esos mismos partidos">La web</abbr></th></tr></thead><tbody>'
+    + filas.map(f => '<tr' + (f.apodo === mio ? ' class="mia"' : "") + '><td class="pos">' + f.puesto + '</td>'
+      + '<th scope="row" class="eq">' + esc(f.apodo) + (f.apodo === mio ? ' <span class="tu">(tú)</span>' : "") + '</th>'
+      + '<td class="n"><b>' + f.aciertos + '</b> de ' + f.jugados + '</td><td class="n">' + f.web + '</td></tr>').join("")
+    + '</tbody></table></div>';
+}
+
+// El tablero La porra de Panorama (nov 2026), para que se sepa que existe: qué es, los tres
+// primeros de la clasificación (esta semana; si aún no hay nadie, la pasada, y si no, desde
+// siempre) y el enlace a #/porra. Con la cuenta abierta, además, lo suyo. Solo en Cloudflare.
+const PERIODO_TABLERO = { semana: "esta semana", pasada: "la semana pasada", siempre: "desde el principio" };
+function htmlTableroPorra() {
+  if (!datos || datos.plataforma !== "cloudflare") return "";
+  let d = null, cargando = false;
+  for (const per of Object.keys(PERIODOS_CLASIF)) {
+    let h = clasif.get(per);
+    if (!h || (!h.cargando && Date.now() - h.pedida > 10 * 60000)) { cargarClasificacion(per); h = clasif.get(per); }
+    const doc = h.doc && h.doc.estado === "listo" ? h.doc : null;
+    if (!doc) { cargando = !h.error; break; }
+    if (doc.filas.length) { d = doc; break; }
+  }
+  const r = cuenta && porra.resumen;
+  const tuyo = r && r.jugados ? '<p class="porra-tuyo"><b>Tú:</b> ' + esc(frasePorra(r)) + '</p>' : "";
+  const cuerpo = d ? htmlTablaClasif(d.filas.slice(0, 3), "Los primeros de la clasificación de la porra, " + PERIODO_TABLERO[d.periodo])
+    : cargando ? "" : '<p class="nota">Nadie sale todavía en la clasificación: el primero que elija un apodo y acierte, va arriba.</p>';
+  return '<section class="modulo m-porra"><h2>La porra <span class="meta">' + (d ? "los primeros, " + PERIODO_TABLERO[d.periodo]
+    : "contra la web") + '</span></h2>'
+    + '<p class="porra-que">Elige 1, X o 2 antes de cada partido y mira si aciertas más que la web. Gratis, sin dinero ni premios.</p>'
+    + tuyo + cuerpo
+    + '<a class="eq-ir" href="#/porra" data-hash="#/porra">' + (cuenta ? "Tu porra y la clasificación" : "Juega contra la web")
+    + ICONO_FLECHA + '</a></section>';
+}
+
 function htmlClasificacion() {
   let h = clasif.get(periodoClasif);
   if (!h || (!h.cargando && Date.now() - h.pedida > 10 * 60000)) { cargarClasificacion(periodoClasif); h = clasif.get(periodoClasif); }
@@ -1371,15 +1439,8 @@ function htmlClasificacion() {
     cuerpo = '<p class="nota">' + (periodoClasif === "siempre" ? "Todavía no sale nadie: elige un apodo y sé el primero."
       : "Nadie con apodo tiene todavía partidos terminados en esa semana.") + '</p>';
   } else {
-    const mio = cuenta ? porra.apodo : null;
-    cuerpo = '<div class="tabla-desliza"><table class="tabla-liga clasif"><caption class="oculto">Clasificación de la porra, '
-      + esc(PERIODOS_CLASIF[periodoClasif].toLowerCase()) + (cuando ? ", " + esc(cuando) : "") + '</caption>'
-      + '<thead><tr><th scope="col" class="pos"><abbr title="Puesto">#</abbr></th><th scope="col">Apodo</th>'
-      + '<th scope="col" class="n">Aciertos</th><th scope="col" class="n"><abbr title="Lo que acertó la web en esos mismos partidos">La web</abbr></th></tr></thead><tbody>'
-      + d.filas.map(f => '<tr' + (f.apodo === mio ? ' class="mia"' : "") + '><td class="pos">' + f.puesto + '</td>'
-        + '<th scope="row" class="eq">' + esc(f.apodo) + (f.apodo === mio ? ' <span class="tu">(tú)</span>' : "") + '</th>'
-        + '<td class="n"><b>' + f.aciertos + '</b> de ' + f.jugados + '</td><td class="n">' + f.web + '</td></tr>').join("")
-      + '</tbody></table></div>' + (d.mas ? '<p class="nota">Salen los 100 primeros.</p>' : "");
+    cuerpo = htmlTablaClasif(d.filas, "Clasificación de la porra, " + PERIODOS_CLASIF[periodoClasif].toLowerCase()
+      + (cuando ? ", " + cuando : "")) + (d.mas ? '<p class="nota">Salen los 100 primeros.</p>' : "");
   }
   return htmlBloque("Clasificación", botones + cuerpo + '<p class="nota">Con los mismos aciertos va delante quien jugó menos'
     + ' partidos. La web, en los mismos partidos de cada uno. Solo sale quien elige un apodo.</p>', cuando);
@@ -1424,7 +1485,8 @@ function bloquesPorra(todos) {
   if (!cuenta) {
     const inv = '<div class="avisos-tarjeta porra-tarjeta"><div><h2>Juega contra la web</h2><p>Con una cuenta (gratis), elige 1, X'
       + ' o 2 antes de cada partido y mira si aciertas más que ella. Sin dinero ni premios; si quieres, sales en la clasificación'
-      + ' con un apodo.</p><div class="botones"><button class="accion principal" data-abrir-cuenta>Entrar o crear cuenta</button></div></div></div>';
+      + ' con un apodo.</p><div class="botones"><button class="accion principal" data-abrir-cuenta>Entrar o crear cuenta</button>'
+      + BOTON_COMPARTIR_PORRA + '</div></div></div>';
     out.bloques.push({ id: "porra-invita", clase: "porra-invita", html: inv, huella: inv }, bloqueClasif);
     return out;
   }
@@ -1436,7 +1498,7 @@ function bloquesPorra(todos) {
     : '<p class="nota">' + (porra.error ? esc(porra.error) : porra.resumen ? "Todavía no ha terminado ningún partido que"
       + " elegiste. Abre uno de la semana y elige 1, X o 2." : "Cargando tu porra…") + '</p>', r && r.jugados ? plural(r.jugados, "partido", "partidos") : "")
     + '<p class="nota">La web juega con su favorito: el resultado al que daba más, antes de empezar. Solo cuentan los partidos'
-    + ' que terminaron con su pronóstico publicado.</p>';
+    + ' que terminaron con su pronóstico publicado.</p><div class="botones">' + BOTON_COMPARTIR_PORRA + '</div>';
   out.bloques.push({ id: "porra-resumen", clase: "detalle eq-web", html: resumen, huella: resumen });
   const apodo = htmlApodo();
   out.bloques.push(bloqueClasif, { id: "porra-apodo", clase: "detalle eq-web porra-apodo", html: apodo, huella: apodo });
@@ -1625,10 +1687,11 @@ function pintarFechas(todos, ruta) {
 }
 
 function pintarTiraLigas(todos, ruta) {
-  const activa = ruta.vista === "liga" ? ruta.liga : ruta.vista === "favoritos" || ruta.vista === "equipo" ? null : "";
+  const activa = ruta.vista === "liga" ? ruta.liga : ["favoritos", "equipo", "porra"].includes(ruta.vista) ? null : "";
   const html = '<button class="sin-insignia" data-liga="" aria-current="' + (activa === "") + '">Todas <span class="n num">' + todos.length + '</span></button>'
     + (favoritos.size ? '<button data-hash="#/favoritos" aria-current="' + (ruta.vista === "favoritos") + '">'
       + htmlInsigniaFav("redonda") + 'Mis equipos <span class="n num">' + todos.filter(esFavorito).length + '</span></button>' : "")
+    + chipPorra(ruta)
     + porLigas(todos).map(L => '<button data-liga="' + esc(L.codigo) + '" aria-current="' + (activa === L.codigo) + '">'
       + htmlInsignia(L.codigo, "redonda") + esc(L.nombre)
       + ' <span class="n num">' + L.partidos.length + '</span></button>').join("");
@@ -1858,7 +1921,7 @@ const ICONO_TODAS = '<svg width="18" height="18" viewBox="0 0 16 16" aria-hidden
   + '<rect x="2" y="9" width="5" height="5" rx="1.3" fill="currentColor"></rect><rect x="9" y="9" width="5" height="5" rx="1.3" fill="currentColor"></rect></svg>';
 
 function pintarLigasPane(todos, ruta) {
-  const activa = ruta.vista === "liga" ? ruta.liga : ruta.vista === "favoritos" || ruta.vista === "equipo" ? null : "";
+  const activa = ruta.vista === "liga" ? ruta.liga : ["favoritos", "equipo", "porra"].includes(ruta.vista) ? null : "";
   const mios = todos.filter(esFavorito).length;
   const filaFav = favoritos.size
     ? '<button class="liga-fila" data-hash="#/favoritos" aria-current="' + (ruta.vista === "favoritos") + '">'
@@ -1947,7 +2010,7 @@ function htmlHistograma(todos) {
 }
 
 function pintarPanorama(todos, ruta) {
-  const html = htmlClaros(todos) + htmlHistograma(todos) + htmlSemana() + htmlResultados();
+  const html = htmlClaros(todos) + htmlTableroPorra() + htmlHistograma(todos) + htmlSemana() + htmlResultados();
   if (panePan.dataset.huella === html) return;
   panePan.dataset.huella = html;
   panePan.innerHTML = html;
@@ -2345,6 +2408,7 @@ document.addEventListener("click", (e) => {
   if (seguir) { alternarFavorito(seguir.dataset.seguir, seguir); return; }
   const comp = t.closest("[data-compartir]");
   if (comp) { compartir(comp.dataset.compartir); return; }
+  if (t.closest("[data-compartir-porra]")) { compartirPorra(); return; }
   const compEq = t.closest("[data-compartir-equipo]");
   if (compEq) { compartirEquipo(compEq.dataset.compartirEquipo); return; }
   const img = t.closest("[data-imagen]");
@@ -2488,6 +2552,7 @@ function contar(evento) {
   else if (enlaceEquipo) ev.via = "equipo";
   else if (enlaceLiga) ev.via = "liga";
   else if (enlaceResultados) ev.via = "resultados";
+  else if (enlacePorra) ev.via = "porra";
   if (favoritos.size) ev.f = 1;
   if (window.matchMedia("(display-mode: standalone)").matches || navigator.standalone) ev.app = 1;
   if (v === "vuelve") ev.hace = Math.round((Date.parse(hoy) - Date.parse(ultima)) / 86400000);

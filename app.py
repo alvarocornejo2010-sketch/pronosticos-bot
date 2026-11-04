@@ -1459,6 +1459,13 @@ def pagina_resultados(semana=None):
     return render_template("index.html")
 
 
+@app.route("/porra")
+def pagina_porra():
+    """La porra para compartir y para los buscadores: la misma web, que la abre. Su
+    tarjeta y su texto solo los pone Cloudflare (worker/porra.js)."""
+    return render_template("index.html")
+
+
 @app.route("/api/resultados")
 def api_resultados():
     """El historial de aciertos (lo que dijo la web de cada partido de una semana,
