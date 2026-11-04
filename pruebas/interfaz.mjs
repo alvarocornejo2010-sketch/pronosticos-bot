@@ -294,7 +294,7 @@ for (const [ancho, alto] of ANCHOS) {
     // antes, sin cuenta: la porra se ve igual (la fila de Ligas, el botón de la tira del móvil y
     // el tablero de Panorama, que lleva a #/porra)
     await p.goto(W + "/#/semana");
-    await p.waitForSelector(".m-porra a[href='#/porra']", { timeout: 15000 }).catch(() => fallo(`${ancho}px: sin cuenta, no sale el tablero La porra`));
+    await p.waitForSelector(".m-porra a[href='#/porra']", { state: "attached", timeout: 15000 })   // en el móvil, en la pestaña Panorama.catch(() => fallo(`${ancho}px: sin cuenta, no sale el tablero La porra`));
     const sinC = await p.evaluate(() => ({ fila: document.querySelector('.m-ligas [data-hash="#/porra"] .nom')?.textContent || "",
       chip: document.querySelector('.tira-ligas [data-hash="#/porra"]')?.textContent || "" }));
     if (sinC.fila !== "La porra" || !sinC.chip.includes("La porra")) fallo(`${ancho}px: sin cuenta, la porra no sale en Ligas (${JSON.stringify(sinC)})`);
