@@ -1385,6 +1385,12 @@ vueltas y los goles esperados (con dos decimales) salían iguales salvo algún
    `validacion.py` metía la temporada anterior entera en la media de liga
    (380 partidos más los de esta más K_LIGA de ancla), y producción usa solo
    los de esta más K_LIGA. Ahora las dos hacen lo de producción.
+9. **La vista de una liga perdía el orden Hora / Claros / Reñidos** (nov 2026). En `render`,
+   `classList.toggle("en-tabla", enTabla)` recibía `undefined` fuera de la tabla, y `toggle` sin
+   un booleano alterna en vez de fijar: tras un número impar de repintados, `#/liga/PD` quedaba
+   como si fuera la tabla. Salió al añadir el tablero La porra (más repintados al cargar);
+   `interfaz.mjs` lo cazó al no poder pulsar "Claros". Al segundo argumento de `toggle`, siempre
+   un booleano (`!!`).
 
 ## Champions: cómo se predice (oct 2026)
 

@@ -2190,7 +2190,9 @@ function render() {
   pintarTiraLigas(todos, ruta);
   pintarOrden();
 
-  const enTabla = ruta.vista === "liga" && ruta.tabla && !busqueda;
+  // booleano siempre: con undefined, toggle no fuerza nada y alterna la clase en cada repintado
+  // (la vista de una liga se quedaba sin el orden Hora / Claros / Reñidos tras un número impar)
+  const enTabla = !!(ruta.vista === "liga" && ruta.tabla && !busqueda);
   centroEl.classList.toggle("en-tabla", enTabla);
   if (enTabla) {
     const suya = todos.find(p => (p.liga_codigo || p.liga) === ruta.liga);
