@@ -322,8 +322,9 @@ Medido con el perfilador de V8 del isolate del Worker en `wrangler dev`
 (`pruebas/cpu_isolate.mjs`, lo que cuenta Cloudflare: sin el SQLite de la D1 local):
 6-13 ms por pasada con la web al día (media ~8) y hasta ~37 en las de llenarla
 desde cero; las tablas, hasta 20. Con el modelo 6 (nov 2026), en la prueba de punta a
-punta, media 15.7 y picos de 45-52 en algunas de llenarla (antes de quitar de cada pasada
-la lectura de las filas de tiros y de abaratar `filasTiros`, `casarTiros` y el filtro). Es una cota alta: el perfilador pesa y la máquina
+punta, media 10.5 y máximo 25 llenándola desde cero (la primera versión, que leía en cada
+pasada las filas de tiros de todas las ligas y las leía y casaba sin cuidar la CPU, daba
+media 15.7 y picos de 52). Es una cota alta: el perfilador pesa y la máquina
 no es la de Cloudflare. En producción no ha muerto ni una pasada desde el 18 oct
 (`muertes` en los Logs y en D1), así que caben, con poco margen: Cloudflare tolera
 que un isolate se pase del límite de vez en cuando, no siempre. **Ojo:** hasta el 25
