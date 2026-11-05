@@ -11,6 +11,7 @@ os.environ.pop("RENDER_EXTERNAL_URL", None)   # sin planificador: las pasadas se
 sys.path.insert(0, REPO)
 import app, validacion
 app.BASE_URL = f"http://127.0.0.1:{PUERTO}/v4"
+app.TIROS_BASE = f"http://127.0.0.1:{PUERTO}"     # los CSV de tiros a puerta, de la API falsa
 app.PAUSA_ENTRE_REQUESTS = 0
 app.PRESUPUESTO_REQUESTS = 10000
 app.correr_actualizacion()

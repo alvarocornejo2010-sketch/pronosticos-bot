@@ -1,27 +1,34 @@
 """
 Mide y afina el modelo de liga de app.py con resultados reales: las fuerzas
-ajustadas por rival (ajustar_fuerzas: FACTOR_DIARIO, PSEUDO_GOLES_ATAQUE,
-PSEUDO_GOLES_DEFENSA, ATAQUE_RECIEN_LLEGADO), la corrección de empates
+(ajustar_fuerzas, modelo 6: un filtro de Kalman con KALMAN_DERIVA, KALMAN_INICIO,
+KALMAN_TEMPORADA y KALMAN_NUEVO, los tiros a puerta con PESO_TIROS y
+EXPONENTE_FUERZAS, y los priors de los recién llegados), la corrección de empates
 (RHO_EMPATES) y los mercados de goles: el acercamiento del total (ENCOGER_TOTAL) y
 el 0 de cada equipo (MENOS_CEROS).
 
-Datos: openfootball/football.json en GitHub, gratis y sin token. Ocho ligas
-(LaLiga, Premier, Bundesliga, Serie A, Ligue 1, Eredivisie, Primeira Liga y
-Championship) desde 2010/11 las que más (Países Bajos y Portugal, desde
-2018/19), unos 45.000 partidos; el Brasileirão solo tiene 2019, 2020, 2025 y
-2026. Cada temporada se recorre como en producción (validacion.py): la anterior
-hace de ancla e historial y cada partido se predice solo con lo jugado en días
-anteriores.
+Datos, gratis y sin token:
+  - resultados: openfootball/football.json en GitHub. Ocho ligas (LaLiga, Premier,
+    Bundesliga, Serie A, Ligue 1, Eredivisie, Primeira Liga y Championship) desde
+    2010/11 las que más (Países Bajos y Portugal, desde 2018/19), unos 38.000
+    partidos; el Brasileirão solo tiene 2019, 2020, 2025 y 2026.
+  - tiros a puerta y cuotas de bet365: football-data.co.uk (lo que lee la web en
+    producción), por un espejo en GitHub con todas sus temporadas en un archivo
+    (xgabora/Club-Football-Match-Data-2000-2025, data/Matches.csv, 45 MB). Se casan
+    con openfootball por el cruce y el marcador (_casar): el 99 % de los partidos.
+    El Brasileirão no los trae.
+Cada temporada se recorre como en producción (validacion.py): la anterior hace de
+ancla e historial y cada partido se predice solo con lo jugado en días anteriores.
 
 Dos grupos de temporadas, para no elegir y juzgar con los mismos partidos:
   ajuste   2010/11 a 2020/21: aquí se eligen los parámetros.
   prueba   2021/22 en adelante: solo se mira el resultado.
 
 Uso:
-    python afinar_liga.py             # el modelo de app.py frente al anterior,
-                                      # por liga y por temporada (~3 min)
-    python afinar_liga.py afinar      # busca los parámetros en el grupo de
-                                      # ajuste y los juzga en el de prueba
+    python afinar_liga.py             # el modelo de app.py frente al modelo 5 (el ajuste
+                                      # de goles pesados por antigüedad) y frente a
+                                      # bet365, por liga y por temporada (~2 min)
+    python afinar_liga.py afinar      # busca los parámetros en el grupo de ajuste y
+                                      # los juzga en el de prueba
     python afinar_liga.py descensos   # de dónde parten los recién llegados: los
                                       # que bajan de la Premier a la Championship
                                       # y los que suben a cada liga
@@ -30,25 +37,30 @@ Uso:
                                       # cómo acabaron (~1 min)
 
 La evaluación usa las funciones de app.py (ajustar_fuerzas, calcular_poisson,
-mercados_de_goles) y el recorrido de validacion.py, no una copia. La búsqueda
-usa una gemela en numpy del mismo ajuste (_fuerzas_np), mil veces más rápida;
-al final comprueba que da lo mismo que app.py.
+mercados_de_goles) y el recorrido de validacion.py, no una copia. La búsqueda usa
+una gemela incremental del mismo filtro (_kalman), que recorre cada temporada una
+vez en vez de rehacer el filtro cada día; al final comprueba que da lo mismo que
+app.py. El modelo 5 vive aquí (_fuerzas_np y MODELO5), solo para comparar.
 
 Ojo con los nombres: openfootball cambió su forma de escribirlos en 2020/21
 (las cinco grandes y la Championship: "Arsenal" pasó a "Arsenal FC") y en
 2023/24 (Francia, Países Bajos y Portugal: "PSV Eindhoven" pasó a "PSV"). Sin
 casarlos (mapa_nombres), media liga contaría como recién ascendida esas
-temporadas. Y los 0-0 vienen como [0, 0] en vez de {"ft": [0, 0]}.
+temporadas. Los 0-0 vienen como [0, 0] en vez de {"ft": [0, 0]}. Y openfootball
+fecha en julio de 2019 los partidos de la vuelta de 2019/20 (julio de 2020).
 
-Descarga ~120 ficheros la primera vez (12 MB) y los guarda en openfootball_cache/.
+Descarga ~120 ficheros la primera vez (12 MB) y los guarda en openfootball_cache/,
+y el de football-data en footballdata_cache/.
 """
+import csv
 import json
 import math
 import os
 import re
 import sys
 import unicodedata
-from collections import defaultdict
+from collections import Counter, defaultdict
+from datetime import date, timedelta
 from multiprocessing import Pool
 
 import numpy as np
@@ -171,13 +183,138 @@ def mapa_nombres(codigo):
     return canon
 
 
-def cargar(codigo, season):
+def _cargar_base(codigo, season):
     """Los partidos de una temporada con los nombres casados entre temporadas."""
     p = _crudos(codigo, season)
     if p is None:
         return None
     mp = mapa_nombres(codigo)
     return [dict(m, local=mp.get(m["local"], m["local"]), visita=mp.get(m["visita"], m["visita"])) for m in p]
+
+
+# ------------------------------------------------------------------
+# Tiros a puerta y cuotas (football-data.co.uk, por el espejo de GitHub)
+# ------------------------------------------------------------------
+URL_FD = "https://raw.githubusercontent.com/xgabora/Club-Football-Match-Data-2000-2025/main/data/Matches.csv"
+CACHE_FD = "footballdata_cache"
+_FILAS_FD = None
+
+
+def _num(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def filas_fd():
+    """{división: [partido]} de football-data.co.uk, con los nombres por clave_tiros
+    (el espejo escribe a veces un equipo de dos formas en la misma temporada)."""
+    global _FILAS_FD
+    if _FILAS_FD is None:
+        ruta = os.path.join(CACHE_FD, "Matches.csv")
+        if not os.path.exists(ruta):
+            os.makedirs(CACHE_FD, exist_ok=True)
+            resp = requests.get(URL_FD, timeout=300)
+            resp.raise_for_status()
+            with open(ruta, "wb") as f:
+                f.write(resp.content)
+        quiero = set(app.DIVISION_TIROS.values())
+        _FILAS_FD = defaultdict(list)
+        with open(ruta, encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                if r["Division"] not in quiero or _num(r["FTHome"]) is None:
+                    continue
+                _FILAS_FD[r["Division"]].append({
+                    "fecha": r["MatchDate"], "local": app.clave_tiros(r["HomeTeam"]),
+                    "visita": app.clave_tiros(r["AwayTeam"]),
+                    "gl": int(float(r["FTHome"])), "gv": int(float(r["FTAway"])),
+                    "pl": _num(r["HomeTarget"]), "pv": _num(r["AwayTarget"]),
+                    "o": (_num(r["OddHome"]), _num(r["OddDraw"]), _num(r["OddAway"]))})
+    return _FILAS_FD
+
+
+def _dia_iso(s, d=0):
+    return (date.fromisoformat(s[:10]) + timedelta(days=d)).isoformat()
+
+
+_CASADOS = {}
+
+
+def _casar(codigo):
+    """{(temporada, índice en _cargar_base): fila de football-data}. Cada nombre de
+    openfootball toma el de football-data que le dan los partidos con el mismo marcador
+    el mismo día (o uno antes o después) que solo pueden ser uno, temporada a temporada
+    (y si una no da, el de todas). Luego cada partido toma la fila del mismo cruce y
+    marcador: primero a menos de 4 días; lo que queda, la más cercana aún sin usar a
+    menos de 400 (las fechas de mentira de la vuelta de 2019/20)."""
+    if codigo in _CASADOS:
+        return _CASADOS[codigo]
+    filas = filas_fd()[app.DIVISION_TIROS[codigo]]
+    por_marcador = defaultdict(list)
+    for r in filas:
+        por_marcador[(r["fecha"], r["gl"], r["gv"])].append(r)
+    votos, total = {}, defaultdict(Counter)
+    for s in temporadas(codigo):
+        v = votos[s] = defaultdict(Counter)
+        for m in _cargar_base(codigo, s):
+            cand = [r for d in (0, -1, 1) for r in por_marcador.get((_dia_iso(m["fecha"], d), m["gl"], m["gv"]), [])]
+            if len(cand) == 1:
+                for a, b in ((m["local"], cand[0]["local"]), (m["visita"], cand[0]["visita"])):
+                    v[a][b] += 1
+                    total[a][b] += 1
+    todos = {n: c.most_common(1)[0][0] for n, c in total.items()}
+    cruces = defaultdict(list)
+    for r in filas:
+        cruces[(r["local"], r["visita"], r["gl"], r["gv"])].append(r)
+    out, usadas, quedan = {}, set(), []
+    for s in temporadas(codigo):
+        mp = dict(todos, **{n: c.most_common(1)[0][0] for n, c in votos[s].items()})
+        for i, m in enumerate(_cargar_base(codigo, s)):
+            f = date.fromisoformat(m["fecha"][:10])
+            cand = sorted(((abs((date.fromisoformat(r["fecha"]) - f).days), id(r), r)
+                           for r in cruces.get((mp.get(m["local"]), mp.get(m["visita"]), m["gl"], m["gv"]), [])),
+                          key=lambda x: x[0])
+            if cand and cand[0][0] <= 3 and id(cand[0][2]) not in usadas:
+                out[(s, i)] = cand[0][2]
+                usadas.add(id(cand[0][2]))
+            else:
+                quedan.append((s, i, cand))
+    for s, i, cand in quedan:
+        libres = [x for x in cand if x[1] not in usadas and x[0] < 400]
+        if libres:
+            out[(s, i)] = libres[0][2]
+            usadas.add(libres[0][1])
+    _CASADOS[codigo] = out
+    return out
+
+
+def cargar(codigo, season):
+    """Los partidos de una temporada con los nombres casados entre temporadas y, si
+    football-data.co.uk los tiene, sus tiros a puerta (pl, pv) y las cuotas de bet365
+    (cuotas: 1, X, 2)."""
+    p = _cargar_base(codigo, season)
+    if p is None or codigo not in app.DIVISION_TIROS:
+        return p
+    cas = _casar(codigo)
+    out = []
+    for i, m in enumerate(p):
+        r = cas.get((season, i))
+        if r and r["pl"] is not None and r["pv"] is not None:
+            m = dict(m, pl=int(r["pl"]), pv=int(r["pv"]))
+        if r and all(r["o"]):
+            m = dict(m, cuotas=r["o"])
+        out.append(m)
+    return out
+
+
+def preparar():
+    """Lo que cuesta leer y casar, antes de repartir el trabajo entre procesos."""
+    for c in FICHERO:
+        for s in temporadas(c):
+            _cargar_base(c, s)
+        if c in app.DIVISION_TIROS:
+            _casar(c)
 
 
 def casos():
@@ -215,8 +352,9 @@ def _ancla(previa):
 # Recorridos: cada partido con lo de antes, como validacion.py
 # ------------------------------------------------------------------
 def recorrer_app(caso):
-    """El modelo de app.py: [xg_local, xg_visita, media local, media visita,
-    goles local, goles visita] por partido, con el recorrido de validacion.py."""
+    """El modelo de app.py: [xg_local, xg_visita, media local, media visita, goles
+    local, goles visita, y las cuotas de bet365 de 1, X y 2 (nan si no las hay)] por
+    partido, con el recorrido de validacion.py."""
     c, s = caso
     previa, ultima = cargar(c, s - 1), cargar(c, s)
     hist = validacion._Historial(previa, _ancla(previa), app.K_LIGA, codigo_liga=c, de_arriba=de_arriba(c, s))
@@ -225,49 +363,150 @@ def recorrer_app(caso):
         fz, media = hist.antes_de(m)
         xl, xv = app.calcular_xg_partido(app.fuerza_equipo(fz, m["local"]),
                                          app.fuerza_equipo(fz, m["visita"]), media)
-        filas.append([xl, xv, media["avg_local"], media["avg_visita"], m["gl"], m["gv"]])
+        filas.append([xl, xv, media["avg_local"], media["avg_visita"], m["gl"], m["gv"],
+                      *m.get("cuotas", (math.nan,) * 3)])
         hist.registrar(m)
     return c, s, np.array(filas, dtype=float)
 
 
-def recorrer_anterior(caso):
-    """El modelo de la app hasta oct 2026, para compararlo: los últimos 20
-    partidos de cada equipo, en casa y fuera por separado, encogidos hacia la
-    media de la liga con 6 partidos de pseudo-cuenta y sin mirar al rival. Es
-    una copia a propósito: app.py ya no lo tiene."""
+def _kalman(caso, q=None, p_ini=None, q_temp=None, p_nuevo=None, peso=None, exponente=None,
+            a0=None, d0=None, baja=None):
+    """Gemela incremental de ajustar_fuerzas con el recorrido de validacion.py: las
+    mismas operaciones en el mismo orden (con exp_exacto y log_exacto), pero recorriendo
+    cada temporada una sola vez en vez de rehacer el filtro cada día. Con los parámetros
+    de app.py da lo mismo que recorrer_app (lo comprueba main); los que se den, mandan.
+    Devuelve las filas de recorrer_app, con los goles esperados sin redondear."""
     c, s = caso
+    q = app.KALMAN_DERIVA if q is None else q
+    p_ini = app.KALMAN_INICIO if p_ini is None else p_ini
+    q_temp = app.KALMAN_TEMPORADA if q_temp is None else q_temp
+    p_nuevo = app.KALMAN_NUEVO if p_nuevo is None else p_nuevo
+    W = app.PESO_TIROS if peso is None else peso
+    e_f = app.EXPONENTE_FUERZAS if exponente is None else exponente
     previa, ultima = cargar(c, s - 1), cargar(c, s)
-    ancla, k_liga, pseudo, ventana = _ancla(previa), app.K_LIGA, 6, 20
-    eq = defaultdict(list)
-    for m in previa:
-        eq[m["local"]].append((True, m["gl"], m["gv"])); eq[m["visita"]].append((False, m["gv"], m["gl"]))
-    gl = gv = n = 0
-    filas = []
-    enc = lambda t, k, p: (t + pseudo * p) / (k + pseudo)   # noqa: E731
-    for m in ultima:
-        ml = (gl + k_liga * ancla["avg_local"]) / (n + k_liga)
-        mv = (gv + k_liga * ancla["avg_visita"]) / (n + k_liga)
-        def lado(t, casa):
-            g = [0, 0, 0]
-            for en_casa, f, cc in eq[t][-ventana:]:
-                if en_casa == casa:
-                    g[0] += f; g[1] += cc; g[2] += 1
-            return g
-        L, V = lado(m["local"], True), lado(m["visita"], False)
-        xl = enc(L[0], L[2], ml) / ml * enc(V[1], V[2], ml) / ml * ml
-        xv = enc(V[0], V[2], mv) / mv * enc(L[1], L[2], mv) / mv * mv
-        filas.append([round(xl, 2), round(xv, 2), ml, mv, m["gl"], m["gv"]])
-        eq[m["local"]].append((True, m["gl"], m["gv"])); eq[m["visita"]].append((False, m["gv"], m["gl"]))
-        gl += m["gl"]; gv += m["gv"]; n += 1
+    prev = [validacion._compacto(m) for m in previa]
+    act = [validacion._compacto(m) for m in ultima]
+    kl = kv = 0.0
+    gl = gv = tl = tv = 0
+    for p in prev:
+        if len(p) > 5:
+            gl += p[3]; gv += p[4]; tl += p[5]; tv += p[6]
+    if tl > 0 and tv > 0:
+        kl, kv = gl / tl, gv / tv
+    elif any(len(p) > 5 for p in act):
+        return recorrer_app(caso)   # los goles por tiro saldrían de esta temporada: cambian cada día
+    arriba = set(de_arriba(c, s))
+    previos = {t for p in prev for t in (p[1], p[2])}
+    con_previa = len(prev) > 0
+    if len(prev) >= 100:
+        al_, av_ = sum(p[3] for p in prev) / len(prev), sum(p[4] for p in prev) / len(prev)
+    else:
+        al_, av_ = app.PRIOR_AVG_LOCAL, app.PRIOR_AVG_VISITA
+    a_asc = app.ATAQUE_RECIEN_LLEGADO if a0 is None else a0
+    d_asc = app.DEFENSA_RECIEN_LLEGADO.get(c, 1.0) if d0 is None else d0
+    a_baj, d_baj = (app.ATAQUE_DESCENDIDO, app.DEFENSA_DESCENDIDO) if baja is None else baja
+
+    def prior(t):
+        return (a_baj, d_baj) if t in arriba else (a_asc, d_asc)
+
+    estado, orden = {}, []
+    cuenta = {"tiros": 0, "n": 0}
+
+    def paso(p, en_actual, ml, mv):
+        d, loc, vis, g1, g2 = p[0], p[1], p[2], p[3], p[4]
+        for t in (loc, vis):
+            e = estado.get(t)
+            if e is None:
+                if en_actual and con_previa and t not in previos:
+                    a, df = prior(t)
+                    e = [app.log_exacto(a), app.log_exacto(df), p_nuevo, p_nuevo, d, 0]
+                else:
+                    e = [0.0, 0.0, p_ini, p_ini, d, 0]
+                estado[t] = e
+                orden.append(t)
+            if d > e[4]:
+                e[2] += q * (d - e[4])
+                e[3] += q * (d - e[4])
+                e[4] = d
+            e[5] += 1
+        el, ev = estado[loc], estado[vis]
+        lam_l = ml * app.exp_exacto(el[0] + ev[1])
+        lam_v = mv * app.exp_exacto(ev[0] + el[1])
+        if len(p) > 5 and kl > 0:
+            y_l = (1 - W) * g1 + W * kl * p[5]
+            y_v = (1 - W) * g2 + W * kv * p[6]
+            cuenta["tiros"] += 1
+        else:
+            y_l, y_v = g1, g2
+        for at, de, lam, y in ((el, ev, lam_l, y_l), (ev, el, lam_v, y_v)):
+            pa, pd = at[2], de[3]
+            den = 1 + lam * (pa + pd)
+            at[0] += pa * (y - lam) / den
+            de[1] += pd * (y - lam) / den
+            at[2] = pa - lam * pa * pa / den
+            de[3] = pd - lam * pd * pd / den
+        cuenta["n"] += 1
+
+    for p in prev:
+        paso(p, False, al_, av_)
+    ancla = _ancla(previa)
+    filas, i = [], 0
+    gl_t = gv_t = n_t = 0
+    while i < len(act):
+        j = i
+        while j < len(act) and act[j][0] == act[i][0]:
+            j += 1
+        # lo que diría app.py ese día: las fuerzas de lo jugado antes, elevadas a su exponente
+        n = cuenta["n"]
+        b = 1 + (e_f - 1) * (cuenta["tiros"] / n) if n else 1.0
+        ml = (gl_t + app.K_LIGA * ancla["avg_local"]) / (n_t + app.K_LIGA)
+        mv = (gv_t + app.K_LIGA * ancla["avg_visita"]) / (n_t + app.K_LIGA)
+
+        def fuerza(t):
+            e = estado.get(t)
+            if e is not None:
+                return app.exp_exacto(b * e[0]), app.exp_exacto(b * e[1])
+            if not con_previa:
+                return 1.0, 1.0
+            a, df = prior(t)
+            return app.exp_exacto(b * app.log_exacto(a)), app.exp_exacto(b * app.log_exacto(df))
+
+        for k in range(i, j):
+            (ah, dh), (aa, da) = fuerza(act[k][1]), fuerza(act[k][2])
+            m = ultima[k]
+            filas.append([ml * ah * da, mv * aa * dh, ml, mv, m["gl"], m["gv"], *m.get("cuotas", (math.nan,) * 3)])
+        # y luego se juegan
+        ml_f = (gl_t + app.K_LIGA * al_) / (n_t + app.K_LIGA)
+        mv_f = (gv_t + app.K_LIGA * av_) / (n_t + app.K_LIGA)
+        for k in range(i, j):
+            if k == 0:
+                for t in orden:
+                    estado[t][2] += q_temp
+                    estado[t][3] += q_temp
+            paso(act[k], True, ml_f, mv_f)
+        for k in range(i, j):
+            gl_t += act[k][3]; gv_t += act[k][4]; n_t += 1
+        i = j
     return c, s, np.array(filas, dtype=float)
 
 
+def _k(arg):
+    caso, sobre = arg
+    return _kalman(caso, **sobre)
+
+
+# El modelo 5 (hasta nov 2026), para comparar: el ataque y la defensa de cada equipo con
+# los goles de las dos temporadas pesados por antigüedad (factor^días), encogidos hacia su
+# prior con pseudo-goles y ajustados hasta que nada cambia. Ver "El modelo" en CLAUDE.md.
+MODELO5 = {"factor": 0.998, "k_at": 6, "k_de": 8, "tolerancia": 1e-4, "max_iter": 300}
+CLAVE_MODELO5 = (MODELO5["factor"], MODELO5["k_at"], MODELO5["k_de"], 0.8)
+
+
 def _fuerzas_np(caso, factor, k_at, k_de, a0, d0=None, baja=None):
-    """Gemela en numpy de ajustar_fuerzas + el recorrido de validacion.py, para
-    buscar parámetros deprisa. Mismo algoritmo; no el mismo orden de sumas, así
-    que difiere en el último decimal (lo mide main al final). d0 (la defensa
-    de la que parte un ascendido) y baja (ataque y defensa de un descendido de
-    la liga de arriba) son, si no se dan, los de app.py para esa liga."""
+    """El modelo 5 en numpy (el ajuste de app.py hasta nov 2026) con el recorrido de
+    validacion.py, para comparar con el de ahora. d0 (la defensa de la que parte un
+    ascendido) y baja (ataque y defensa de un descendido de la liga de arriba) son,
+    si no se dan, los de app.py para esa liga."""
     c, s = caso
     d0 = app.DEFENSA_RECIEN_LLEGADO.get(c, 1.0) if d0 is None else d0
     baja = (app.ATAQUE_DESCENDIDO, app.DEFENSA_DESCENDIDO) if baja is None else baja
@@ -297,12 +536,12 @@ def _fuerzas_np(caso, factor, k_at, k_de, a0, d0=None, baja=None):
         mv = (GA[n0:i].sum() + app.K_LIGA * ancla["avg_visita"]) / (i - n0 + app.K_LIGA)
         gf = np.bincount(h, w * gh, T) + np.bincount(a, w * ga, T) + k_at * p_at
         gc = np.bincount(h, w * ga, T) + np.bincount(a, w * gh, T) + k_de * p_de
-        for _ in range(app.MAX_ITER_FUERZAS):
+        for _ in range(MODELO5["max_iter"]):
             at_n = gf / (np.bincount(h, w * ml * de[a], T) + np.bincount(a, w * mv * de[h], T) + k_at)
             de_n = gc / (np.bincount(h, w * mv * at_n[a], T) + np.bincount(a, w * ml * at_n[h], T) + k_de)
             cambio = max(np.abs(at_n - at).max(), np.abs(de_n - de).max())
             at, de = at_n, de_n
-            if cambio < app.TOLERANCIA_FUERZAS:
+            if cambio < MODELO5["tolerancia"]:
                 break
         for k in range(i, j):
             filas.append([ml * at[H[k]] * de[A[k]], mv * at[A[k]] * de[H[k]], ml, mv, GH[k], GA[k]])
@@ -400,78 +639,94 @@ def _juntar(res):
 # ------------------------------------------------------------------
 def evaluar(pool, lista):
     nuevo, liga, temp = _juntar(pool.map(recorrer_app, lista))
-    viejo, _, _ = _juntar(pool.map(recorrer_anterior, lista))
+    viejo, _, _ = _juntar(pool.map(_np, [(c, CLAVE_MODELO5) for c in lista]))
+    viejo[:, :2] = np.round(viejo[:, :2], 2)          # como calcular_xg_partido
     pn = puntuar(nuevo, app.RHO_EMPATES, app.ENCOGER_TOTAL)
-    pv = puntuar(viejo, 0.0, 0.3, "log", 0.0)   # el modelo anterior, con su Poisson sin corregir
+    pv = puntuar(viejo, app.RHO_EMPATES, app.ENCOGER_TOTAL)
     grupos = [("ajuste (hasta 2020/21)", temp <= FIN_AJUSTE), ("prueba (2021/22-2025/26)", (temp > FIN_AJUSTE) & (temp <= 2025)),
               ("2026/27 en curso", temp >= 2026)]
-    print("\n1X2: skill frente a la base 'equipo medio' y diferencia de Brier con el modelo anterior")
+    print("\n1X2: skill frente a la base 'equipo medio' y diferencia de Brier con el modelo 5")
     for nombre, m in grupos:
         if not m.any():
             continue
         d, se = pareado(pn["1x2"][m], pv["1x2"][m])
         dl, sel = pareado(pn["logloss"][m], pv["logloss"][m])
-        print(f"  {nombre:26s} {m.sum():6d} partidos   anterior {skill(pv['1x2'][m], pv['1x2_base'][m]):+5.1f}%   "
-              f"app.py {skill(pn['1x2'][m], pn['1x2_base'][m]):+5.1f}%   Brier {d:+.4f} ± {se:.4f} ({d / se:+.1f} se)"
+        print(f"  {nombre:26s} {m.sum():6d} partidos   modelo 5 {skill(pv['1x2'][m], pv['1x2_base'][m]):+5.2f}%   "
+              f"app.py {skill(pn['1x2'][m], pn['1x2_base'][m]):+5.2f}%   Brier {d:+.4f} ± {se:.4f} ({d / se:+.1f} se)"
               f"   LogLoss {dl:+.4f} ({dl / sel:+.1f} se)")
-    prueba = temp > FIN_AJUSTE
-    print("\nPor liga (prueba, 2021/22 en adelante): skill del 1X2, anterior -> app.py")
+    prueba = (temp > FIN_AJUSTE) & (temp <= 2025)
+    print("\nPor liga (prueba): skill del 1X2, modelo 5 -> app.py")
     for c in FICHERO:
         m = prueba & (liga == c)
         if m.any():
             d, se = pareado(pn["1x2"][m], pv["1x2"][m])
-            print(f"  {c:4s} {m.sum():5d} partidos  {skill(pv['1x2'][m], pv['1x2_base'][m]):+5.1f}% -> "
-                  f"{skill(pn['1x2'][m], pn['1x2_base'][m]):+5.1f}%   ({d / se:+.1f} se)")
-    print("\nPor temporada: skill del 1X2, anterior -> app.py")
+            print(f"  {c:4s} {m.sum():5d} partidos  {skill(pv['1x2'][m], pv['1x2_base'][m]):+5.2f}% -> "
+                  f"{skill(pn['1x2'][m], pn['1x2_base'][m]):+5.2f}%   ({d / se:+.1f} se)")
+    print("\nPor temporada: skill del 1X2, modelo 5 -> app.py")
     for s in sorted(set(temp.tolist())):
         m = temp == s
         d, se = pareado(pn["1x2"][m], pv["1x2"][m])
-        print(f"  {s}/{(s + 1) % 100:02d} {m.sum():5d} partidos  {skill(pv['1x2'][m], pv['1x2_base'][m]):+5.1f}% -> "
-              f"{skill(pn['1x2'][m], pn['1x2_base'][m]):+5.1f}%   ({d / se:+.1f} se)")
-    print("\nMercados de goles (prueba): skill frente a la base, anterior -> app.py")
+        print(f"  {s}/{(s + 1) % 100:02d} {m.sum():5d} partidos  {skill(pv['1x2'][m], pv['1x2_base'][m]):+5.2f}% -> "
+              f"{skill(pn['1x2'][m], pn['1x2_base'][m]):+5.2f}%   ({d / se:+.1f} se)")
+    print("\nMercados de goles (prueba): skill frente a la base, modelo 5 -> app.py")
     for k, txt in (("mas_25", "más de 2.5"), ("ambos", "ambos marcan")):
+        d, se = pareado(pn[k][prueba], pv[k][prueba])
         print(f"  {txt:13s} {skill(pv[k][prueba], pv[k + '_base'][prueba]):+5.2f}% -> "
-              f"{skill(pn[k][prueba], pn[k + '_base'][prueba]):+5.2f}%")
-    p4 = puntuar(nuevo, app.RHO_EMPATES, app.ENCOGER_TOTAL, z=0.0)
+              f"{skill(pn[k][prueba], pn[k + '_base'][prueba]):+5.2f}%   ({d / se:+.1f} se)")
     for nombre, m in grupos[:2]:
-        d, se = pareado(pn["marcador"][m], p4["marcador"][m])
-        print(f"  log loss del marcador, MENOS_CEROS frente al modelo 4, {nombre}: {d:+.5f} ({d / se:+.1f} se)")
+        d, se = pareado(pn["marcador"][m], pv["marcador"][m])
+        print(f"  log loss del marcador frente al modelo 5, {nombre}: {d:+.5f} ({d / se:+.1f} se)")
     print(f"\nEmpates (prueba): app.py predice {100 * pn['empate_pred'][prueba].mean():.1f}%, "
           f"hubo {100 * pn['empate_real'][prueba].mean():.1f}%")
+    # bet365 sin su margen (las cuotas inversas, normalizadas), en los mismos partidos
+    o = nuevo[:, 6:9]
+    con = ~np.isnan(o).any(1)
+    y = np.where(nuevo[:, 4] > nuevo[:, 5], 0, np.where(nuevo[:, 4] == nuevo[:, 5], 1, 2))
+    q = 1 / np.where(con[:, None], o, 1.0)
+    q /= q.sum(1, keepdims=True)
+    obs = np.zeros_like(q)
+    obs[np.arange(len(y)), y] = 1
+    casa = ((q - obs) ** 2).sum(1)
+    print("\nFrente a bet365 sin su margen (los partidos con cuotas), skill del 1X2:")
+    for nombre, m in grupos[:2]:
+        m = m & con
+        print(f"  {nombre:26s} {m.sum():6d} partidos   modelo 5 {skill(pv['1x2'][m], pv['1x2_base'][m]):+5.2f}%   "
+              f"app.py {skill(pn['1x2'][m], pn['1x2_base'][m]):+5.2f}%   bet365 {skill(casa[m], pn['1x2_base'][m]):+5.2f}%")
     return nuevo, liga, temp
 
 
 def afinar(pool, lista):
-    """Búsqueda por coordenadas en el grupo de ajuste, con la gemela en numpy."""
+    """Búsqueda por coordenadas de los parámetros del filtro en el grupo de ajuste, con
+    la gemela incremental (_kalman), y luego la corrección de empates y los mercados de
+    goles con esas fuerzas."""
     ajuste = [x for x in lista if x[1] <= FIN_AJUSTE]
-    rejilla = {"factor": [1.0, 0.999, 0.9985, 0.998, 0.9975, 0.997, 0.996],
-               "k_at": [2, 4, 6, 8, 11, 15], "k_de": [4, 6, 8, 11, 15, 20],
-               "a0": [0.7, 0.75, 0.8, 0.85, 0.9, 1.0]}
-    mejor = {"factor": app.FACTOR_DIARIO, "k_at": app.PSEUDO_GOLES_ATAQUE,
-             "k_de": app.PSEUDO_GOLES_DEFENSA, "a0": app.ATAQUE_RECIEN_LLEGADO}
+    rejilla = {"exponente": [1.0, 1.05, 1.1, 1.15, 1.2, 1.25], "q": [3e-5, 5e-5, 7e-5, 1e-4],
+               "p_ini": [0.08, 0.12, 0.16, 0.24, 0.32], "q_temp": [0.0, 0.005, 0.01, 0.02],
+               "peso": [0.3, 0.4, 0.5, 0.6], "p_nuevo": [0.03, 0.04, 0.06, 0.08, 0.12]}
+    mejor = {"exponente": app.EXPONENTE_FUERZAS, "q": app.KALMAN_DERIVA, "p_ini": app.KALMAN_INICIO,
+             "q_temp": app.KALMAN_TEMPORADA, "peso": app.PESO_TIROS, "p_nuevo": app.KALMAN_NUEVO}
     memo = {}
 
     def coste(p):
-        clave = tuple(p[k] for k in rejilla)
+        clave = tuple(sorted(p.items()))
         if clave not in memo:
-            f, _, _ = _juntar(pool.map(_np, [(c, clave) for c in ajuste]))
+            f, _, _ = _juntar(pool.map(_k, [(c, p) for c in ajuste]))
             memo[clave] = puntuar(f, app.RHO_EMPATES, app.ENCOGER_TOTAL)["1x2"].mean()
         return memo[clave]
 
     print(f"Búsqueda en {len(ajuste)} temporadas de ajuste (Brier del 1X2):")
-    for ronda in range(3):
+    for ronda in range(4):
         cambio = False
         for k, vals in rejilla.items():
             res = [(coste(dict(mejor, **{k: v})), v) for v in vals]
             b, v = min(res)
             cambio |= v != mejor[k]
             mejor[k] = v
-            print(f"  {k:7s} " + "  ".join(f"{vv}:{bb:.5f}" for bb, vv in res) + f"   -> {v}", flush=True)
+            print(f"  {k:9s} " + "  ".join(f"{vv}:{bb:.5f}" for bb, vv in res) + f"   -> {v}", flush=True)
         if not cambio:
             break
     print("mejor:", mejor)
-    clave = tuple(mejor[k] for k in rejilla)
-    f, _, temp = _juntar(pool.map(_np, [(c, clave) for c in lista]))
+    f, _, temp = _juntar(pool.map(_k, [(c, mejor) for c in lista]))
     print("\nCon esas fuerzas, corrección de empates y mercados de goles (Brier; ajuste | prueba):")
     aj, pr = temp <= FIN_AJUSTE, temp > FIN_AJUSTE
     for rho in (0.0, -0.03, -0.05, -0.08, -0.12):
@@ -494,10 +749,9 @@ def afinar(pool, lista):
         print(f"  MENOS_CEROS {z:.2f}: log loss del marcador frente a 0, " + "   ".join(partes))
 
 
-def _np_prior(arg):
+def _k_prior(arg):
     caso, d0, baja = arg
-    return _fuerzas_np(caso, app.FACTOR_DIARIO, app.PSEUDO_GOLES_ATAQUE, app.PSEUDO_GOLES_DEFENSA,
-                       app.ATAQUE_RECIEN_LLEGADO, d0, baja)
+    return _kalman(caso, d0=d0, baja=baja)
 
 
 def _fuerza_real(partidos):
@@ -525,7 +779,7 @@ def descensos(pool, lista):
     diferencia de Brier del 1X2 con cada prior frente a tratarlos como un
     ascendido cualquiera (ataque ATAQUE_RECIEN_LLEGADO, defensa 1)."""
     def brier(casos_liga, d0, baja):
-        res = pool.map(_np_prior, [(x, d0, baja) for x in casos_liga])
+        res = pool.map(_k_prior, [(x, d0, baja) for x in casos_liga])
         return {g: puntuar(np.concatenate([r[2] for r in res if filtro(r[1])]), app.RHO_EMPATES,
                            app.ENCOGER_TOTAL)["1x2"]
                 for g, filtro in (("ajuste", lambda s: s <= FIN_AJUSTE),
@@ -717,6 +971,7 @@ def tabla(pool, lista):
 
 
 def main():
+    preparar()
     lista = casos()
     print(f"{len(lista)} temporadas evaluables: "
           + ", ".join(f"{c} {sum(1 for x in lista if x[0] == c)}" for c in FICHERO))
@@ -731,9 +986,8 @@ def main():
             tabla(pool, lista)
             return
         nuevo, _, _ = evaluar(pool, lista)
-        clave = (app.FACTOR_DIARIO, app.PSEUDO_GOLES_ATAQUE, app.PSEUDO_GOLES_DEFENSA, app.ATAQUE_RECIEN_LLEGADO)
-        gemela, _, _ = _juntar(pool.map(_np, [(c, clave) for c in lista]))
-    print(f"\nGemela en numpy frente a app.py: diferencia máxima de goles esperados "
+        gemela, _, _ = _juntar(pool.map(_k, [(c, {}) for c in lista]))
+    print(f"\nGemela incremental frente a app.py: diferencia máxima de goles esperados "
           f"{np.abs(np.round(gemela[:, :2], 2) - nuevo[:, :2]).max():.2f} en {len(nuevo)} partidos.")
 
 

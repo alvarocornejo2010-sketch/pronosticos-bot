@@ -9,6 +9,8 @@ export const ESQUEMA = [
   // (los partidos de cada liga de las dos temporadas, compactos), fuerzas (las
   // de cada equipo, ajustadas con esos partidos), calendario (cuándo se bajó el
   // de cada competición) y liga_equipo (de qué liga es cada equipo de la Champions).
+  // Y de football-data.co.uk, los tiros a puerta: tiros (cuándo se bajó el CSV de cada
+  // liga y temporada) y tiros_filas (sus filas, que solo se leen al ajustar las fuerzas).
   `CREATE TABLE IF NOT EXISTS cache (
      seccion TEXT NOT NULL,
      clave   TEXT NOT NULL,
@@ -239,12 +241,23 @@ export class Almacen {
   }
 
   // ---------- caché de la API ----------
-  async cargarCache(secciones = null) {
+  // secciones: solo esas; sin: todas menos esas (las grandes que casi nunca hacen falta,
+  // como tiros_filas, se leen de una en una con leerCache al necesitarlas)
+  async cargarCache(secciones = null, { sin = [] } = {}) {
+    const lista = (xs) => xs.map((_, i) => "?" + (i + 1)).join(",");
     const r = await this.consultar(() => (secciones
-      ? this.db.prepare(`SELECT seccion, clave, valor FROM cache WHERE seccion IN (${secciones.map((_, i) => "?" + (i + 1)).join(",")})`)
-        .bind(...secciones)
-      : this.db.prepare("SELECT seccion, clave, valor FROM cache")).all());
+      ? this.db.prepare(`SELECT seccion, clave, valor FROM cache WHERE seccion IN (${lista(secciones)})`).bind(...secciones)
+      : sin.length
+        ? this.db.prepare(`SELECT seccion, clave, valor FROM cache WHERE seccion NOT IN (${lista(sin)})`).bind(...sin)
+        : this.db.prepare("SELECT seccion, clave, valor FROM cache")).all());
     return new Cache(r.results);
+  }
+
+  // Una fila de la caché, sin leer (el JSON tal cual), o null si no está.
+  async leerCache(seccion, clave) {
+    const r = await this.consultar(() => this.db.prepare("SELECT valor FROM cache WHERE seccion = ?1 AND clave = ?2")
+      .bind(seccion, clave).first());
+    return r ? r.valor : null;
   }
 
   sentenciasCache(cache) {
@@ -400,6 +413,11 @@ export class Cache {
   poner(seccion, clave, valor) {
     (this.datos[seccion] ??= {})[clave] = valor;
     this.sucias.set(seccion + "\u0000" + clave, [seccion, clave]);
+  }
+
+  // Una fila leída aparte (Almacen.leerCache), sin leer aún y sin marcarla como cambiada.
+  cargarUna(seccion, clave, cruda) {
+    (this.crudas[seccion] ??= {})[clave] = cruda;
   }
 
   sacarSucias() {

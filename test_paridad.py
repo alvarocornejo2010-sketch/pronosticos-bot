@@ -5,9 +5,13 @@ afinar_champions.py. Si tocas el modelo en un lado y no en el otro, esto falla.
 
 Compara:
   - las constantes (FACTOR_LIGA, ENCOGER_TOTAL, K_LIGA...) una a una;
-  - el ajuste de fuerzas (ajustar_fuerzas) en cientos de ligas al azar: tiene
-    que dar el mismo double, sin tolerancia, y las listas compactas de partidos
-    (partidos_compactos) de respuestas de la API inventadas;
+  - el filtro de las fuerzas (ajustar_fuerzas) en cientos de ligas al azar, con
+    tiros a puerta y sin ellos: tiene que dar el mismo double, sin tolerancia (por
+    eso exp_exacto y log_exacto, que se comparan aparte), y las listas compactas de
+    partidos (partidos_compactos) de respuestas de la API inventadas;
+  - los tiros a puerta: CSV de football-data.co.uk inventados (con BOM, CRLF, fechas
+    de dos y cuatro cifras, nombres escritos de dos formas, filas rotas) leídos con
+    filas_tiros y casados con casar_tiros y _con_tiros, sin tolerancia;
   - goles esperados, 1X2, doble oportunidad y mercados de goles en miles de
     partidos al azar, más los casos límite;
   - la Champions: fuerzas_champions (con su liga ajustada de verdad) y
@@ -38,6 +42,11 @@ os.environ.setdefault("UPDATE_SECRET", "test_paridad_dummy_secret")
 import app          # noqa: E402
 import validacion   # noqa: E402
 
+# Aquí no se baja nada: los tiros a puerta de los casos van ya en sus listas (y la
+# Champions ajusta sus ligas sin ellos). La constante se compara con la del Worker.
+TIROS_BASE = app.TIROS_BASE
+app.TIROS_BASE = ""
+
 AQUI = os.path.dirname(os.path.abspath(__file__))
 N_PARTIDOS = 4000
 N_CHAMPIONS = 1500
@@ -58,13 +67,15 @@ const out = {
     EXPONENTE_FUERZA_CHAMPIONS: c.EXPONENTE_FUERZA_CHAMPIONS, ESCALA_CHAMPIONS: c.ESCALA_CHAMPIONS,
     K_HISTORIAL_CHAMPIONS: c.K_HISTORIAL_CHAMPIONS,
     DIAS_VALIDEZ_LIGA_EQUIPO: c.DIAS_VALIDEZ_LIGA_EQUIPO, HORAS_VALIDEZ_LIGA: c.HORAS_VALIDEZ_LIGA,
-    HORAS_VALIDEZ_PREDICCION: c.HORAS_VALIDEZ_PREDICCION, FACTOR_DIARIO: c.FACTOR_DIARIO,
-    PSEUDO_GOLES_ATAQUE: c.PSEUDO_GOLES_ATAQUE, PSEUDO_GOLES_DEFENSA: c.PSEUDO_GOLES_DEFENSA,
+    HORAS_VALIDEZ_PREDICCION: c.HORAS_VALIDEZ_PREDICCION, KALMAN_DERIVA: c.KALMAN_DERIVA,
+    KALMAN_INICIO: c.KALMAN_INICIO, KALMAN_TEMPORADA: c.KALMAN_TEMPORADA, KALMAN_NUEVO: c.KALMAN_NUEVO,
+    PESO_TIROS: c.PESO_TIROS, EXPONENTE_FUERZAS: c.EXPONENTE_FUERZAS, DIVISION_TIROS: c.DIVISION_TIROS,
+    HORAS_VALIDEZ_TIROS: c.HORAS_VALIDEZ_TIROS, DIAS_VALIDEZ_TIROS_PREVIA: c.DIAS_VALIDEZ_TIROS_PREVIA,
+    HORAS_REINTENTO_TIROS: c.HORAS_REINTENTO_TIROS, TIROS_BASE: aj.tirosBase,
     ATAQUE_RECIEN_LLEGADO: c.ATAQUE_RECIEN_LLEGADO, DEFENSA_RECIEN_LLEGADO: c.DEFENSA_RECIEN_LLEGADO,
     LIGA_DE_ARRIBA: c.LIGA_DE_ARRIBA, ATAQUE_DESCENDIDO: c.ATAQUE_DESCENDIDO,
     DEFENSA_DESCENDIDO: c.DEFENSA_DESCENDIDO, VERSION_MODELO: c.VERSION_MODELO, FORMATO_LISTAS: c.FORMATO_LISTAS,
-    TOLERANCIA_FUERZAS: c.TOLERANCIA_FUERZAS,
-    MAX_ITER_FUERZAS: c.MAX_ITER_FUERZAS, K_LIGA: c.K_LIGA,
+    K_LIGA: c.K_LIGA,
     PRIOR_AVG_LOCAL: c.PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA: c.PRIOR_AVG_VISITA,
     DIAS_VALIDEZ_PRIOR: c.DIAS_VALIDEZ_PRIOR, LIMITE_GOLES: c.LIMITE_GOLES, RHO_EMPATES: c.RHO_EMPATES,
     ENCOGER_TOTAL: c.ENCOGER_TOTAL, MENOS_CEROS: c.MENOS_CEROS, LIGAS_ANO_NATURAL: [...c.LIGAS_ANO_NATURAL].sort(), DIAS_SEMANA: c.DIAS_SEMANA,
@@ -72,9 +83,15 @@ const out = {
     HORAS_VALIDEZ_FIXTURES: aj.horasValidezFixtures, MIN_MINUTOS_ACTUALIZACION: aj.minMinutosActualizacion,
     TZ: aj.tz,
   },
-  fuerzas: casos.fuerzas.map(({ previa, actual, media, inicio, codigo, de_arriba, fuera }) => {
-    const fz = m.ajustarFuerzas(previa, actual, media, inicio, codigo, de_arriba);
+  fuerzas: casos.fuerzas.map(({ previa, actual, codigo, de_arriba, fuera }) => {
+    const fz = m.ajustarFuerzas(previa, actual, codigo, de_arriba);
     return { ...fz, fuera: fuera.map((t) => m.fuerzaEquipo(fz, t)), equipos_arriba: m.equiposDePartidos(previa) };
+  }),
+  exactas: { exp: casos.exactas.exp.map((x) => m.expExacto(x)), log: casos.exactas.log.map((x) => m.logExacto(x)) },
+  tiros: casos.tiros.map(({ csv, lista, partidos, codigo, season }) => {
+    const filas = m.filasTiros(csv);
+    return { filas, casados: m.casarTiros(lista, filas), con_tiros: v.conTiros(partidos, filas),
+      url: m.urlTiros(aj.tirosBase, codigo, season) };
   }),
   compactos: casos.compactos.map((matches) => a.partidosCompactos(a.soloLiga(matches))),
   partidos: casos.partidos.map(({ local, visita, prom }) => {
@@ -95,7 +112,7 @@ const out = {
       return x.liga === null
         ? { liga: null, nombre_liga: null, factor: c.FACTOR_OTRA_LIGA, ataque: 1.0, defensa: 1.0, muestra: 0, ...historial }
         : { liga: x.liga, nombre_liga: Object.keys(c.LIGAS).find((k) => c.LIGAS[k] === x.liga),
-            factor, ...m.fuerzasDesdeLiga(m.fuerzaEquipo(m.ajustarFuerzas(x.previa, x.actual, x.prom, null, x.liga, []),
+            factor, ...m.fuerzasDesdeLiga(m.fuerzaEquipo(m.ajustarFuerzas(x.previa, x.actual, x.liga, []),
               x.id)),
             ...historial };
     };
@@ -143,16 +160,20 @@ def _fuerza(rnd):
     return {"ataque": rnd.uniform(0.4, 2.2), "defensa": rnd.uniform(0.45, 2.0)}
 
 
-def _liga(rnd, equipos, n_previa, n_actual, dia0=20000):
-    """Listas compactas de una liga al azar: [[día, local, visita, gl, gv], ...].
-    Algún equipo solo en una de las dos (ascendidos y descendidos), días
-    repetidos y huecos, como en una temporada de verdad."""
+def _liga(rnd, equipos, n_previa, n_actual, dia0=20000, tiros=0.0):
+    """Listas compactas de una liga al azar: [[día, local, visita, gl, gv], ...], y con
+    probabilidad tiros, cada partido con sus tiros a puerta. Algún equipo solo en una de
+    las dos (ascendidos y descendidos), días repetidos y huecos, como en una temporada
+    de verdad."""
     def lista(n, desde, quienes):
         out, dia = [], desde
         for _ in range(n):
             dia += rnd.choice((0, 0, 1, 3, 7))
             loc, vis = rnd.sample(quienes, 2)
-            out.append([dia, loc, vis, rnd.choice((0, 0, 1, 1, 1, 2, 2, 3, 4, 6)), rnd.choice((0, 0, 1, 1, 2, 3))])
+            p = [dia, loc, vis, rnd.choice((0, 0, 1, 1, 1, 2, 2, 3, 4, 6)), rnd.choice((0, 0, 1, 1, 2, 3))]
+            if rnd.random() < tiros:
+                p += [p[3] + rnd.randint(0, 9), p[4] + rnd.randint(0, 7)]
+            out.append(p)
         return out, dia
     viejos, nuevos = equipos[:-2], equipos[2:]
     previa, fin = lista(n_previa, dia0, viejos) if n_previa else ([], dia0)
@@ -164,8 +185,9 @@ def _prom(rnd):
     return {"avg_local": rnd.uniform(1.0, 2.0), "avg_visita": rnd.uniform(0.8, 1.6)}
 
 
-def _temporada(rnd, equipos, fuerza, n_jornadas):
-    """Liga sintética a doble vuelta, con goles según la fuerza de cada uno."""
+def _temporada(rnd, equipos, fuerza, n_jornadas, tiros=0.0):
+    """Liga sintética a doble vuelta, con goles según la fuerza de cada uno (y, con
+    probabilidad tiros, sus tiros a puerta, como los deja _con_tiros)."""
     out, dia = [], 0
     for j in range(n_jornadas):
         orden = list(equipos)
@@ -178,9 +200,12 @@ def _temporada(rnd, equipos, fuerza, n_jornadas):
                 while u > s and x < 12:
                     x += 1; p *= mu / x; s += p
                 return x
-            out.append({"fecha": f"2024-{1 + (dia // 28) % 12:02d}-{1 + dia % 28:02d}T{12 + k % 8:02d}:00:00Z",
-                        "local": l, "visita": v,
-                        "gl": goles(1.45 * fuerza[l] / fuerza[v]), "gv": goles(1.1 * fuerza[v] / fuerza[l])})
+            m = {"fecha": f"2024-{1 + (dia // 28) % 12:02d}-{1 + dia % 28:02d}T{12 + k % 8:02d}:00:00Z",
+                 "local": l, "visita": v,
+                 "gl": goles(1.45 * fuerza[l] / fuerza[v]), "gv": goles(1.1 * fuerza[v] / fuerza[l])}
+            if rnd.random() < tiros:
+                m.update(pl=m["gl"] + rnd.randint(0, 7), pv=m["gv"] + rnd.randint(0, 6))
+            out.append(m)
         dia += 1
     out.sort(key=lambda m: m["fecha"])
     return out
@@ -210,16 +235,20 @@ def _casos(rnd):
     fuerzas = []
     for k in range(300):
         equipos = [5000 + 30 * k + j for j in range(rnd.choice((4, 10, 20)))]
-        previa, actual = _liga(rnd, equipos, rnd.choice((0, 30, 180, 380)), rnd.choice((0, 1, 9, 120, 380)))
-        inicio = None
-        if rnd.random() < 0.3:   # arranque con unas fuerzas anteriores, como en la validación
-            inicio = {str(t): [rnd.uniform(0.5, 1.5), rnd.uniform(0.5, 1.5), 3] for t in equipos[:5]}
+        # sin tiros, con todos, con algunos (los últimos días aún sin ellos), y solo en una temporada
+        previa, actual = _liga(rnd, equipos, rnd.choice((0, 30, 180, 380)), rnd.choice((0, 1, 9, 120, 380)),
+                               tiros=rnd.choice((0.0, 1.0, 0.9)))
+        if rnd.random() < 0.2:
+            previa = [p[:5] for p in previa]
         # la liga (la Premier tiene su propio ascendido) y los de la liga de arriba:
         # un recién llegado, uno de la previa (no cuenta) y uno sin partidos
         codigo = rnd.choice((None, "PL", "ELC", "PD"))
         de_arriba = rnd.sample([equipos[-1], equipos[0], 888888, 888888], rnd.choice((0, 2, 4)))
-        fuerzas.append({"previa": previa, "actual": actual, "media": _prom(rnd), "inicio": inicio,
-                        "codigo": codigo, "de_arriba": de_arriba, "fuera": [999999, 888888]})
+        fuerzas.append({"previa": previa, "actual": actual, "codigo": codigo, "de_arriba": de_arriba,
+                        "fuera": [999999, 888888]})
+    exactas = {"exp": [rnd.uniform(-6, 6) for _ in range(3000)] + [0.0, -0.0, 1e-300, -1e-300, 0.5 * math.log(2), 30.0, -30.0],
+               "log": [math.exp(rnd.uniform(-5, 5)) for _ in range(3000)]
+               + [1.0, 0.8, 0.85, 1.2, 1.3, 2.0, 0.5, 1.4142135623730951, 0.7071067811865476, 1e-9, 1e9]}
     # respuestas de la API: desordenadas, sin resultado, con prórroga y penaltis, sin equipo,
     # con playoffs (solo_liga los quita) y alguna casi toda de playoffs (entonces se quedan todos)
     compactos = []
@@ -271,9 +300,10 @@ def _casos(rnd):
     for i, (n_equipos, jornadas_previa, jornadas_ultima) in enumerate(((20, 38, 38), (18, 34, 34), (20, 8, 38), (20, 38, 6))):
         equipos = list(range(100 * i, 100 * i + n_equipos))
         fuerza = {e: rnd.uniform(0.6, 1.6) for e in equipos}
+        tiros = (0.0, 1.0, 0.85, 1.0)[i]
         validaciones.append({"codigo": f"T{i}", "nombre": f"Prueba {i}", "season": 2024,
-                             "previa": _temporada(rnd, equipos, fuerza, jornadas_previa),
-                             "ultima": _temporada(rnd, equipos, fuerza, jornadas_ultima)})
+                             "previa": _temporada(rnd, equipos, fuerza, jornadas_previa, tiros),
+                             "ultima": _temporada(rnd, equipos, fuerza, jornadas_ultima, tiros if i != 3 else 0.0)})
     # una Championship: tres equipos cambian, dos bajan de la Premier (que juegan
     # su temporada anterior) y uno sube; y una Premier, con su propio ascendido
     for codigo, i in (("ELC", 5), ("PL", 6)):
@@ -282,8 +312,8 @@ def _casos(rnd):
         arriba = list(range(100 * i + 50, 100 * i + 52)) + list(range(100 * i + 60, 100 * i + 78))
         fuerza = {e: rnd.uniform(0.6, 1.6) for e in viejos + nuevos + arriba}
         validaciones.append({"codigo": codigo, "nombre": f"Prueba {codigo}", "season": 2024,
-                             "previa": _temporada(rnd, viejos, fuerza, 46),
-                             "ultima": _temporada(rnd, nuevos, fuerza, 46),
+                             "previa": _temporada(rnd, viejos, fuerza, 46, 1.0),
+                             "ultima": _temporada(rnd, nuevos, fuerza, 46, 0.95),
                              "arriba": _temporada(rnd, arriba, fuerza, 38) if codigo == "ELC" else None})
     # la Champions (validar_champions): tres ligas con sus equipos de Champions (una de
     # ellas la Championship, sin nivel propio) y equipos de fuera del plan; días de
@@ -296,8 +326,8 @@ def _casos(rnd):
             equipos = list(range(5000 + 1000 * caso + 100 * j, 5000 + 1000 * caso + 100 * j + 20))
             fuerza.update({e: rnd.uniform(0.6, 1.6) for e in equipos})
             ligas_cl.append({"codigo": codigo, "nombre": f"Liga {codigo}",
-                             "previa": _temporada(rnd, equipos, fuerza, 38),
-                             "ultima": _temporada(rnd, equipos, fuerza, jornadas)})
+                             "previa": _temporada(rnd, equipos, fuerza, 38, 1.0 if j else 0.0),
+                             "ultima": _temporada(rnd, equipos, fuerza, jornadas, 1.0 if j else 0.0)})
             de_cl += equipos[:4]
         de_cl += [90000 + 10 * caso + j for j in range(6)]
         fuerza.update({e: rnd.uniform(0.6, 1.6) for e in de_cl if e >= 90000})
@@ -306,17 +336,82 @@ def _casos(rnd):
     # redondeo: empates exactos (0.125, 2.675...), negativos y valores corrientes
     redondeo = [[x, n] for x in (0.125, 0.375, 2.675, 1.005, 12.345, 45.675, -0.125, 0.5, 1.5, 2.5)
                 for n in (0, 1, 2)] + [[rnd.uniform(0, 100), rnd.choice((1, 2, 3, 4))] for _ in range(3000)]
-    return {"fuerzas": fuerzas, "compactos": compactos, "partidos": partidos, "sueltos": sueltos,
-            "champions": champions, "validacion": validaciones, "validacion_cl": validacion_cl, "redondeo": redondeo}
+    return {"fuerzas": fuerzas, "exactas": exactas, "tiros": _casos_tiros(rnd), "compactos": compactos,
+            "partidos": partidos, "sueltos": sueltos, "champions": champions, "validacion": validaciones,
+            "validacion_cl": validacion_cl, "redondeo": redondeo}
+
+
+def _casos_tiros(rnd):
+    """CSV de football-data.co.uk inventados para unos partidos de football-data.org, y los
+    partidos (compactos y como los guarda la validación) que hay que casar con ellos: cada
+    equipo con su nombre en el CSV (alguno escrito de dos formas), fechas del mismo día o de
+    uno antes o después, partidos que el CSV no trae y filas que no están en la lista, tiros
+    que faltan, filas rotas, BOM y CRLF."""
+    casos = []
+    for k in range(60):
+        ids = [7000 + 40 * k + j for j in range(rnd.choice((6, 20)))]
+        nombres = {t: rnd.choice(("Man United", "Nott'm Forest", "Ath Madrid", "Sp Lisbon", "Paris SG", "Dortmund"))
+                   + f" {j}" for j, t in enumerate(ids)}
+        dos_formas = {ids[0]: [nombres[ids[0]], nombres[ids[0]].replace("'", "").upper()]}
+        partidos, dia = [], 20000 + rnd.randint(0, 300)
+        for _ in range(rnd.choice((0, 5, 60, 200))):
+            dia += rnd.choice((0, 0, 1, 3, 7))
+            loc, vis = rnd.sample(ids, 2)
+            partidos.append([dia, loc, vis, rnd.randint(0, 4), rnd.randint(0, 3)])
+        filas_csv = []
+        for p in partidos:
+            if rnd.random() < 0.08:
+                continue                                         # el CSV no lo trae (aún)
+            d = p[0] + rnd.choice((0, 0, 0, 0, 1, -1))
+            f = app._EPOCA.fromordinal(app._EPOCA.toordinal() + d)
+            fecha = f"{f.day:02d}/{f.month:02d}/" + (f"{f.year}" if k % 2 else f"{f.year % 100:02d}")
+            nom = lambda t: rnd.choice(dos_formas.get(t, [nombres[t]]))   # noqa: E731
+            hst = "" if rnd.random() < 0.05 else str(p[3] + rnd.randint(0, 8))
+            ast = str(p[4] + rnd.randint(0, 6))
+            filas_csv.append(f"E0,{fecha},15:00,{nom(p[1])},{nom(p[2])},{p[3]},{p[4]},H,0,0,D,{rnd.randint(5, 20)},"
+                             f"{rnd.randint(3, 15)},{hst},{ast},10,12")
+        for _ in range(rnd.choice((0, 3))):                      # partidos que no son de la lista
+            filas_csv.append(f"E0,01/01/2025,15:00,Otro {rnd.randint(1, 9)},Otro {rnd.randint(10, 19)},"
+                             f"{rnd.randint(0, 3)},{rnd.randint(0, 3)},H,0,0,D,9,9,4,4,10,12")
+        filas_csv += ["", "E0,31/02/2025,15:00,X,Y,1,0,H,0,0,D,9,9,4,4,1,1", "E0,,15:00,X,Y,1,0", "basura",
+                      "E0,05/05/2025,15:00,X,Y,a,0,H,0,0,D,9,9,4,4,1,1"]
+        rnd.shuffle(filas_csv)
+        cab = "Div,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG,FTR,HTHG,HTAG,HTR,HS,AS,HST,AST,HF,AF"
+        texto = ("\ufeff" if k % 3 == 0 else "") + cab + "\n" + "\n".join(filas_csv)
+        if k % 4 == 0:
+            texto = texto.replace("\n", "\r\n")
+        if k == 1:
+            texto = "Div,Fecha,Local\nE0,01/01/2025,X"             # sin las columnas que hacen falta
+        en_validacion = [{"fecha": app._EPOCA.fromordinal(app._EPOCA.toordinal() + p[0]).isoformat() + "T15:00:00Z",
+                          "local": p[1], "visita": p[2], "gl": p[3], "gv": p[4]} for p in partidos]
+        casos.append({"csv": texto, "lista": partidos, "partidos": en_validacion,
+                      "codigo": rnd.choice(list(app.DIVISION_TIROS)), "season": rnd.choice((2009, 2025, 2026, 2099))})
+    return casos
 
 
 def _python(casos):
     fuerzas = []
     for c in casos["fuerzas"]:
-        fz = app.ajustar_fuerzas(c["previa"], c["actual"], c["media"], c["inicio"],
-                                 codigo_liga=c["codigo"], de_arriba=c["de_arriba"])
+        fz = app.ajustar_fuerzas(c["previa"], c["actual"], codigo_liga=c["codigo"], de_arriba=c["de_arriba"])
         fuerzas.append(dict(fz, fuera=[app.fuerza_equipo(fz, t) for t in c["fuera"]],
                             equipos_arriba=app.equipos_de_partidos(c["previa"])))
+    exactas = {"exp": [app.exp_exacto(x) for x in casos["exactas"]["exp"]],
+               "log": [app.log_exacto(x) for x in casos["exactas"]["log"]]}
+    tiros = []
+    original_tiros = validacion._cargar_tiros
+    try:
+        for c in casos["tiros"]:
+            filas = app.filas_tiros(c["csv"])
+            validacion._cargar_tiros = lambda codigo, season: filas
+            app.TIROS_BASE = TIROS_BASE           # validacion._con_tiros solo baja si hay base
+            try:
+                tiros.append({"filas": filas, "casados": app.casar_tiros(c["lista"], filas),
+                              "con_tiros": validacion._con_tiros("PL", 2025, c["partidos"]),
+                              "url": app.url_tiros(c["codigo"], c["season"])})
+            finally:
+                app.TIROS_BASE = ""
+    finally:
+        validacion._cargar_tiros = original_tiros
     compactos = [app.partidos_compactos(app.solo_liga(ms)) for ms in casos["compactos"]]
     partidos = []
     for c in casos["partidos"]:
@@ -364,6 +459,8 @@ def _python(casos):
 
     vals = []
     original = validacion._cargar_temporada
+    original_tiros = validacion._cargar_tiros
+    validacion._cargar_tiros = lambda codigo, season: []   # los tiros ya van en los partidos
     try:
         for c in casos["validacion"]:
             temporadas = {(c["codigo"], c["season"] - 1): c["previa"], (c["codigo"], c["season"]): c["ultima"]}
@@ -387,14 +484,16 @@ def _python(casos):
                                                                fotos)})
     finally:
         validacion._cargar_temporada = original
+        validacion._cargar_tiros = original_tiros
 
     constantes = {k: getattr(app, k) for k in (
         "LIGAS", "TORNEOS", "FACTOR_LIGA", "FACTOR_OTRA_LIGA", "EXPONENTE_FUERZA_CHAMPIONS", "K_HISTORIAL_CHAMPIONS",
-        "DIAS_VALIDEZ_LIGA_EQUIPO", "HORAS_VALIDEZ_LIGA", "HORAS_VALIDEZ_PREDICCION", "FACTOR_DIARIO",
-        "PSEUDO_GOLES_ATAQUE", "PSEUDO_GOLES_DEFENSA", "ATAQUE_RECIEN_LLEGADO", "DEFENSA_RECIEN_LLEGADO",
+        "DIAS_VALIDEZ_LIGA_EQUIPO", "HORAS_VALIDEZ_LIGA", "HORAS_VALIDEZ_PREDICCION", "KALMAN_DERIVA",
+        "KALMAN_INICIO", "KALMAN_TEMPORADA", "KALMAN_NUEVO", "PESO_TIROS", "EXPONENTE_FUERZAS", "DIVISION_TIROS",
+        "HORAS_VALIDEZ_TIROS", "DIAS_VALIDEZ_TIROS_PREVIA", "HORAS_REINTENTO_TIROS",
+        "ATAQUE_RECIEN_LLEGADO", "DEFENSA_RECIEN_LLEGADO",
         "LIGA_DE_ARRIBA", "ATAQUE_DESCENDIDO", "DEFENSA_DESCENDIDO", "VERSION_MODELO", "FORMATO_LISTAS",
-        "TOLERANCIA_FUERZAS",
-        "MAX_ITER_FUERZAS", "K_LIGA", "PRIOR_AVG_LOCAL", "PRIOR_AVG_VISITA", "DIAS_VALIDEZ_PRIOR",
+        "K_LIGA", "PRIOR_AVG_LOCAL", "PRIOR_AVG_VISITA", "DIAS_VALIDEZ_PRIOR",
         "LIMITE_GOLES", "RHO_EMPATES", "ENCOGER_TOTAL", "MENOS_CEROS", "DIAS_SEMANA", "MAX_DIAS_BUSQUEDA",
         "HORAS_VALIDEZ_FIXTURES")}
     constantes.update({
@@ -402,10 +501,12 @@ def _python(casos):
         "LIGAS_ANO_NATURAL": sorted(app.LIGAS_ANO_NATURAL),
         "MAX_INTENTOS_VALIDACION": app.MAX_INTENTOS_VALIDACION,
         "MIN_MINUTOS_ACTUALIZACION": app.MIN_INTERVALO_ACTUALIZACION.total_seconds() / 60,
+        "TIROS_BASE": TIROS_BASE,
         "TZ": app._TZ_NOMBRE,
     })
     redondeo = [round(x, n) for x, n in casos["redondeo"]]
-    return {"constantes": constantes, "fuerzas": fuerzas, "compactos": compactos, "partidos": partidos,
+    return {"constantes": constantes, "fuerzas": fuerzas, "exactas": exactas, "tiros": tiros,
+            "compactos": compactos, "partidos": partidos,
             "sueltos": sueltos, "champions": champions, "validacion": vals, "validacion_cl": vals_cl,
             "validacion_cl_tramos": vals_cl, "redondeo": redondeo}
 
@@ -486,8 +587,8 @@ def main():
     js = json.loads(proc.stdout)
 
     fallos = 0
-    for parte in ("constantes", "fuerzas", "compactos", "partidos", "sueltos", "champions", "validacion",
-                  "validacion_cl", "validacion_cl_tramos", "redondeo"):
+    for parte in ("constantes", "fuerzas", "exactas", "tiros", "compactos", "partidos", "sueltos", "champions",
+                  "validacion", "validacion_cl", "validacion_cl_tramos", "redondeo"):
         comp = Comparador()
         comp.comparar(py[parte], js[parte], parte)
         tolerables, graves = [], []
@@ -495,7 +596,8 @@ def main():
             numeros = all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in (a, b))
             # un redondeo en el borde: como mucho una unidad de la última cifra que se publica
             # (las fuerzas y las listas no se redondean: tienen que salir idénticas)
-            if parte not in ("constantes", "fuerzas", "compactos", "redondeo") and numeros and abs(a - b) <= 0.0100000001:
+            if (parte not in ("constantes", "fuerzas", "exactas", "tiros", "compactos", "redondeo") and numeros
+                    and abs(a - b) <= 0.0100000001):
                 tolerables.append((ruta, a, b))
             else:
                 graves.append((ruta, a, b))

@@ -15,7 +15,8 @@
 # el historial de aciertos suma bien cada semana y tiene su página (resultados.py),
 # el calendario de Mis equipos es un .ics bien hecho que sigue a sus equipos (ics.py), la
 # limpieza del día borra lo caducado (limpieza.py) y el cron avisa a IndexNow de las páginas
-# nuevas (indexnow.py, contra el IndexNow de mentira de la API falsa).
+# nuevas (indexnow.py, contra el IndexNow de mentira de la API falsa). Los tiros a puerta salen
+# de los CSV de football-data.co.uk de mentira de la API falsa (TIROS_BASE), en los dos.
 #
 # Uso: bash pruebas/e2e.sh   (antes: npm ci y pip install -r requirements.txt)
 # Las variables del Worker van con --var, que manda sobre .dev.vars: tu token de
@@ -71,6 +72,7 @@ echo "== Worker"
   --var "TURNSTILE_VERIFICAR:http://127.0.0.1:$P_API/turnstile/v0/siteverify" \
   --var "PUSH_PRUEBA:http://127.0.0.1:$P_API" --var AVISO_ANTES_MIN:20160 --var MAX_ENVIOS_PASADA:3 \
   --var MAX_CALENDARIOS_DIA:5 --var "INDEXNOW_URL:http://127.0.0.1:$P_API/indexnow" \
+  --var "TIROS_BASE:http://127.0.0.1:$P_API" \
   > "$TMP/wrangler.log" 2>&1) &
 esperar "http://127.0.0.1:$P_W/salud"
 python3 "$REPO/pruebas/correr_cron.py" "$P_W" "$P_INS" 600 "$MAX_MS" | tail -4
@@ -83,6 +85,28 @@ echo "pasadas muertas: $muertas"
 curl -s "http://127.0.0.1:$P_API/__stats" | python3 -c "import json,sys; print('peticiones del Worker:', json.load(sys.stdin)['total'])"
 # la temporada anterior de la Championship trae 5 partidos de playoff: no cuentan
 curl -s "http://127.0.0.1:$P_W/api/ligas" | python3 -c "import json,sys; n = json.load(sys.stdin)['ELC']['ancla_partidos']; print('Championship, temporada anterior:', n, 'partidos de liga'); assert n == 552, n"
+# los tiros a puerta (los CSV de la API falsa): las 8 ligas que los tienen se ajustaron con
+# ellos (menos los 4 partidos más recientes de cada una, que la API falsa aún no publica, y los
+# que traen el tiro en blanco), con el exponente casi entero; el Brasileirão y la Champions, sin
+curl -s "http://127.0.0.1:$P_W/api/ligas" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+t = {c: d[c].get('tiros') for c in d}
+assert t['BSA'] is None and t['CL'] is None, t
+for c, v in t.items():
+    if c not in ('BSA', 'CL'):
+        assert v and v['partidos_con_tiros'] > 300 and 1.13 < v['exponente'] <= 1.15 and v['fallo'] is False, (c, v)
+print('tiros a puerta:', ', '.join(f\"{c} {v['partidos_con_tiros']}\" for c, v in t.items() if v))"
+(cd "$REPO" && FOOTBALL_DATA_TOKEN=sin_uso UPDATE_SECRET=tiros_dummy_secret python3 -c "
+import app
+app.TIROS_BASE = 'http://127.0.0.1:9'          # nadie escucha: el CSV falla
+cache = {}
+e = app.obtener_tiros_liga('PL', 2026, 'actual', cache)
+assert e['fallo'] and e['filas'] == [], e
+assert app.obtener_tiros_liga('PL', 2026, 'actual', cache) is e   # no se pide en cada pasada
+f = app.ajustar_fuerzas(app.casar_tiros([[20000 + k, k % 4, (k + 1) % 4, 1, 0] for k in range(40)], e['filas']), [])
+assert f['con_tiros'] == 0 and f['exponente'] == 1.0, f
+print('Flask: un CSV de tiros que falla se apunta, no se pide en cada pasada y el modelo sigue con los goles')")
 
 echo "== Tablas y lo que falta de cada temporada"
 python3 "$REPO/pruebas/tablas.py" "$P_W" "$P_INS" "$P_API" "$MAX_MS"

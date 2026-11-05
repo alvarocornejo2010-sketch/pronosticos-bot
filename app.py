@@ -2,6 +2,8 @@ import os
 import sys
 import hmac
 import json
+import math
+import re
 import time
 import threading
 from collections import defaultdict
@@ -52,6 +54,20 @@ LIGAS = {
     # Europa League y Conference League no están en el plan free.
 }
 
+# Tiros a puerta (modelo 6, nov 2026): football-data.co.uk publica gratis, sin cuenta,
+# un CSV por liga y temporada con el resultado de cada partido y sus tiros a puerta
+# (columnas HST y AST), y lo pone al día un par de veces por semana. De ahí sale la
+# mitad de lo que el filtro de Kalman observa de cada partido (PESO_TIROS). Es otra
+# fuente que football-data.org: sus nombres son otros ("Man United") y se casan con
+# los equipos de football-data.org por la fecha y el marcador (casar_tiros). Si no
+# responde, el modelo sigue con los goles solos: medido, igual o mejor que el modelo 5.
+TIROS_BASE = os.environ.get("TIROS_BASE", "https://www.football-data.co.uk").rstrip("/")
+DIVISION_TIROS = {"PL": "E0", "ELC": "E1", "PD": "SP1", "BL1": "D1", "SA": "I1", "FL1": "F1",
+                  "DED": "N1", "PPL": "P1"}     # el Brasileirão no trae tiros
+HORAS_VALIDEZ_TIROS = 12        # los de la temporada en curso
+DIAS_VALIDEZ_TIROS_PREVIA = 30  # los de la anterior ya no cambian
+HORAS_REINTENTO_TIROS = 6       # tras un fallo
+
 # Torneos: NO se predicen con sus propios partidos. En la Champions cada equipo
 # juega 4 en casa y 4 fuera contra rivales de niveles muy distintos, y su "media
 # de liga" mezcla al Bayern con el campeón de Kazajistán. Cada equipo se mide en
@@ -66,7 +82,7 @@ TORNEOS = {
 # partidos, datos de openfootball), con validación cruzada (ver CLAUDE.md,
 # "Champions"). Championship y Brasileirão no juegan la Champions; si algún día
 # hiciera falta, usan FACTOR_OTRA_LIGA.
-FACTOR_LIGA = {"PL": 1.25, "PD": 1.06, "FL1": 1.08, "SA": 1.01, "BL1": 1.06, "PPL": 0.86, "DED": 0.73}
+FACTOR_LIGA = {"PL": 1.27, "PD": 1.05, "FL1": 1.08, "SA": 1.02, "BL1": 1.06, "PPL": 0.85, "DED": 0.71}
 # Equipos de ligas fuera del plan (Bélgica, Austria, Escocia...): sin datos de su
 # liga, cuentan como un equipo medio de este nivel.
 FACTOR_OTRA_LIGA = 0.87
@@ -75,11 +91,11 @@ FACTOR_OTRA_LIGA = 0.87
 # exagera. Sale 0.82 (entre 0.71 y 0.90 en los nueve ajustes de la validación):
 # las fuerzas ya vienen ajustadas por rival y encogidas, así que hay que
 # atenuarlas mucho menos que las de antes (0.39).
-EXPONENTE_FUERZA_CHAMPIONS = 0.82
+EXPONENTE_FUERZA_CHAMPIONS = 0.77
 # Los goles esperados parten de la media de la Champions por este factor (local,
 # visitante): con equipos que en su liga son de los mejores, el producto de
 # ataque y defensa sale por encima de 1 y hay que compensarlo.
-ESCALA_CHAMPIONS = (0.90, 0.89)
+ESCALA_CHAMPIONS = (0.90, 0.90)
 # Historial en la Champions: lo que cada equipo marcó y encajó en sus partidos de
 # Champions de esta temporada y la anterior, frente a lo que se esperaba de un
 # equipo de su nivel de liga contra esos mismos rivales. Corrige la fuerza que da
@@ -89,7 +105,7 @@ ESCALA_CHAMPIONS = (0.90, 0.89)
 # partidos queda como estaba. Con la fuerza nacional de ahora, mejor medida, el
 # historial aporta menos que antes. Sale de los mismos partidos que ya se bajan
 # para la media de la Champions.
-K_HISTORIAL_CHAMPIONS = 54
+K_HISTORIAL_CHAMPIONS = 66
 DIAS_VALIDEZ_LIGA_EQUIPO = 30   # de qué liga es cada equipo: no cambia en la temporada
 
 # Zona horaria de referencia para decidir qué es "hoy".
@@ -157,20 +173,34 @@ HORAS_VALIDEZ_PREDICCION = 24
 DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 # --- Parámetros del modelo ---
-# La fuerza de cada equipo (ajustar_fuerzas): un ataque y una defensa por
-# equipo, con TODOS sus partidos de liga de esta temporada y la anterior (en
-# casa y fuera), cada uno medido frente al rival que tuvo y pesado por su
-# antigüedad. Medido con afinar_liga.py en 8 ligas y 15 temporadas de
-# openfootball: los valores se eligieron mirando 2010/11 a 2020/21 (19.753
-# partidos) y se juzgaron en 2021/22 a 2025/26 (14.706), que no se usaron para
-# elegir. Frente al modelo de antes (últimos 20 partidos, casa y fuera por
-# separado, sin mirar al rival): skill del 1X2 de +6.1% a +8.9%, mejor en las
-# 9 ligas y en todas las temporadas. Detalle en CLAUDE.md ("El modelo").
-FACTOR_DIARIO = 0.998           # peso de un partido de hace un día frente a uno de hoy:
-                                # a los 347 días pesa la mitad. Se multiplica día a día
-                                # (no con exp) para que Python y JavaScript den lo mismo.
-PSEUDO_GOLES_ATAQUE = 6         # encogimiento hacia el equipo medio, en goles esperados:
-PSEUDO_GOLES_DEFENSA = 8        # con pocos partidos un equipo queda cerca de 1
+# La fuerza de cada equipo (ajustar_fuerzas, modelo 6, nov 2026): un ataque y una
+# defensa por equipo, que un filtro de Kalman sigue partido a partido con TODOS sus
+# partidos de liga de esta temporada y la anterior (en casa y fuera), cada uno medido
+# frente al rival que tuvo. De cada partido se observa la mitad de sus goles y la mitad
+# de lo que valen sus tiros a puerta (de football-data.co.uk, ver "TIROS A PUERTA"):
+# los tiros tienen mucho menos azar que los goles. Medido con afinar_liga.py en 8 ligas
+# y 16 temporadas de openfootball: elegido mirando 2010/11 a 2020/21 y juzgado en
+# 2021/22 a 2025/26, que no se usaron para elegir. Frente al modelo 5 (un ajuste con
+# los goles pesados por antigüedad): skill del 1X2 de +8.9% a +9.5% en la prueba
+# (-8.3 se), mejor en las 8 ligas y en las 16 temporadas. Detalle en CLAUDE.md ("El
+# modelo").
+#
+# Cada log-fuerza es un paseo aleatorio: su varianza crece KALMAN_DERIVA por día y cada
+# partido la corrige (un paso de Newton de la verosimilitud de Poisson, con la varianza
+# de las dos fuerzas que intervienen). Mismas operaciones en el mismo orden que
+# ajustarFuerzas en worker/modelo.js, con exp_exacto y log_exacto: test_paridad.py
+# comprueba que dan el mismo double.
+KALMAN_DERIVA = 5e-5            # varianza que gana cada log-fuerza por día: en un año, 0.018
+KALMAN_INICIO = 0.16            # la de partida de un equipo de la temporada anterior (fuerza 1)
+KALMAN_TEMPORADA = 0.005        # la que se suma a todos al empezar la temporada (fichajes)
+KALMAN_NUEVO = 0.06             # la de partida de un recién llegado, que parte de su prior
+PESO_TIROS = 0.5                # de cada partido se observa la mitad de sus goles y la mitad
+                                # de lo que valen sus tiros a puerta (los goles por tiro a
+                                # puerta de la temporada anterior en esa liga, en casa y fuera)
+EXPONENTE_FUERZAS = 1.15        # con tiros, el filtro queda corto de confianza (sus favoritos
+                                # del 70-80% ganaban el 79%): las fuerzas salen elevadas a
+                                # 1 + 0.15 x la parte de los partidos que traen tiros. Sin
+                                # tiros (el Brasileirão, o si football-data.co.uk falla), 1.
 ATAQUE_RECIEN_LLEGADO = 0.8     # un equipo que no estaba la temporada pasada (un
                                 # ascendido) parte de un ataque un 20% peor que el medio.
                                 # Su defensa, como la de un equipo medio...
@@ -189,19 +219,15 @@ DEFENSA_RECIEN_LLEGADO = {"PL": 1.3}   # ...salvo en la Premier, donde el que su
 LIGA_DE_ARRIBA = {"ELC": "PL"}
 ATAQUE_DESCENDIDO = 1.2
 DEFENSA_DESCENDIDO = 0.85
-VERSION_MODELO = 5              # subirlo al cambiar el modelo: las fuerzas guardadas se
+VERSION_MODELO = 6              # subirlo al cambiar el modelo: las fuerzas guardadas se
                                 # recalculan, cada ficha dice con cuál se calculó (una de
                                 # otra versión se recalcula) y en Cloudflare (donde D1
                                 # guarda la validación) esta se repite.
                                 # 3 (oct 2026): sin los playoffs de la Championship
                                 # 4 (oct 2026): los mercados de goles con ENCOGER_TOTAL
                                 # 5 (oct 2026): los mercados de goles con MENOS_CEROS
+                                # 6 (nov 2026): Kalman, tiros a puerta y EXPONENTE_FUERZAS
 FORMATO_LISTAS = 2              # partidos_liga sin playoffs (solo_liga): las de antes se bajan otra vez
-TOLERANCIA_FUERZAS = 1e-4       # el ajuste se repite hasta que nada cambia más que esto:
-                                # con 1e-6 harían falta el doble de vueltas y los goles
-                                # esperados (con dos decimales) salen iguales salvo algún
-                                # 0.01 suelto en el borde de un redondeo
-MAX_ITER_FUERZAS = 300
 K_LIGA = 50                     # cuánto pesa el ancla en la media de la propia liga
 
 # Ancla de ÚLTIMO RECURSO, solo si no se puede leer la temporada anterior de la liga.
@@ -386,6 +412,40 @@ def dia_de(utc_date):
     return (date.fromisoformat(utc_date[:10]) - _EPOCA).days
 
 
+# exp y log con sumas, productos y divisiones (más la potencia de 2, exacta): math.exp y
+# Math.exp de JavaScript pueden diferir en el último bit, y el filtro de Kalman encadena
+# cientos de ellas. Así Python y el Worker dan el mismo double (test_paridad.py). Con
+# un error de unos 2e-16, como las de la biblioteca.
+LN2 = 0.6931471805599453
+LN2_ALTO = 0.6931471803691238   # LN2 en dos partes (como fdlibm): n * LN2_ALTO no redondea
+LN2_BAJO = 1.9082149292705877e-10
+
+
+def exp_exacto(x):
+    n = math.floor(x / LN2 + 0.5)
+    r = (x - n * LN2_ALTO) - n * LN2_BAJO       # |r| <= 0.35
+    s = 1.0
+    for k in range(13, 0, -1):                 # Taylor hasta r^13 / 13!, de dentro afuera
+        s = 1.0 + s * r / k
+    return math.ldexp(s, n)                    # s * 2^n, exacto
+
+
+def log_exacto(x):
+    e = 0
+    while x > 1.4142135623730951:
+        x *= 0.5
+        e += 1
+    while x < 0.7071067811865476:
+        x *= 2.0
+        e -= 1
+    z = (x - 1.0) / (x + 1.0)                  # |z| <= 0.172
+    z2 = z * z
+    s = 0.0
+    for k in range(29, 0, -2):                 # 2 (z + z^3/3 + ... + z^29/29)
+        s = 1.0 / k + z2 * s
+    return 2.0 * z * s + e * LN2
+
+
 def solo_liga(matches):
     """Los partidos de la fase de liga, sin playoffs: los de ascenso de la
     Championship no son liga (afinar_liga.py tampoco los cuenta) y se colaban en
@@ -537,7 +597,7 @@ def obtener_promedio_liga(codigo_liga, cache):
 
 
 # ==========================================
-# FUERZAS: ataque y defensa de cada equipo, ajustados por el rival
+# FUERZAS: ataque y defensa de cada equipo
 # ==========================================
 def prior_recien_llegado(codigo_liga, team_id, de_arriba):
     """(ataque, defensa) de los que parte un equipo que no estaba en la liga la
@@ -549,127 +609,287 @@ def prior_recien_llegado(codigo_liga, team_id, de_arriba):
     return ATAQUE_RECIEN_LLEGADO, DEFENSA_RECIEN_LLEGADO.get(codigo_liga, 1.0)
 
 
-def ajustar_fuerzas(previa, actual, media, inicio=None, codigo_liga=None, de_arriba=()):
-    """Ataque y defensa de todos los equipos de una liga.
+# ==========================================
+# TIROS A PUERTA (football-data.co.uk)
+# ==========================================
+def clave_tiros(nombre):
+    """El nombre de un equipo en football-data.co.uk sin mayúsculas ni nada que no sea
+    letra o número: escribe a veces un mismo equipo de dos formas en una temporada
+    ("Nott'm Forest" y "Nottm Forest")."""
+    return re.sub(r"[^a-z0-9]", "", nombre.lower())
 
-    previa y actual son las listas de partidos_compactos de la temporada
-    anterior y la actual (lo jugado hasta hoy); media, la de obtener_promedio_liga.
-    Los goles esperados de un partido son media x ataque propio x defensa rival,
-    y cada fuerza se elige para que cuadren con lo que pasó:
 
-        ataque = (goles marcados + k·a0) / (goles que habría marcado un equipo
-                  medio contra esas mismas defensas + k)
+def _entero(texto):
+    """Un entero de una celda del CSV (solo cifras, hasta 6), o None."""
+    t = texto.strip()
+    return int(t) if 0 < len(t) <= 6 and all(ch in "0123456789" for ch in t) else None
 
-    y lo mismo con la defensa. Como cada una depende de las de los rivales, se
-    repite hasta que no cambian (TOLERANCIA_FUERZAS). Cada partido pesa
-    FACTOR_DIARIO^días (días contados hasta el último partido de la lista), y
-    k (PSEUDO_GOLES_*) son goles esperados de un equipo de prior: con pocos
-    partidos, la fuerza queda cerca de a0, que es 1 o, para un equipo que no
-    estaba la temporada anterior, lo que diga prior_recien_llegado (de_arriba:
-    los equipos de la temporada anterior de la liga de arriba).
 
-    Mismas operaciones y en el mismo orden que ajustarFuerzas en
-    worker/modelo.js: test_paridad.py comprueba que dan lo mismo. inicio (unas
-    fuerzas anteriores) solo acelera la convergencia; lo usa validacion.py.
+def filas_tiros(texto):
+    """[[día, local, visita, goles local, goles visita, tiros a puerta local, visita], ...]
+    de un CSV de resultados de football-data.co.uk (Date, HomeTeam, AwayTeam, FTHG, FTAG,
+    HST, AST; la fecha, dd/mm/aaaa o dd/mm/aa), con los nombres por clave_tiros. Los
+    tiros que falten van como None; una fila sin fecha, equipos o marcador no entra.
+    Mismo orden que filasTiros en worker/modelo.js."""
+    lineas = texto.replace("\r", "").split("\n")
+    cab = [c.strip().lstrip("﻿") for c in lineas[0].split(",")]
+    col = {}
+    for i, c in enumerate(cab):
+        col.setdefault(c, i)
 
-    Devuelve {"equipos": {id: [ataque, defensa, partidos]}, "con_previa",
-    "codigo", "de_arriba", "dia", "iteraciones"}; los equipos sin ningún
-    partido no salen (fuerza_equipo).
+    def indice(*nombres):
+        return next((col[n] for n in nombres if n in col), None)
+    i_f, i_l, i_v = indice("Date"), indice("HomeTeam", "Home"), indice("AwayTeam", "Away")
+    i_gl, i_gv, i_pl, i_pv = indice("FTHG", "HG"), indice("FTAG", "AG"), indice("HST"), indice("AST")
+    if None in (i_f, i_l, i_v, i_gl, i_gv):
+        return []
+    hasta = max(i_f, i_l, i_v, i_gl, i_gv, i_pl or 0, i_pv or 0) + 1
+    out = []
+    for linea in lineas[1:]:
+        c = linea.split(",", hasta)[:hasta]          # solo las columnas que hacen falta
+        if len(c) <= max(i_f, i_l, i_v, i_gl, i_gv):
+            continue
+        partes = c[i_f].strip().split("/")
+        gl, gv = _entero(c[i_gl]), _entero(c[i_gv])
+        local, visita = clave_tiros(c[i_l]), clave_tiros(c[i_v])
+        if len(partes) != 3 or gl is None or gv is None or not local or not visita:
+            continue
+        d, m, a = _entero(partes[0]), _entero(partes[1]), _entero(partes[2])
+        if d is None or m is None or a is None or not 1 <= m <= 12 or not 1 <= d <= 31:
+            continue
+        if a < 100:
+            a += 2000
+        try:
+            dia = (date(a, m, d) - _EPOCA).days
+        except ValueError:
+            continue
+        pl = _entero(c[i_pl]) if i_pl is not None and i_pl < len(c) else None
+        pv = _entero(c[i_pv]) if i_pv is not None and i_pv < len(c) else None
+        out.append([dia, local, visita, gl, gv, pl, pv])
+    return out
+
+
+def casar_tiros(partidos, filas):
+    """La lista de partidos_compactos con los tiros a puerta de cada uno, [día, local,
+    visita, gl, gv, tiros local, tiros visita], cuando football-data.co.uk los trae
+    (filas_tiros); los demás quedan como estaban. Sus nombres no son los de
+    football-data.org ("Man United", "Manchester United FC"): cada equipo toma el que
+    más veces le dan los partidos que solo pueden ser uno (mismo marcador el mismo día,
+    o uno antes o después), y cada partido toma el del mismo cruce y marcador más
+    cercano, a menos de 4 días. Mismo orden que casarTiros en worker/modelo.js."""
+    if not filas:
+        return [list(p[:5]) for p in partidos]
+    por_marcador = {}
+    for f in filas:
+        por_marcador.setdefault((f[0], f[3], f[4]), []).append(f)
+    votos = {}
+    for p in partidos:
+        cand = []
+        for dd in (0, -1, 1):
+            cand += por_marcador.get((p[0] + dd, p[3], p[4]), [])
+        if len(cand) == 1:
+            for t, nombre in ((p[1], cand[0][1]), (p[2], cand[0][2])):
+                v = votos.setdefault(t, {})
+                v[nombre] = v.get(nombre, 0) + 1
+    nombre_de = {}
+    for t, v in votos.items():
+        mejor, n = None, 0
+        for nombre, k in v.items():          # en caso de empate, el primero que salió
+            if k > n:
+                mejor, n = nombre, k
+        nombre_de[t] = mejor
+    por_cruce = {}
+    for f in filas:
+        por_cruce.setdefault((f[1], f[2], f[3], f[4]), []).append(f)
+    out = []
+    for p in partidos:
+        mejor = None
+        for f in por_cruce.get((nombre_de.get(p[1]), nombre_de.get(p[2]), p[3], p[4]), []):
+            if abs(f[0] - p[0]) <= 3 and (mejor is None or abs(f[0] - p[0]) < abs(mejor[0] - p[0])):
+                mejor = f
+        if mejor is not None and mejor[5] is not None and mejor[6] is not None:
+            out.append(list(p[:5]) + [mejor[5], mejor[6]])
+        else:
+            out.append(list(p[:5]))
+    return out
+
+
+def url_tiros(codigo_liga, season):
+    s = season % 100
+    return f"{TIROS_BASE}/mmz4281/{s:02d}{(s + 1) % 100:02d}/{DIVISION_TIROS[codigo_liga]}.csv"
+
+
+def obtener_tiros_liga(codigo_liga, season, clave, cache):
+    """Los tiros a puerta de una temporada de una liga (filas_tiros), guardados en la
+    sección tiros de la caché: los de la temporada en curso (clave "actual") se vuelven a
+    bajar cada HORAS_VALIDEZ_TIROS y los de la anterior ("previa"), cada
+    DIAS_VALIDEZ_TIROS_PREVIA. Un fallo (sin red, 404 al empezar la temporada, un CSV
+    sin filas) se apunta, con lo que ya hubiera de esa temporada, y se reintenta a las
+    HORAS_REINTENTO_TIROS. None si la liga no tiene tiros (DIVISION_TIROS) o no están
+    activados (TIROS_BASE vacío) y no hay nada guardado."""
+    if codigo_liga not in DIVISION_TIROS:
+        return None
+    seccion = cache.setdefault("tiros", {})
+    k = f"{codigo_liga}:{clave}"
+    e = seccion.get(k)
+    if e and e.get("temporada") != season:
+        e = None
+    dias = (HORAS_REINTENTO_TIROS / 24 if e and e.get("fallo")
+            else DIAS_VALIDEZ_TIROS_PREVIA if clave == "previa" else HORAS_VALIDEZ_TIROS / 24)
+    if (e and esta_vigente(e.get("actualizado"), dias)) or not TIROS_BASE:
+        return e
+    filas = []
+    try:
+        resp = requests.get(url_tiros(codigo_liga, season), timeout=30,
+                            headers={"User-Agent": "pronosticos-bot"})
+        if resp.status_code == 200:
+            filas = filas_tiros(resp.text)
+        else:
+            print(f"Tiros {codigo_liga} {season}: HTTP {resp.status_code}", file=sys.stderr)
+    except requests.RequestException as ex:
+        print(f"Tiros {codigo_liga} {season}: {ex}", file=sys.stderr)
+    nueva = {"temporada": season, "filas": filas, "actualizado": ahora().isoformat()}
+    if not filas:
+        nueva.update(filas=(e or {}).get("filas", []), fallo=True)
+    seccion[k] = nueva
+    return nueva
+
+
+# ==========================================
+# FUERZAS: un filtro de Kalman, partido a partido
+# ==========================================
+def ajustar_fuerzas(previa, actual, codigo_liga=None, de_arriba=()):
+    """Ataque y defensa de todos los equipos de una liga (modelo 6, nov 2026).
+
+    previa y actual son las listas de partidos_compactos de la temporada anterior y
+    la actual (lo jugado hasta hoy), con los tiros a puerta de cada partido si los
+    hay (casar_tiros). Cada equipo tiene un log-ataque y una log-defensa, cada uno
+    con su varianza, y los goles esperados de un partido son media de la liga x
+    ataque propio x defensa rival (la media de la temporada de ese partido: la de la
+    anterior, o la de esta hasta el día antes anclada en la anterior con K_LIGA, como
+    obtener_promedio_liga). Partido a partido, en orden:
+
+      - la varianza de los dos equipos crece KALMAN_DERIVA por cada día sin jugar (y
+        KALMAN_TEMPORADA al empezar la temporada);
+      - lo observado de cada lado es la mitad de sus goles y la mitad de sus tiros a
+        puerta por los goles que vale cada uno en la liga (PESO_TIROS), o sus goles
+        si el partido no trae tiros;
+      - ataque y defensa se corrigen con lo observado menos lo esperado, cada uno en
+        proporción a su varianza (un paso de Newton de Poisson), y su varianza baja.
+
+    Un equipo de la temporada anterior parte de 1 con varianza KALMAN_INICIO; uno que
+    no estaba, de prior_recien_llegado con KALMAN_NUEVO. Al final, cada fuerza se eleva
+    a 1 + (EXPONENTE_FUERZAS - 1) x la parte de los partidos que traen tiros.
+
+    Mismas operaciones y en el mismo orden que ajustarFuerzas en worker/modelo.js (con
+    exp_exacto y log_exacto): test_paridad.py comprueba que dan el mismo double.
+
+    Devuelve {"equipos": {id: [ataque, defensa, partidos]}, "con_previa", "codigo",
+    "de_arriba", "dia", "exponente", "con_tiros"}; los equipos sin ningún partido no
+    salen (fuerza_equipo).
     """
-    todos = list(previa) + list(actual)
+    previa, actual = list(previa), list(actual)
     con_previa = len(previa) > 0
     de_arriba = list(dict.fromkeys(de_arriba))
-    if not todos:
+    if not previa and not actual:
         return {"equipos": {}, "con_previa": con_previa, "codigo": codigo_liga, "de_arriba": de_arriba,
-                "dia": None, "iteraciones": 0}
-    ref = max(p[0] for p in todos)
-    ids, idx = [], {}
-    for p in todos:
-        for t in (p[1], p[2]):
-            if t not in idx:
-                idx[t] = len(ids)
-                ids.append(t)
-    T = len(ids)
+                "dia": None, "exponente": 1.0, "con_tiros": 0}
+    arriba = set(de_arriba)
     previos = set()
     for p in previa:
         previos.add(p[1]); previos.add(p[2])
-    arriba = set(de_arriba)
-    a0, d0 = [], []
-    for t in ids:
-        a, d = (prior_recien_llegado(codigo_liga, t, arriba) if con_previa and t not in previos
-                else (1.0, 1.0))
-        a0.append(a)
-        d0.append(d)
-    # pesos por antigüedad, multiplicando día a día: el mismo double en los dos lenguajes
-    pesos = [1.0]
-    for _ in range(ref - min(p[0] for p in todos)):
-        pesos.append(pesos[-1] * FACTOR_DIARIO)
-    ml, mv = media["avg_local"], media["avg_visita"]
-    k_at, k_de = PSEUDO_GOLES_ATAQUE, PSEUDO_GOLES_DEFENSA
-    num_at = [k_at * a for a in a0]
-    num_de = [k_de * d for d in d0]
-    jugados = [0] * T
-    # peso total de cada cruce (i en casa contra j): lo único que hace falta de
-    # cada partido en las vueltas del ajuste, que así cuestan T² y no lo que
-    # tenga la lista (24 equipos: 576 cruces frente a ~1.100 partidos)
-    cruce = [[0.0] * T for _ in range(T)]
-    for d, loc, vis, gl, gv in todos:
-        i, j, w = idx[loc], idx[vis], pesos[ref - d]
-        num_at[i] += w * gl
-        num_at[j] += w * gv
-        num_de[i] += w * gv
-        num_de[j] += w * gl
-        jugados[i] += 1
-        jugados[j] += 1
-        cruce[i][j] += w
-    # lo que pesa la defensa de j en los goles esperados de i (en casa, media
-    # local; fuera, media visitante), y el ataque de j en los que encaja i
-    pesa_de = [[ml * cruce[i][j] + mv * cruce[j][i] for j in range(T)] for i in range(T)]
-    pesa_at = [[mv * cruce[i][j] + ml * cruce[j][i] for j in range(T)] for i in range(T)]
-    ataque = list(a0)
-    defensa = list(d0)
-    if inicio:
-        for x, t in enumerate(ids):
-            e = inicio.get(str(t))
-            if e:
-                ataque[x], defensa[x] = e[0], e[1]
-    it = 0
-    while it < MAX_ITER_FUERZAS:
-        it += 1
-        nuevo_at = [0.0] * T
-        for i in range(T):
-            fila, den = pesa_de[i], float(k_at)
-            for j in range(T):
-                den += fila[j] * defensa[j]
-            nuevo_at[i] = num_at[i] / den
-        nueva_de = [0.0] * T
-        for i in range(T):
-            fila, den = pesa_at[i], float(k_de)
-            for j in range(T):
-                den += fila[j] * nuevo_at[j]
-            nueva_de[i] = num_de[i] / den
-        cambio = 0.0
-        for x in range(T):
-            cambio = max(cambio, abs(nuevo_at[x] - ataque[x]), abs(nueva_de[x] - defensa[x]))
-        ataque, defensa = nuevo_at, nueva_de
-        if cambio < TOLERANCIA_FUERZAS:
+    # la media de la temporada anterior, como el ancla de obtener_prior_liga (o la de respaldo)
+    if len(previa) >= 100:
+        al, av = sum(p[3] for p in previa) / len(previa), sum(p[4] for p in previa) / len(previa)
+    else:
+        al, av = PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA
+    # goles por tiro a puerta, en casa y fuera: los de la temporada anterior (o, sin sus
+    # tiros, los de esta)
+    kl = kv = 0.0
+    for lista in (previa, actual):
+        gl = gv = tl = tv = 0
+        for p in lista:
+            if len(p) > 5:
+                gl += p[3]; gv += p[4]; tl += p[5]; tv += p[6]
+        if tl > 0 and tv > 0:
+            kl, kv = gl / tl, gv / tv
             break
-    return {"equipos": {str(t): [ataque[x], defensa[x], jugados[x]] for x, t in enumerate(ids)},
+    W = PESO_TIROS
+    estado = {}            # id -> [log-ataque, log-defensa, sus varianzas, último día, partidos]
+    orden = []
+    con_tiros = 0
+    gl_t = gv_t = n_t = 0  # goles de esta temporada hasta el día anterior
+    pend_l = pend_v = pend_n = 0
+    dia_t = None
+    todos = previa + actual
+    for i, p in enumerate(todos):
+        d, loc, vis, gl, gv = p[0], p[1], p[2], p[3], p[4]
+        en_actual = i >= len(previa)
+        if en_actual:
+            if i == len(previa):
+                for t in orden:
+                    estado[t][2] += KALMAN_TEMPORADA
+                    estado[t][3] += KALMAN_TEMPORADA
+            if d != dia_t:
+                gl_t += pend_l; gv_t += pend_v; n_t += pend_n
+                pend_l = pend_v = pend_n = 0
+                dia_t = d
+            ml = (gl_t + K_LIGA * al) / (n_t + K_LIGA)
+            mv = (gv_t + K_LIGA * av) / (n_t + K_LIGA)
+        else:
+            ml, mv = al, av
+        for t in (loc, vis):
+            e = estado.get(t)
+            if e is None:
+                if en_actual and con_previa and t not in previos:
+                    a0, d0 = prior_recien_llegado(codigo_liga, t, arriba)
+                    e = [log_exacto(a0), log_exacto(d0), KALMAN_NUEVO, KALMAN_NUEVO, d, 0]
+                else:
+                    e = [0.0, 0.0, KALMAN_INICIO, KALMAN_INICIO, d, 0]
+                estado[t] = e
+                orden.append(t)
+            if d > e[4]:
+                e[2] += KALMAN_DERIVA * (d - e[4])
+                e[3] += KALMAN_DERIVA * (d - e[4])
+                e[4] = d
+            e[5] += 1
+        el, ev = estado[loc], estado[vis]
+        lam_l = ml * exp_exacto(el[0] + ev[1])
+        lam_v = mv * exp_exacto(ev[0] + el[1])
+        if len(p) > 5 and kl > 0:
+            y_l = (1 - W) * gl + W * kl * p[5]
+            y_v = (1 - W) * gv + W * kv * p[6]
+            con_tiros += 1
+        else:
+            y_l, y_v = gl, gv
+        for at, de, lam, y in ((el, ev, lam_l, y_l), (ev, el, lam_v, y_v)):
+            pa, pd = at[2], de[3]
+            den = 1 + lam * (pa + pd)
+            at[0] += pa * (y - lam) / den
+            de[1] += pd * (y - lam) / den
+            at[2] = pa - lam * pa * pa / den
+            de[3] = pd - lam * pd * pd / den
+        if en_actual:
+            pend_l += gl; pend_v += gv; pend_n += 1
+    b = 1 + (EXPONENTE_FUERZAS - 1) * (con_tiros / len(todos))
+    return {"equipos": {str(t): [exp_exacto(b * estado[t][0]), exp_exacto(b * estado[t][1]), estado[t][5]]
+                        for t in orden},
             "con_previa": con_previa, "codigo": codigo_liga, "de_arriba": de_arriba,
-            "dia": ref, "iteraciones": it}
+            "dia": max(p[0] for p in todos), "exponente": b, "con_tiros": con_tiros}
 
 
 def fuerza_equipo(fuerzas, team_id):
     """Ataque, defensa y partidos de un equipo. Uno sin partidos todavía (un
     ascendido o un descendido antes de debutar) parte de la fuerza de un recién
-    llegado."""
+    llegado, elevada al exponente de su liga, como las demás."""
     e = fuerzas["equipos"].get(str(team_id))
     if e:
         return {"ataque": e[0], "defensa": e[1], "partidos": e[2]}
     if not fuerzas["con_previa"]:
         return {"ataque": 1.0, "defensa": 1.0, "partidos": 0}
     a, d = prior_recien_llegado(fuerzas.get("codigo"), team_id, fuerzas.get("de_arriba", ()))
-    return {"ataque": a, "defensa": d, "partidos": 0}
+    b = fuerzas.get("exponente", 1.0)
+    return {"ataque": exp_exacto(b * log_exacto(a)), "defensa": exp_exacto(b * log_exacto(d)), "partidos": 0}
 
 
 def equipos_de_partidos(partidos):
@@ -679,16 +899,18 @@ def equipos_de_partidos(partidos):
 
 def obtener_fuerzas_liga(codigo_liga, cache):
     """Las fuerzas de todos los equipos de una liga, con los partidos que ya
-    bajaron obtener_prior_liga y obtener_promedio_liga (y, en una liga con
-    LIGA_DE_ARRIBA, la temporada anterior de la de arriba, que esa liga ya baja
-    para sus propios partidos). No pide nada más: se recalculan solo cuando
-    cambia alguna lista."""
+    bajaron obtener_prior_liga y obtener_promedio_liga y sus tiros a puerta
+    (obtener_tiros_liga, de football-data.co.uk; en una liga con LIGA_DE_ARRIBA,
+    también la temporada anterior de la de arriba, que esa liga ya baja para sus
+    propios partidos). Se recalculan solo cuando cambia alguna lista."""
     promedio = obtener_promedio_liga(codigo_liga, cache)
     season = temporada_actual(codigo_liga)
     previa = _lista_vigente(cache, codigo_liga + ":previa", season - 1) or {}
     actual = _lista_vigente(cache, codigo_liga + ":actual", season) or {}
+    tiros_previa = obtener_tiros_liga(codigo_liga, season - 1, "previa", cache) or {}
+    tiros_actual = obtener_tiros_liga(codigo_liga, season, "actual", cache) or {}
     version = (f"{VERSION_MODELO}|{previa.get('actualizado')}|{actual.get('actualizado')}"
-               f"|{promedio.get('actualizado')}")
+               f"|{promedio.get('actualizado')}|{tiros_previa.get('actualizado')}|{tiros_actual.get('actualizado')}")
     arriba = {}
     if codigo_liga in LIGA_DE_ARRIBA:
         sup = LIGA_DE_ARRIBA[codigo_liga]
@@ -698,10 +920,13 @@ def obtener_fuerzas_liga(codigo_liga, cache):
     guardadas = cache.setdefault("fuerzas", {}).get(codigo_liga)
     if guardadas and guardadas.get("version") == version:
         return guardadas
-    fuerzas = ajustar_fuerzas(previa.get("partidos", []), actual.get("partidos", []), promedio,
+    fuerzas = ajustar_fuerzas(casar_tiros(previa.get("partidos", []), tiros_previa.get("filas")),
+                              casar_tiros(actual.get("partidos", []), tiros_actual.get("filas")),
                               codigo_liga=codigo_liga,
                               de_arriba=equipos_de_partidos(arriba.get("partidos", [])))
     fuerzas["version"] = version
+    if codigo_liga in DIVISION_TIROS:
+        fuerzas["tiros_fallo"] = bool(tiros_previa.get("fallo") or tiros_actual.get("fallo"))
     cache["fuerzas"][codigo_liga] = fuerzas
     return fuerzas
 
@@ -1572,6 +1797,14 @@ def api_ligas():
             "media_usada_visita": round((m or {}).get("avg_visita", 0), 3) or None,
             "partidos_esta_temporada": (m or {}).get("partidos"),
         }
+        if codigo in DIVISION_TIROS:
+            # con cuántos partidos se ajustaron sus fuerzas con tiros a puerta (football-data.co.uk)
+            f = cache.get("fuerzas", {}).get(codigo) or {}
+            salida[codigo]["tiros"] = {
+                "partidos_con_tiros": f.get("con_tiros"),
+                "exponente": round(f["exponente"], 4) if "exponente" in f else None,
+                "fallo": f.get("tiros_fallo"),
+            }
     return jsonify(salida)
 
 

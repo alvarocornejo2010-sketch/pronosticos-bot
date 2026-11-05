@@ -10,7 +10,10 @@ calendario pasan a estar jugados, para el registro en vivo) y
 cabeceras y el cuerpo cifrado, que se ven en /__push) y responde 201, o 410 si el id
 empieza por "gone" (una suscripción que el navegador ya quitó). Y a /indexnow, un
 IndexNow de mentira: apunta lo que le llega (se ve en /__indexnow) y responde 200, o lo
-que diga /__indexnow?estado=N.
+que diga /__indexnow?estado=N. Y a /mmz4281/2526/E0.csv, los CSV de resultados de
+football-data.co.uk con los tiros a puerta de esos mismos partidos (csv_tiros): otros
+nombres, fechas de dos y cuatro cifras, algún partido con el día de al lado, tiros que
+faltan y los últimos de esta temporada aún sin publicar; el Brasileirão no tiene.
 Uso: python pruebas/api_falsa.py PUERTO [limite429]"""
 import base64, hashlib, json, random, re, sys, threading
 from collections import Counter
@@ -229,6 +232,49 @@ def responder(ruta, q):
                      "runningCompetitions": comp + [{"code": "CL", "type": "CUP"}]}
     return 404, {"message": "ruta desconocida"}
 
+DIVISION = {"PL": "E0", "ELC": "E1", "PD": "SP1", "BL1": "D1", "SA": "I1", "FL1": "F1", "DED": "N1", "PPL": "P1"}
+CSV_SERVIDOS = Counter()  # /__stats: los CSV que se pidieron, aparte de las peticiones a la API
+
+def nombre_csv(e, k):
+    """El nombre de un equipo en football-data.co.uk: otro que el de football-data.org
+    (sin "FC", "Man" por "Manchester"...), y el del primer equipo de cada liga, escrito de
+    dos formas según el partido, como "Nott'm Forest" y "Nottm Forest"."""
+    n = e["name"].replace("FC ", "").replace(" FC", "").replace("Manchester ", "Man ").replace(" United", " Utd")
+    if e is EQ_ACTUAL.get(LIGA_DE.get(e["id"]), [None])[0] or e is EQ.get(LIGA_DE.get(e["id"]), [None])[0]:
+        n = n + ("'s" if k % 2 else "s")
+    return n
+
+def csv_tiros(div, temporada_csv):
+    """El CSV de una temporada de una liga, con lo que da la API para esa temporada: la
+    anterior entera o lo jugado de esta, sin los 4 partidos más recientes (football-data.co.uk
+    los publica con retraso). Los goles, los mismos; los tiros a puerta, de cada partido."""
+    c = next((k for k, v in DIVISION.items() if v == div), None)
+    if c is None:
+        return None
+    s = 2000 + int(temporada_csv[:2])
+    actual = INICIO.year if INICIO.month >= 7 else INICIO.year - 1
+    if s == actual:
+        partidos = jugado_actual(c)[:-4]
+    elif s < actual:
+        n = {"BL1": 306, "FL1": 306, "DED": 306, "PPL": 306, "ELC": 552}.get(c, 380)
+        partidos = [m for m in temporada(c, n, s, datetime(s + 1, 5, 25, tzinfo=timezone.utc)) if m.get("stage") == "REGULAR_SEASON"]
+    else:
+        return None
+    filas = ["\ufeffDiv,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG,FTR,HTHG,HTAG,HTR,Referee,HS,AS,HST,AST,HF,AF,HC,AC,B365H,B365D,B365A"]
+    for k, m in enumerate(partidos):
+        r = rnd_de("tiros", m["id"])
+        f = datetime.strptime(m["utcDate"], "%Y-%m-%dT%H:%M:%SZ")
+        if k % 17 == 5:
+            f += timedelta(days=1)                      # la fecha de allí, ya pasada la medianoche
+        fecha = f.strftime("%d/%m/%Y") if c in ("PL", "PD", "BL1", "DED") else f.strftime("%d/%m/%y")
+        gl, gv = m["score"]["fullTime"]["home"], m["score"]["fullTime"]["away"]
+        hst = "" if k % 41 == 7 else str(gl + r.randint(0, 6))
+        ast = str(gv + r.randint(0, 5))
+        filas.append(f"{div},{fecha},15:00,{nombre_csv(m['homeTeam'], k)},{nombre_csv(m['awayTeam'], k + 1)},{gl},{gv},"
+                     f"{'H' if gl > gv else 'A' if gv > gl else 'D'},0,0,D,Arbitro,{r.randint(8, 20)},{r.randint(5, 16)},"
+                     f"{hst},{ast},10,12,5,4,2.1,3.4,3.5")
+    return "\r\n".join(filas) + "\r\n"
+
 FICHAS_USADAS = set()   # Turnstile: cada ficha vale una vez
 AVISOS = []             # lo que llegó al servicio de avisos de mentira
 INDEXNOW = []           # y a IndexNow, que responde INDEXNOW_ESTADO
@@ -264,8 +310,17 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        m = re.fullmatch(r"/mmz4281/(\d{4})/(\w+)\.csv", u.path)
+        if m:
+            texto = csv_tiros(m.group(2), m.group(1))
+            with CANDADO:
+                CSV_SERVIDOS[m.group(1) + "/" + m.group(2)] += 1
+            if texto is None:
+                self.send_response(404); self.end_headers(); return
+            cuerpo = texto.encode("utf-8")
+            self.send_response(200); self.send_header("Content-Type", "text/csv; charset=utf-8"); self.end_headers(); self.wfile.write(cuerpo); return
         if u.path == "/__stats":
-            cuerpo = json.dumps({"total": TOTAL[0], "por_tipo": CONTADOR}).encode()
+            cuerpo = json.dumps({"total": TOTAL[0], "por_tipo": CONTADOR, "csv": CSV_SERVIDOS}).encode()
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(cuerpo); return
         if u.path == "/__limite":
             LIMITE[0] = int(q.get("n", "0"))
