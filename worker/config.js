@@ -75,6 +75,12 @@ export const FORMATO_VALIDACION = 2;
 // la que los buscadores comprueban que las direcciones que se les mandan son de esta web.
 // Si se cambia, cambiar también el nombre y el contenido de ese archivo.
 export const INDEXNOW_CLAVE = "0929ae0a00d11dc89eade75a541f841f";
+// Adónde se mandan, en orden, hasta que uno las acepta: cada buscador de IndexNow reparte entre
+// los demás lo que recibe, así que con uno basta. Bing va primero (de él beben DuckDuckGo, Yahoo,
+// Ecosia y ChatGPT), pero respondió 429 a todo lo que llegaba de Cloudflare del 30 oct al 4 nov
+// 2026, como api.indexnow.org el 30 oct: por eso los demás detrás.
+export const INDEXNOW_DESTINOS = ["https://www.bing.com/indexnow", "https://yandex.com/indexnow",
+  "https://search.seznam.cz/indexnow", "https://searchadvisor.naver.com/indexnow", "https://indexnow.yep.com/indexnow"];
 export const K_LIGA = 50;
 export const PRIOR_AVG_LOCAL = 1.50;
 export const PRIOR_AVG_VISITA = 1.15;
@@ -149,9 +155,10 @@ export function ajustes(env = {}) {
     // la dirección de la web, que va en la firma VAPID como contacto y en lo que se manda a
     // IndexNow (indexnow.js)
     urlWeb: env.URL_WEB || "https://pronosticos-bot.alvarocornejo2010.workers.dev",
-    // adónde se mandan las páginas nuevas (indexnow.js); vacío, no se mandan. Bing directamente:
-    // api.indexnow.org respondió 429 a todo lo que llegaba de Cloudflare (30 oct 2026)
-    indexnowUrl: env.INDEXNOW_URL ?? "https://www.bing.com/indexnow",
+    // adónde se mandan las páginas nuevas (indexnow.js), en orden (INDEXNOW_DESTINOS); INDEXNOW_URL,
+    // una lista separada por comas, la cambia, y vacío, no se mandan
+    indexnowUrls: String(env.INDEXNOW_URL ?? INDEXNOW_DESTINOS.join(",")).split(",").map((u) => u.trim())
+      .filter(Boolean),
     // de dónde salen los tiros a puerta (TIROS_BASE en app.py): los CSV de football-data.co.uk;
     // vacío, el modelo va solo con los goles. Las pruebas lo mandan a la API falsa.
     tirosBase: String(env.TIROS_BASE ?? "https://www.football-data.co.uk").replace(/\/+$/, ""),

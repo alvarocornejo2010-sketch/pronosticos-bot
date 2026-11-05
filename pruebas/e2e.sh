@@ -15,8 +15,9 @@
 # el historial de aciertos suma bien cada semana y tiene su página (resultados.py),
 # el calendario de Mis equipos es un .ics bien hecho que sigue a sus equipos (ics.py), la
 # limpieza del día borra lo caducado (limpieza.py) y el cron avisa a IndexNow de las páginas
-# nuevas (indexnow.py, contra el IndexNow de mentira de la API falsa). Los tiros a puerta salen
-# de los CSV de football-data.co.uk de mentira de la API falsa (TIROS_BASE), en los dos.
+# nuevas (indexnow.py, contra dos IndexNow de mentira de la API falsa: uno que responde 429 y
+# otro que acepta). Los tiros a puerta salen de los CSV de football-data.co.uk de mentira de
+# la API falsa (TIROS_BASE), en los dos.
 #
 # Uso: bash pruebas/e2e.sh   (antes: npm ci y pip install -r requirements.txt)
 # Las variables del Worker van con --var, que manda sobre .dev.vars: tu token de
@@ -71,7 +72,7 @@ echo "== Worker"
   --var TURNSTILE_SITEKEY:clave_de_sitio_falsa --var TURNSTILE_SECRET:secreto_turnstile_falso \
   --var "TURNSTILE_VERIFICAR:http://127.0.0.1:$P_API/turnstile/v0/siteverify" \
   --var "PUSH_PRUEBA:http://127.0.0.1:$P_API" --var AVISO_ANTES_MIN:20160 --var MAX_ENVIOS_PASADA:3 \
-  --var MAX_CALENDARIOS_DIA:5 --var "INDEXNOW_URL:http://127.0.0.1:$P_API/indexnow" \
+  --var MAX_CALENDARIOS_DIA:5 --var "INDEXNOW_URL:http://127.0.0.1:$P_API/indexnow-lleno,http://127.0.0.1:$P_API/indexnow" \
   --var "TIROS_BASE:http://127.0.0.1:$P_API" \
   > "$TMP/wrangler.log" 2>&1) &
 esperar "http://127.0.0.1:$P_W/salud"

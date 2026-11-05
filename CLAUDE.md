@@ -1113,16 +1113,23 @@ asistentes (ChatGPT, Perplexity...) no, así que leían una página vacía. Lo q
   (`resultados.liquidado` mayor que `desde`), los equipos de unos y otros, sus ligas, la
   portada y el historial (`/resultados` y la semana de cada partido terminado); la primera vez,
   además, todas las ligas, los equipos de las tablas y todas las semanas (unas 450
-  direcciones). Si IndexNow no responde 200 o 202, se apunta (con el error y el `Retry-After`,
-  si lo trae) y la vez siguiente va todo otra vez (`al_dia`), cada vez más tarde: 6, 12 y 24 h
-  (`fallos`, `espera_h`), o lo que pida `Retry-After`, hasta 48. Van a Bing
-  (`https://www.bing.com/indexnow`), que las reparte entre los demás: al principio iban a
-  `api.indexnow.org`, que el 30 oct 2026 respondió 429 ("demasiadas peticiones") las tres
-  veces, seguramente por las IP de salida de Cloudflare, que comparten muchas webs. Si Bing
-  también responde 429, queda Bing Webmaster Tools (importando la propiedad de Search
-  Console). `INDEXNOW_URL` cambia adónde se mandan (vacío: a ningún sitio);
-  las pruebas lo mandan al IndexNow de mentira de `api_falsa.py`. Solo manda direcciones de
-  páginas públicas, nada de quién entra.
+  direcciones). **Adónde** (tanda 21, nov 2026): a los buscadores de `INDEXNOW_DESTINOS`
+  (`config.js`), en orden, lo mismo a cada uno, hasta que uno responde 200 o 202: Bing
+  (`https://www.bing.com/indexnow`), Yandex, Seznam, Naver y Yep. Cada uno reparte entre los
+  demás lo que recibe, así que con uno basta. El que acepta queda en `destino` del documento (y
+  los que fallaron antes, en `fallidos`), y la vez siguiente se empieza por él (`ordenDestinos`),
+  también tras una vez sin cambios. Cada intento espera 8 s como mucho: con los cinco sin
+  responder, menos de un minuto. Por qué varios: al principio iban a `api.indexnow.org`, que el
+  30 oct 2026 respondió 429 ("demasiadas peticiones") las tres veces, y luego solo a Bing, que
+  respondió lo mismo siete veces seguidas hasta el 4 nov, sin que entrara ni una dirección:
+  seguramente por las IP de salida de Cloudflare, que comparten muchas webs. Si no acepta
+  ninguno, se apunta (el estado, el error y el `Retry-After` del primero que se probó, y todos
+  en `fallidos`) y la vez siguiente va todo otra vez (`al_dia`), cada vez más tarde: 6, 12 y
+  24 h (`fallos`, `espera_h`), o lo que pida `Retry-After`, hasta 48. Si tampoco así, queda Bing
+  Webmaster Tools (importando la propiedad de Search Console). `INDEXNOW_URL` cambia adónde se
+  mandan (una lista separada por comas; vacío: a ningún sitio); las pruebas lo mandan a dos
+  IndexNow de mentira de `api_falsa.py`, uno que responde 429 y otro que acepta. Solo manda
+  direcciones de páginas públicas, nada de quién entra.
 - **Google: Search Console, lo hace el dueño (5 minutos).** En
   https://search.google.com/search-console → Añadir propiedad → "Prefijo de la URL" →
   `https://pronosticos-bot.alvarocornejo2010.workers.dev/` → método "Etiqueta HTML": copiar el
@@ -1943,7 +1950,8 @@ Environment).
     ya escrito de un partido, un equipo y una liga, con los enteros de la web, escapado y con sus
     enlaces; lo sumado de una semana de resultados y su texto; las marcas de `index.html`, una de
     cada; y qué se manda a IndexNow, todo la primera vez y luego solo lo nuevo, sin perder nada
-    si falla, y cada vez más tarde; y el texto de `/porra`, con los apodos escapados), `node
+    si falla, y cada vez más tarde, y a quién: los destinos en orden hasta que uno acepta, y la vez
+    siguiente primero el que aceptó; y el texto de `/porra`, con los apodos escapados), `node
     pruebas/sw.mjs` (el service worker: "Sin conexión" sin red, la web con red, y los
     avisos: su texto, adónde llevan y la pestaña que abren) y `node pruebas/push.mjs`
     (el cifrado de los avisos contra el ejemplo de RFC 8291, la firma VAPID, la hora
@@ -2016,10 +2024,12 @@ Environment).
     `MAX_CALENDARIOS_DIA=5`; va después de la interfaz, que también crea uno). Que la
     limpieza del día borra en un minuto libre del cron las sesiones de más de 180 días y
     los calendarios de más de 120, deja los demás y no se repite antes de un día
-    (`limpieza.py`). Que el cron avisa a IndexNow (el de mentira de `api_falsa.py`) con la clave
+    (`limpieza.py`). Que el cron avisa a IndexNow (los dos de mentira de `api_falsa.py`: el
+    primero responde siempre 429, como Bing desde Cloudflare, y el segundo acepta) con la clave
     del archivo que sirve la web: la primera vez la portada, las ligas, los partidos y los
-    equipos, luego solo lo que cambió (con `/resultados` y la semana del partido que terminó),
-    nada antes de 3 horas, y lo que falla, otra vez pasadas 6 (`indexnow.py`). Y la
+    equipos, a los dos y en orden, luego solo lo que cambió (con `/resultados` y la semana del
+    partido que terminó) y directo al que aceptó, nada antes de 3 horas, y si no acepta ninguno,
+    otra vez pasadas 6, empezando por el que aceptó la última vez (`indexnow.py`). Y la
     interfaz en un navegador de verdad (`interfaz.mjs`,
     Playwright): 14 vistas (semana, día, liga, por claros y por reñidos, búsqueda,
     Mis equipos, el detalle abierto, el de un partido de Mis equipos, la tabla con su

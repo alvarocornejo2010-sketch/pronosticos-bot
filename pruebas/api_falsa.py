@@ -10,7 +10,8 @@ calendario pasan a estar jugados, para el registro en vivo) y
 cabeceras y el cuerpo cifrado, que se ven en /__push) y responde 201, o 410 si el id
 empieza por "gone" (una suscripción que el navegador ya quitó). Y a /indexnow, un
 IndexNow de mentira: apunta lo que le llega (se ve en /__indexnow) y responde 200, o lo
-que diga /__indexnow?estado=N. Y a /mmz4281/2526/E0.csv, los CSV de resultados de
+que diga /__indexnow?estado=N; y /indexnow-lleno, otro que siempre responde 429 (lo que le
+llega, en /__indexnow_lleno). Y a /mmz4281/2526/E0.csv, los CSV de resultados de
 football-data.co.uk con los tiros a puerta de esos mismos partidos (csv_tiros): otros
 nombres, fechas de dos y cuatro cifras, algún partido con el día de al lado, tiros que
 faltan y los últimos de esta temporada aún sin publicar; el Brasileirão no tiene.
@@ -279,6 +280,7 @@ FICHAS_USADAS = set()   # Turnstile: cada ficha vale una vez
 AVISOS = []             # lo que llegó al servicio de avisos de mentira
 INDEXNOW = []           # y a IndexNow, que responde INDEXNOW_ESTADO
 INDEXNOW_ESTADO = [200]
+INDEXNOW_LLENO = []     # y a un IndexNow que siempre responde 429, como Bing desde Cloudflare
 CABECERAS_PUSH = ("Authorization", "TTL", "Urgency", "Topic", "Content-Encoding", "Content-Type")
 
 class H(BaseHTTPRequestHandler):
@@ -296,6 +298,11 @@ class H(BaseHTTPRequestHandler):
             with CANDADO:
                 INDEXNOW.append({"tipo": self.headers.get("Content-Type"), **json.loads(crudo)})
             self.send_response(INDEXNOW_ESTADO[0]); self.end_headers(); return
+        if u.path == "/indexnow-lleno":
+            with CANDADO:
+                INDEXNOW_LLENO.append(json.loads(crudo))
+            cuerpo = b'{"errorCode":"TooManyRequests"}'
+            self.send_response(429); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(cuerpo); return
         datos = {k: v[0] for k, v in parse_qs(crudo.decode()).items()}
         if u.path != "/turnstile/v0/siteverify":
             self.send_response(404); self.end_headers(); return
@@ -334,6 +341,9 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/__indexnow":
             if "estado" in q: INDEXNOW_ESTADO[0] = int(q["estado"])
             cuerpo = json.dumps(INDEXNOW).encode()
+            self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(cuerpo); return
+        if u.path == "/__indexnow_lleno":
+            cuerpo = json.dumps(INDEXNOW_LLENO).encode()
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(cuerpo); return
         if u.path == "/__push":
             cuerpo = json.dumps(AVISOS).encode()

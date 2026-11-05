@@ -10,9 +10,9 @@ import { CODIGOS, filaResultado, paginaConTarjeta, textoPartido, veredicto } fro
 import { textoEquipo } from "../worker/equipos.js";
 import { textosLiga } from "../worker/ligas.js";
 import { lunesDe, resumirSemana, textosResultados } from "../worker/resultados.js";
-import { avisarBuscadores, horasRetryAfter, tocaIndexnow, HORAS_INDEXNOW } from "../worker/indexnow.js";
+import { avisarBuscadores, horasRetryAfter, ordenDestinos, tocaIndexnow, HORAS_INDEXNOW } from "../worker/indexnow.js";
 import { textosPorra } from "../worker/porra.js";
-import { INDEXNOW_CLAVE } from "../worker/config.js";
+import { INDEXNOW_CLAVE, INDEXNOW_DESTINOS } from "../worker/config.js";
 import { Reloj } from "../worker/tiempo.js";
 
 const reloj = new Reloj("America/Lima");
@@ -155,11 +155,11 @@ assert.ok(vacia.descripcion.includes("sin partidos terminados") && vacia.titulo.
 console.log("resultados: lo sumado por tramo y por liga, y el texto de la semana con sus días y sus vecinas");
 
 // IndexNow: cuándo toca
-const aj = { indexnowUrl: "https://www.bing.com/indexnow", urlWeb: "https://pronosticos-bot.alvarocornejo2010.workers.dev" };
+const aj = { indexnowUrls: ["https://www.bing.com/indexnow"], urlWeb: "https://pronosticos-bot.alvarocornejo2010.workers.dev" };
 const listo = { estado: "listo" }, ahora = Date.parse("2026-10-29T12:00:00Z"), H = 3600000;
 assert.equal(tocaIndexnow(null, listo, aj, ahora), "nunca se ha hecho");
 assert.equal(tocaIndexnow(null, { estado: "actualizando" }, aj, ahora), null);
-assert.equal(tocaIndexnow(null, listo, { ...aj, indexnowUrl: "" }, ahora), null);
+assert.equal(tocaIndexnow(null, listo, { ...aj, indexnowUrls: [] }, ahora), null);
 assert.equal(tocaIndexnow({ actualizado: ahora - (HORAS_INDEXNOW * H - 60000) }, listo, aj, ahora), null);
 assert.equal(tocaIndexnow({ actualizado: ahora - HORAS_INDEXNOW * H }, listo, aj, ahora), `la última hace ${HORAS_INDEXNOW} h`);
 // tras un fallo, lo que diga su espera
@@ -205,7 +205,7 @@ const origen = aj.urlWeb;
 let r = await avisarBuscadores(almacen, aj, null, ahora, falso);
 assert.deepEqual(r, { urls: 1 + CODIGOS.size + 3 + 6 + 2, estado: 200 });
 let e = enviadas.at(-1);
-assert.equal(e.url, aj.indexnowUrl);
+assert.equal(e.url, aj.indexnowUrls[0]);
 assert.equal(e.host, "pronosticos-bot.alvarocornejo2010.workers.dev");
 assert.equal(e.key, INDEXNOW_CLAVE);
 assert.equal(e.keyLocation, `${origen}/${INDEXNOW_CLAVE}.txt`);
@@ -215,7 +215,7 @@ for (const x of ["/partido/11", "/partido/12", "/partido/3", "/equipo/86", "/equ
   "/equipo/5", "/equipo/6", "/resultados", "/resultados/2026-10-19"]) assert.ok(e.urlList.includes(origen + x), x);
 assert.equal(new Set(e.urlList).size, e.urlList.length);
 assert.deepEqual(ultimo(), { hecha: "2026-10-29T12:00:00.000Z", urls: r.urls, al_dia: true, desde: 1000, enviados: [11, 12],
-  estado: 200 });
+  estado: 200, destino: aj.indexnowUrls[0] });
 // la clave que se manda es la del archivo que se publica
 assert.equal(readFileSync(new URL(`../public/${INDEXNOW_CLAVE}.txt`, import.meta.url), "utf8").trim(), INDEXNOW_CLAVE);
 
@@ -278,6 +278,49 @@ r = await avisarBuscadores(almacen, aj, antes, ahora + 6 * H, sinRed);
 assert.deepEqual(r, { urls: 5, estado: 0 });
 assert.ok(ultimo().desde === antes.desde && ultimo().error === "fetch failed");
 console.log("IndexNow: la primera vez todo, luego solo lo nuevo, y lo que falla se vuelve a mandar, cada vez más tarde");
+
+// IndexNow con varios destinos: se prueban en orden hasta que uno acepta (lo mismo a cada
+// uno), y la vez siguiente se empieza por el que aceptó, también tras una vez sin cambios
+const bing = "https://www.bing.com/indexnow", yandex = "https://yandex.com/indexnow", seznam = "https://search.seznam.cz/indexnow";
+assert.deepEqual(ordenDestinos(INDEXNOW_DESTINOS, null), INDEXNOW_DESTINOS);
+assert.deepEqual(ordenDestinos([bing, yandex, seznam], seznam), [seznam, bing, yandex]);
+assert.deepEqual(ordenDestinos([bing, yandex], "https://otro.example/indexnow"), [bing, yandex]);   // uno que ya no está
+assert.equal(INDEXNOW_DESTINOS[0], bing);
+const tres = { ...aj, indexnowUrls: [bing, yandex, seznam] };
+const responde = { [bing]: 429, [yandex]: 202, [seznam]: 200 };
+const porDestino = async (url, op) => {
+  enviadas.push({ url, ...JSON.parse(op.body) });
+  return new Response(responde[url] === 429 ? "TooManyRequests" : "", { status: responde[url],
+    headers: responde[url] === 429 ? { "Retry-After": "7200" } : {} });
+};
+const probados = async (fn) => { const n = enviadas.length; await fn(); return enviadas.slice(n).map((x) => x.url); };
+docs.length = 0;
+assert.deepEqual(await probados(() => avisarBuscadores(almacen, tres, null, ahora, porDestino)), [bing, yandex]);
+assert.deepEqual(enviadas.at(-1).urlList, enviadas.at(-2).urlList);
+assert.deepEqual([ultimo().estado, ultimo().destino, ultimo().fallidos],
+  [202, yandex, [{ destino: bing, estado: 429, error: "TooManyRequests", retry_after: "7200" }]]);
+assert.ok(!("fallos" in ultimo()) && !("error" in ultimo()) && ultimo().al_dia);
+// sin cambios no se manda nada, pero no se olvida quién aceptó
+const quien = ultimo().destino;
+assert.deepEqual(await probados(() => avisarBuscadores(almacen, tres, ultimo(), ahora + 3 * H, porDestino)), []);
+assert.equal(ultimo().destino, quien);
+base.resultados.push({ id: 7, liga: "PL", utc: "2026-10-30T15:00:00Z", contado: 1, liquidado: 5000, local_id: 61, visita_id: 63 });
+assert.deepEqual(await probados(() => avisarBuscadores(almacen, tres, ultimo(), ahora + 6 * H, porDestino)), [yandex]);
+assert.ok(!("fallidos" in ultimo()) && ultimo().desde === 5000);
+// si no acepta ninguno: la espera de siempre (con el Retry-After del primero que se probó, Yandex, que no
+// lo trae), lo mandado sin mover y el que aceptó la última vez, para empezar otra vez por él
+Object.assign(responde, { [yandex]: 503, [seznam]: 403 });
+base.resultados.push({ id: 8, liga: "SA", utc: "2026-10-31T15:00:00Z", contado: 1, liquidado: 6000, local_id: 108, visita_id: 109 });
+assert.deepEqual(await probados(() => avisarBuscadores(almacen, tres, ultimo(), ahora + 9 * H, porDestino)), [yandex, bing, seznam]);
+assert.deepEqual([ultimo().estado, ultimo().destino, ultimo().fallos, ultimo().espera_h, ultimo().desde],
+  [503, yandex, 1, 2 * HORAS_INDEXNOW, 5000]);
+assert.deepEqual(ultimo().fallidos.map((f) => [f.destino, f.estado]), [[yandex, 503], [bing, 429], [seznam, 403]]);
+// y si luego acepta otro, se queda ese, con todo lo que faltaba
+responde[seznam] = 200;
+assert.deepEqual(await probados(() => avisarBuscadores(almacen, tres, ultimo(), ahora + 15 * H, porDestino)), [yandex, bing, seznam]);
+assert.deepEqual([ultimo().estado, ultimo().destino, ultimo().desde], [200, seznam, 6000]);
+assert.ok(enviadas.at(-1).urlList.includes(origen + "/partido/8") && !("fallos" in ultimo()));
+console.log("IndexNow: varios destinos en orden hasta que uno acepta, y la vez siguiente primero el que aceptó");
 // /porra: qué es y la clasificación (la primera con alguien), con los apodos escapados; sin
 // nadie, la invitación
 const tp = textosPorra({ periodo: "pasada", desde: "2026-10-26", hasta: "2026-11-01", filas: [
