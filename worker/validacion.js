@@ -10,21 +10,24 @@
 // en D1 por dónde iba. Las temporadas terminadas no cambian: se guardan y la
 // próxima validación no las vuelve a pedir.
 //
+// Con los tiros a puerta de esas temporadas (football-data.co.uk), como en producción: un
+// CSV por liga y temporada, que se baja en su propio paso y queda en D1 (tiros:liga:...).
+//
 // La Champions (oct 2026) va con su propio modelo, como en validacion.py: las ligas
 // apuntan, al pasar por cada día de Champions, la fuerza de sus equipos que la
 // juegan (fotos), y luego se recorre la Champions de tramo en tramo. Por eso sus dos
 // temporadas se bajan antes que las de las ligas.
 
-import { EXPONENTE_FUERZA_CHAMPIONS, FACTOR_LIGA, FACTOR_OTRA_LIGA, FORMATO_VALIDACION, K_LIGA, LIGAS, LIGA_DE_ARRIBA,
-  PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA, TORNEOS, VERSION_MODELO } from "./config.js";
-import { ajustarFuerzas, calcularPoisson, calcularXgChampions, calcularXgPartido, fuerzaEquipo, mercadosDeGoles,
-  multiplicadoresHistorial, redondear, sumarHistorial } from "./modelo.js";
+import { DIVISION_TIROS, EXPONENTE_FUERZA_CHAMPIONS, FACTOR_LIGA, FACTOR_OTRA_LIGA, FORMATO_VALIDACION, K_LIGA, LIGAS,
+  LIGA_DE_ARRIBA, PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA, TORNEOS, VERSION_MODELO } from "./config.js";
+import { ajustarFuerzas, calcularPoisson, calcularXgChampions, calcularXgPartido, casarTiros, filasTiros, fuerzaEquipo,
+  mercadosDeGoles, multiplicadoresHistorial, redondear, sumarHistorial, urlTiros } from "./modelo.js";
 import { Acumulador, Binario, MERCADOS, resultado, resumenMercado } from "./metricas.js";
 import { diaDe, goles90, soloLiga } from "./actualizacion.js";
 
-// Cada día con partidos es un ajuste de fuerzas (unos 0.2 ms ya compilado, más
-// en un isolate recién creado, que aún no ha compilado nada): con 15 partidos,
-// que son 2 o 3 días, un paso va de 1 a 4 ms en caliente.
+// Cada día con partidos es un recorrido del filtro de las fuerzas por las dos temporadas
+// (más en un isolate recién creado, que aún no ha compilado nada): con 15 partidos, que
+// son 2 o 3 días, un paso se queda en unos pocos ms.
 export const PARTIDOS_POR_PASO = 15;
 
 // ==========================================
@@ -33,7 +36,7 @@ export const PARTIDOS_POR_PASO = 15;
 // Sabe responder "qué se sabía justo antes de este partido" (_Historial en
 // validacion.py): las fuerzas de todos los equipos (ajustarFuerzas, como en
 // producción) y la media de la temporada en curso anclada en la anterior. Se
-// recalculan al cambiar de día, arrancando de las del día anterior.
+// recalculan al cambiar de día.
 // el día de cada fecha se recuerda: en cada paso se compactan las dos temporadas
 const DIAS = new Map();
 const diaDeFecha = (fecha) => {
@@ -42,7 +45,20 @@ const diaDeFecha = (fecha) => {
   if (d === undefined) { d = diaDe(k); DIAS.set(k, d); }
   return d;
 };
-const compacto = (m) => [diaDeFecha(m.fecha), m.local, m.visita, m.gl, m.gv];
+// [día, local, visita, gl, gv] y, si los tiene, sus tiros a puerta (_compacto en validacion.py)
+const compacto = (m) => {
+  const c = [diaDeFecha(m.fecha), m.local, m.visita, m.gl, m.gv];
+  if (m.pl != null && m.pv != null) c.push(m.pl, m.pv);
+  return c;
+};
+
+// Los partidos de una temporada con sus tiros a puerta (pl, pv) cuando football-data.co.uk
+// los trae, casados como en producción (_con_tiros en validacion.py).
+export function conTiros(partidos, filas) {
+  if (!filas || !filas.length) return partidos;
+  const casados = casarTiros(partidos.map((m) => [diaDeFecha(m.fecha), m.local, m.visita, m.gl, m.gv]), filas);
+  return partidos.map((m, i) => (casados[i].length > 5 ? { ...m, pl: casados[i][5], pv: casados[i][6] } : m));
+}
 
 class Historial {
   // al retomar, actual son los partidos ya recorridos y guardado lo demás
@@ -67,8 +83,7 @@ class Historial {
       const k = this.k;
       this.media = { avg_local: (this.gl + k * this.ancla.avg_local) / (this.n + k),
         avg_visita: (this.gv + k * this.ancla.avg_visita) / (this.n + k) };
-      this.fuerzas = ajustarFuerzas(this.previa, this.actual, this.media,
-        this.fuerzas ? this.fuerzas.equipos : null, this.codigo, this.deArriba);
+      this.fuerzas = ajustarFuerzas(this.previa, this.actual, this.codigo, this.deArriba);
       this.dia = dia;
     }
     return [this.fuerzas, this.media];
@@ -413,6 +428,7 @@ const desplegar = (filas) => filas.map(([fecha, local, visita, gl, gv]) => ({ fe
 // las de antes ("temporada:PD:2025") ya no se leen y se vuelven a bajar.
 const claveTemporada = (codigo, s) => `temporada:liga:${codigo}:${s}`;
 const claveTorneo = (codigo, s) => `temporada:torneo:${codigo}:${s}`;
+const claveTiros = (codigo, s) => `tiros:liga:${codigo}:${s}`;
 
 // ==========================================
 // ORQUESTACIÓN (un paso por ejecución del cron)
@@ -460,6 +476,39 @@ async function temporada(ctx, almacen, doc, control, clave, ruta, s, compactar) 
   return null;
 }
 
+// Los tiros a puerta de una temporada terminada de una liga (_cargar_tiros en
+// validacion.py), guardados en D1 o, si faltan, el CSV de football-data.co.uk para
+// bajarlos (una tarea pesada: va sola en su paso). [] si la liga no los trae o fallaron
+// en esta ejecución (sigue sin ellos); null si este paso se gastó en bajarlos.
+async function tirosTemporada(ctx, almacen, doc, control, codigo, s) {
+  if (!(codigo in DIVISION_TIROS) || !ctx.aj.tirosBase) return [];
+  const clave = claveTiros(codigo, s);
+  if (control.fallidas[clave]) return [];
+  const texto = await almacen.leerDocTexto(clave);
+  if (texto !== null) return JSON.parse(texto);
+  let filas = [], estado = 0;
+  try {
+    const r = await ctx.api.fetch(urlTiros(ctx.aj.tirosBase, codigo, s), {
+      headers: { "User-Agent": "pronosticos-bot (Cloudflare Workers)" }, signal: AbortSignal.timeout(30000) });
+    estado = r.status;
+    if (r.status === 200) {
+      const cuerpo = await r.text();
+      ctx.api.bytes += cuerpo.length;
+      filas = filasTiros(cuerpo);
+    }
+  } catch (e) {
+    console.warn(`Validación ${clave}: ${(e && e.message) || e}`);
+  }
+  if (filas.length) {
+    await almacen.escribir([almacen.sentenciaDoc(clave, filas)]);
+  } else {
+    console.warn(`Validación ${clave}: sin tiros (HTTP ${estado})`);
+    control.fallidas[clave] = estado || "sin red";
+    await almacen.escribir(escribirValidacion(almacen, doc, control));
+  }
+  return null;
+}
+
 // Avanza la validación en curso un paso: bajar una temporada que falte o
 // recorrer un tramo de la liga (o de la Champions) que toca. Devuelve true cuando
 // terminó todo.
@@ -497,6 +546,13 @@ export async function pasoValidacion(ctx, almacen, resumen, escala = 1) {
       temporadas[s] = await temporada(ctx, almacen, doc, control, claveTemporada(codigo, s),
         `/competitions/${codigo}/matches`, s, compactarTemporada);
       if (temporadas[s] === null) return false;
+    }
+
+    // y sus tiros a puerta, como en producción
+    for (const s of [season - 1, season]) {
+      const filas = await tirosTemporada(ctx, almacen, doc, control, codigo, s);
+      if (filas === null) return false;
+      temporadas[s] = conTiros(temporadas[s], filas);
     }
 
     // los que bajan de la liga de arriba parten de su propia fuerza: su temporada

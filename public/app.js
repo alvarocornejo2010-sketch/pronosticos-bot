@@ -651,7 +651,7 @@ function htmlNotaChampions() {
     + 'atenuada), se ajusta por el nivel de esa liga y se corrige con sus partidos de Champions de esta temporada y '
     + 'la anterior: lo que marcó y encajó frente a lo esperado de un equipo de su liga contra esos mismos rivales. '
     + 'Medido con cuatro Champions (2022/23 a 2025/26, 628 partidos): acierta un 13 % mejor que no saber nada, y el '
-    + 'historial suma casi 1 punto a lo que daba la liga sola.' + htmlMedidaChampions() + '</p>';
+    + 'historial suma algo más de medio punto a lo que daba la liga sola.' + htmlMedidaChampions() + '</p>';
 }
 
 /** La Champions medida aquí (la validación, con los datos de football-data), si ya está. */
@@ -694,7 +694,7 @@ function htmlNotaGoles(p) {
   }
   return '<p class="nota-goles">Más/menos, ambos marcan, porterías a cero, cómo gana y marcadores salen de una misma'
     + ' rejilla de marcadores, con el total de goles esperados acercado a la media de la liga y el reparto entre los dos'
-    + ' equipos del 1X2: con solo resultados, el modelo exagera cuántos goles habrá, pero no quién los marca. Cuántos'
+    + ' equipos del 1X2: el modelo exagera cuántos goles habrá, pero no quién los marca. Cuántos'
     + ' goles habrá (más/menos, ambos marcan) apenas se predice mejor que con la media de la liga: tómalo como'
     + ' orientación. Quién gana por 2 o más, o sin recibir gol, se predice casi tan bien como el 1X2.'
     + medida + '</p>';
@@ -1062,7 +1062,8 @@ function htmlFuerza(d) {
     + fila("Encaja", df, f.puesto_defensa, Math.round(df) === 0 ? "Lo mismo que un equipo medio contra los mismos ataques."
       : cuanto(df) + " que un equipo medio contra los mismos ataques.")
     + '</div><p class="nota">' + (f.partidos
-      ? "Con sus " + f.partidos + " partidos de liga de esta temporada y la anterior; los más recientes pesan más. Es lo que usa el modelo."
+      ? "Con sus " + f.partidos + " partidos de liga de esta temporada y la anterior: sus goles y, donde los hay, sus tiros a"
+        + " puerta, que tienen menos azar. Lo más reciente cuenta más. Es lo que usa el modelo."
       : "Recién llegado a la liga: parte de lo que suelen rendir los que llegan, hasta que juegue.") + '</p>';
 }
 
@@ -1950,7 +1951,7 @@ function pintarLigasPane(todos, ruta) {
     + '<span class="stats">' + ligas.length + (ligas.length === 1 ? " competición" : " competiciones") + ' esta semana</span>'
     + '<span class="n">' + todos.length + '</span></button>'
     + filaFav + filaPorra(ruta) + filas + '</div></section>' + htmlFiabilidad()
-    + '<p class="pie-izq">Datos de football-data.org · <a href="/privacidad">Privacidad</a></p>';
+    + '<p class="pie-izq">Datos de football-data.org; tiros a puerta de football-data.co.uk · <a href="/privacidad">Privacidad</a></p>';
   if (paneLigas.dataset.huella === html) return;
   paneLigas.dataset.huella = html;
   paneLigas.innerHTML = html;

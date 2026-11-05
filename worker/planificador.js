@@ -168,7 +168,10 @@ export async function tick(env, { fetchFn = null } = {}) {
       terminoBien = true;
       return { tarea, motivo, ...hecho, muertes };
     }
-    const ctx = new Contexto({ reloj, cache: await almacen.cargarCache(), api, ajustes: ajp, almacen });
+    // las filas de los tiros a puerta (~15 KB por liga y temporada) solo hacen falta al ajustar
+    // las fuerzas: no se leen en cada pasada
+    const ctx = new Contexto({ reloj, cache: await almacen.cargarCache(null, { sin: ["tiros_filas"] }), api,
+      ajustes: ajp, almacen });
 
     if (tarea === "actualizar") {
       if (pedidoForzar) await almacen.escribir([almacen.sentenciaBorrarDoc("pedido_forzar", pedidoForzar.actualizado)]);

@@ -6,6 +6,7 @@ data.json
 validacion.json
 validacion_cache/
 openfootball_cache/
+footballdata_cache/
 
 # Basura estándar de Python:
 __pycache__/

@@ -22,11 +22,11 @@ export const TORNEOS = {
 export const COMPETICIONES = { ...LIGAS, ...TORNEOS };
 export const CODIGOS_TORNEO = new Set(Object.values(TORNEOS));
 
-export const FACTOR_LIGA = { PL: 1.25, PD: 1.06, FL1: 1.08, SA: 1.01, BL1: 1.06, PPL: 0.86, DED: 0.73 };
+export const FACTOR_LIGA = { PL: 1.27, PD: 1.05, FL1: 1.08, SA: 1.02, BL1: 1.06, PPL: 0.85, DED: 0.71 };
 export const FACTOR_OTRA_LIGA = 0.87;
-export const EXPONENTE_FUERZA_CHAMPIONS = 0.82;
-export const ESCALA_CHAMPIONS = [0.90, 0.89];
-export const K_HISTORIAL_CHAMPIONS = 54;
+export const EXPONENTE_FUERZA_CHAMPIONS = 0.77;
+export const ESCALA_CHAMPIONS = [0.90, 0.90];
+export const K_HISTORIAL_CHAMPIONS = 66;
 export const DIAS_VALIDEZ_LIGA_EQUIPO = 30;
 
 export const HORAS_VALIDEZ_LIGA = 12;
@@ -44,17 +44,28 @@ export const ZONAS = {
   FL1: ZONAS_COMUNES(2), DED: ZONAS_COMUNES(2), PPL: ZONAS_COMUNES(2), BSA: ZONAS_COMUNES(4),
   ELC: [["Campeón", 1, 1], ["Ascenso directo", 1, 2], ["Descenso", -3, -1]],
 };
-export const FACTOR_DIARIO = 0.998;
-export const PSEUDO_GOLES_ATAQUE = 6;
-export const PSEUDO_GOLES_DEFENSA = 8;
+// Las fuerzas (modelo 6, nov 2026): un filtro de Kalman con los goles y los tiros a puerta.
+export const KALMAN_DERIVA = 5e-5;
+export const KALMAN_INICIO = 0.16;
+export const KALMAN_TEMPORADA = 0.005;
+export const KALMAN_NUEVO = 0.06;
+export const PESO_TIROS = 0.5;
+export const EXPONENTE_FUERZAS = 1.15;
+// Los tiros a puerta de football-data.co.uk: la división de cada liga en sus CSV (el
+// Brasileirão no los trae) y cada cuánto se vuelven a bajar.
+export const DIVISION_TIROS = { PL: "E0", ELC: "E1", PD: "SP1", BL1: "D1", SA: "I1", FL1: "F1", DED: "N1", PPL: "P1" };
+export const HORAS_VALIDEZ_TIROS = 12;
+export const DIAS_VALIDEZ_TIROS_PREVIA = 30;
+export const HORAS_REINTENTO_TIROS = 6;
 export const ATAQUE_RECIEN_LLEGADO = 0.8;
 export const DEFENSA_RECIEN_LLEGADO = { PL: 1.3 };
 export const LIGA_DE_ARRIBA = { ELC: "PL" };
 export const ATAQUE_DESCENDIDO = 1.2;
 export const DEFENSA_DESCENDIDO = 0.85;
-export const VERSION_MODELO = 5;   // 3 (oct 2026): sin los playoffs de la Championship
+export const VERSION_MODELO = 6;   // 3 (oct 2026): sin los playoffs de la Championship
                                    // 4 (oct 2026): los mercados de goles con ENCOGER_TOTAL
                                    // 5 (oct 2026): los mercados de goles con MENOS_CEROS
+                                   // 6 (nov 2026): Kalman, tiros a puerta y EXPONENTE_FUERZAS
 export const FORMATO_LISTAS = 2;   // partidos_liga sin playoffs (soloLiga): las de antes se bajan otra vez
 // la validación de Cloudflare (validacion.js): una de otro formato se repite, como una de
 // otro modelo. 2 (oct 2026): con la Champions
@@ -64,8 +75,6 @@ export const FORMATO_VALIDACION = 2;
 // la que los buscadores comprueban que las direcciones que se les mandan son de esta web.
 // Si se cambia, cambiar también el nombre y el contenido de ese archivo.
 export const INDEXNOW_CLAVE = "0929ae0a00d11dc89eade75a541f841f";
-export const TOLERANCIA_FUERZAS = 1e-4;
-export const MAX_ITER_FUERZAS = 300;
 export const K_LIGA = 50;
 export const PRIOR_AVG_LOCAL = 1.50;
 export const PRIOR_AVG_VISITA = 1.15;
@@ -143,6 +152,9 @@ export function ajustes(env = {}) {
     // adónde se mandan las páginas nuevas (indexnow.js); vacío, no se mandan. Bing directamente:
     // api.indexnow.org respondió 429 a todo lo que llegaba de Cloudflare (30 oct 2026)
     indexnowUrl: env.INDEXNOW_URL ?? "https://www.bing.com/indexnow",
+    // de dónde salen los tiros a puerta (TIROS_BASE en app.py): los CSV de football-data.co.uk;
+    // vacío, el modelo va solo con los goles. Las pruebas lo mandan a la API falsa.
+    tirosBase: String(env.TIROS_BASE ?? "https://www.football-data.co.uk").replace(/\/+$/, ""),
     // solo en las pruebas: el origen de un servicio de avisos de mentira (http://127.0.0.1:...)
     pushPrueba: env.PUSH_PRUEBA || "",
     // El calendario de Mis equipos (calendario.js): cuántos puede haber, cuántos nuevos al

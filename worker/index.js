@@ -32,7 +32,7 @@
 //
 // El trabajo de verdad lo hace el cron (planificador.js), una vez por minuto.
 
-import { COMPETICIONES, ajustes } from "./config.js";
+import { COMPETICIONES, DIVISION_TIROS, ajustes } from "./config.js";
 import { Almacen } from "./almacen.js";
 import { redondear } from "./modelo.js";
 import { SIN_EJECUTAR } from "./validacion.js";
@@ -108,9 +108,10 @@ async function exigirToken(url, env) {
 }
 
 async function apiLigas(almacen) {
-  const cache = await almacen.cargarCache(["priors", "ligas"]);
+  const cache = await almacen.cargarCache(["priors", "ligas", "fuerzas"]);
   const priors = cache.seccion("priors");
   const ligas = cache.seccion("ligas");
+  const fuerzas = cache.seccion("fuerzas");
   const r3 = (x) => redondear(x ?? 0, 3) || null;
   const salida = {};
   for (const [nombre, codigo] of Object.entries(COMPETICIONES)) {
@@ -125,6 +126,15 @@ async function apiLigas(almacen) {
       media_usada_visita: r3(m && m.avg_visita),
       partidos_esta_temporada: (m && m.partidos) ?? null,
     };
+    if (codigo in DIVISION_TIROS) {
+      // con cuántos partidos se ajustaron sus fuerzas con tiros a puerta (football-data.co.uk)
+      const f = fuerzas[codigo] || {};
+      salida[codigo].tiros = {
+        partidos_con_tiros: f.con_tiros ?? null,
+        exponente: f.exponente === undefined ? null : redondear(f.exponente, 4),
+        fallo: f.tiros_fallo ?? null,
+      };
+    }
   }
   return salida;
 }

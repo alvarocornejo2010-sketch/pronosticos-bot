@@ -8,7 +8,7 @@ El modelo de liga mide a un equipo con sus partidos en la misma competición.
 En la Champions eso solo no sirve: 4 partidos en casa y 4 fuera por temporada,
 contra rivales de niveles muy distintos. Aquí cada equipo se mide en su liga
 nacional (sus fuerzas de liga, las mismas que usa la app: ajustar_fuerzas con
-su temporada anterior y lo jugado de la actual), se ajusta
+su temporada anterior y lo jugado de la actual, con sus tiros a puerta), se ajusta
 por el nivel de la liga (dominar la Eredivisie no es dominar la Premier; ese
 nivel solo se ve donde se cruzan ligas, en la propia Champions) y se corrige
 con su historial en la Champions: lo que marcó y encajó en sus partidos de esta
@@ -166,7 +166,10 @@ class Liga:
 
     def registrar(self, m):
         s = temporada_de(m["fecha"])
-        self.partidos[s].append([(m["fecha"] - date(1970, 1, 1)).days, m["local"], m["visita"], m["gl"], m["gv"]])
+        p = [(m["fecha"] - date(1970, 1, 1)).days, m["local"], m["visita"], m["gl"], m["gv"]]
+        if m.get("pl") is not None and m.get("pv") is not None:
+            p += [m["pl"], m["pv"]]             # sus tiros a puerta, como en producción
+        self.partidos[s].append(p)
         t = self.totales[s]
         t[0] += m["gl"]; t[1] += m["gv"]; t[2] += 1
 
@@ -186,9 +189,7 @@ class Liga:
         if d not in self.memo:
             s = temporada_de(d)
             previa = self.partidos[s - 1] if len(self.partidos[s - 1]) >= 100 else []
-            antes = self.ultimas.get(s)
-            fz = app.ajustar_fuerzas(previa, self.partidos[s], self.media(d),
-                                     inicio=antes["equipos"] if antes else None)
+            fz = app.ajustar_fuerzas(previa, self.partidos[s])
             self.memo[d] = self.ultimas[s] = fz
         return self.memo[d]
 

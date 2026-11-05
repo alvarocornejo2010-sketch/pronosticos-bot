@@ -13,6 +13,9 @@ con lo ocurrido en días anteriores: las fuerzas de ajustar_fuerzas con la
 temporada anterior y lo ya jugado de esta, y la media de la temporada en curso
 anclada en la anterior. Es la misma situación que en producción.
 
+Con los tiros a puerta de esas dos temporadas (football-data.co.uk, como en
+producción: _con_tiros), que se bajan una vez y quedan en disco.
+
 Además del 1X2 mide dos mercados de goles, más de 2.5 y ambos marcan, con la
 misma función que publica la web (`mercados_de_goles`) y contra la misma base
 "equipo medio". No cuesta ni una petición más: salen de los mismos resultados.
@@ -86,12 +89,61 @@ def _cargar_temporada(codigo_liga, season, torneo=False):
     return limpios
 
 
+def _cargar_tiros(codigo_liga, season):
+    """Los tiros a puerta de una temporada terminada (filas_tiros de app.py), en disco
+    como las temporadas: ya no cambian. [] si la liga no trae tiros o no se pudieron
+    bajar (y entonces no se guarda nada: se vuelve a intentar la vez siguiente)."""
+    import app
+    import requests
+    if codigo_liga not in app.DIVISION_TIROS or not app.TIROS_BASE:
+        return []
+    _, cache_dir = _rutas()
+    os.makedirs(cache_dir, exist_ok=True)
+    ruta = os.path.join(cache_dir, f"{codigo_liga}_{season}_tiros.json")
+    if os.path.exists(ruta):
+        try:
+            with open(ruta) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    try:
+        resp = requests.get(app.url_tiros(codigo_liga, season), timeout=30,
+                            headers={"User-Agent": "pronosticos-bot"})
+    except requests.RequestException as e:
+        print(f"Validación: tiros de {codigo_liga} {season}: {e}", file=sys.stderr)
+        return []
+    if resp.status_code != 200:
+        print(f"Validación: tiros de {codigo_liga} {season}: HTTP {resp.status_code}", file=sys.stderr)
+        return []
+    filas = app.filas_tiros(resp.text)
+    if filas:
+        with open(ruta, "w") as f:
+            json.dump(filas, f)
+    return filas
+
+
+def _con_tiros(codigo_liga, season, partidos):
+    """Los partidos de una temporada con sus tiros a puerta (pl, pv) cuando
+    football-data.co.uk los trae, casados como en producción (casar_tiros)."""
+    import app
+    filas = _cargar_tiros(codigo_liga, season)
+    if not filas:
+        return partidos
+    casados = app.casar_tiros([_compacto(m) for m in partidos], filas)
+    return [dict(m, pl=c[5], pv=c[6]) if len(c) > 5 else m for m, c in zip(partidos, casados)]
+
+
 # ==========================================
 # ESTADO INCREMENTAL
 # ==========================================
 def _compacto(m):
+    """[día, local, visita, gl, gv] y, si los tiene, sus tiros a puerta (partidos_compactos
+    con casar_tiros, como en producción)."""
     import app
-    return [app.dia_de(m["fecha"]), m["local"], m["visita"], m["gl"], m["gv"]]
+    c = [app.dia_de(m["fecha"]), m["local"], m["visita"], m["gl"], m["gv"]]
+    if m.get("pl") is not None and m.get("pv") is not None:
+        c += [m["pl"], m["pv"]]
+    return c
 
 
 class _Historial:
@@ -99,8 +151,7 @@ class _Historial:
     de todos los equipos (ajustar_fuerzas, como obtener_fuerzas_liga en
     producción) y la media de la temporada en curso anclada en la anterior
     (como obtener_promedio_liga). Se recalculan al cambiar de día, así que los
-    partidos de un mismo día no se ven entre sí; el ajuste de cada día arranca
-    del anterior, que solo lo hace converger antes."""
+    partidos de un mismo día no se ven entre sí."""
 
     def __init__(self, previa, ancla, k, codigo_liga=None, de_arriba=()):
         self.previa = [_compacto(m) for m in previa]
@@ -120,8 +171,7 @@ class _Historial:
             k = self.k
             self.media = {"avg_local": (self.gl + k * self.ancla["avg_local"]) / (self.n + k),
                           "avg_visita": (self.gv + k * self.ancla["avg_visita"]) / (self.n + k)}
-            self.fuerzas = app.ajustar_fuerzas(self.previa, self.actual, self.media,
-                                               inicio=self.fuerzas["equipos"] if self.fuerzas else None,
+            self.fuerzas = app.ajustar_fuerzas(self.previa, self.actual,
                                                codigo_liga=self.codigo_liga, de_arriba=self.de_arriba)
             self.dia = dia
         return self.fuerzas, self.media
@@ -338,6 +388,8 @@ def validar_liga(codigo_liga, nombre, season, champions=None, fotos=None):
     if len(ultima) < 100:
         return {"liga": nombre, "error": f"temporada {season} no disponible "
                                          f"({len(ultima)} partidos)"}
+    previa = _con_tiros(codigo_liga, season - 1, previa)
+    ultima = _con_tiros(codigo_liga, season, ultima)
 
     ancla = _ancla(previa, season)
 
