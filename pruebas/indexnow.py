@@ -3,7 +3,9 @@ tablas bajadas: en un minuto libre del cron manda a IndexNow (el de mentira de a
 la portada, las ligas, los partidos de la ventana con predicción y los equipos de las tablas,
 con la clave del archivo que sirve la web; no lo repite antes de 3 horas; luego manda solo lo
 que cambió (un partido que terminó, sus equipos, su liga, la portada y su semana de resultados), nada si no cambió
-nada, y si IndexNow falla, lo vuelve a mandar la vez siguiente.
+nada, y si IndexNow falla, lo vuelve a mandar la vez siguiente. Con dos destinos (INDEXNOW_URL de
+e2e.sh): uno que siempre responde 429, como Bing desde Cloudflare, y detrás otro que acepta; la primera
+vez prueba los dos y luego va directo al que aceptó.
 Uso: python pruebas/indexnow.py PUERTO_WORKER PUERTO_API DIR_D1"""
 import glob, json, os, re, sqlite3, sys, time, urllib.request
 from datetime import datetime, timedelta
@@ -14,6 +16,8 @@ HORA = 3600000
 cron = lambda: urllib.request.urlopen(W + "/cdn-cgi/local/scheduled?cron=*+*+*+*+*").read()
 pedir = lambda url: json.load(urllib.request.urlopen(url))
 recibidas = lambda: pedir(API + "/__indexnow")
+lleno = lambda: pedir(API + "/__indexnow_lleno")   # lo que le llegó al que responde 429
+DESTINO, LLENO = API + "/indexnow", API + "/indexnow-lleno"
 
 # la clave: la del archivo de public/ que sirve la web, la misma que va en config.js
 publico = os.path.join(os.path.dirname(__file__), "..", "public")
@@ -50,11 +54,14 @@ def atrasar(horas=4):   # como si la última vez hubiera sido hace 4 horas
 # como si no se hubiera hecho nunca: toca en el siguiente minuto libre, y va todo
 db.execute("DELETE FROM documentos WHERE clave = 'indexnow'")
 db.commit()
-n = len(recibidas())
+n, m = len(recibidas()), len(lleno())
 d = esperar("la primera vez")
 envios = recibidas()
 assert len(envios) == n + 1 and d["estado"] == 200 and d["al_dia"] is True, (len(envios), d)
 e = envios[-1]
+# antes, el que responde 429, con lo mismo; el documento dice quién aceptó y quién no
+assert len(lleno()) == m + 1 and lleno()[-1]["urlList"] == e["urlList"], len(lleno())
+assert d["destino"] == DESTINO and [(f["destino"], f["estado"]) for f in d["fallidos"]] == [(LLENO, 429)], d
 assert (e["host"], e["key"], e["keyLocation"]) == ("pronosticos-bot.alvarocornejo2010.workers.dev", clave,
                                                     f"{WEB}/{clave}.txt"), e
 assert e["tipo"].startswith("application/json")
@@ -72,7 +79,8 @@ assert "/" in rutas and ligas <= rutas and con_numeros <= rutas and equipos <= r
 assert d["urls"] == len(rutas) and set(d["enviados"]) >= {p["id"] for p in partidos if not p.get("pendiente")
                                                           and p["utcDate"] > ahora}
 print(f"la primera vez: {len(rutas)} direcciones (la portada, las 10 ligas, {len(con_numeros)} partidos por jugar con"
-      f" pronóstico y {len(equipos)} equipos de las tablas), con su clave")
+      f" pronóstico y {len(equipos)} equipos de las tablas), con su clave; primero al que responde 429 y luego al que"
+      f" acepta")
 
 hecho = doc()
 for _ in range(5):
@@ -83,8 +91,8 @@ print("no se repite antes de 3 horas")
 # 3 horas después sin cambios: no se manda nada
 atrasar()
 d = esperar("sin cambios")
-assert d["urls"] == 0 and "estado" not in d and len(recibidas()) == n + 1, d
-print("sin cambios, no se manda nada")
+assert d["urls"] == 0 and "estado" not in d and len(recibidas()) == n + 1 and d["destino"] == DESTINO, d
+print("sin cambios, no se manda nada (y no se olvida quién aceptó)")
 
 # un partido termina: él, sus equipos, su liga y la portada, nada más
 p, q = [x for x in partidos if not x.get("pendiente") and x["utcDate"] > ahora][:2]
@@ -102,7 +110,9 @@ semana = (dia - timedelta(days=dia.weekday())).isoformat()
 assert rutas == {"/", f"/liga/{p['liga_codigo']}", f"/partido/{p['id']}", f"/equipo/{p['local_id']}",
                  f"/equipo/{p['visita_id']}", "/resultados", f"/resultados/{semana}"}, rutas
 assert d["desde"] == liquidado and d["estado"] == 200, d
-print(f"un partido que termina: la portada, su liga, su página, la de sus dos equipos y sus resultados ({len(rutas)} direcciones)")
+assert len(lleno()) == m + 1 and "fallidos" not in d, d   # directo al que aceptó la vez anterior
+print(f"un partido que termina: la portada, su liga, su página, la de sus dos equipos y sus resultados ({len(rutas)} direcciones),"
+      f" directo al que aceptó")
 
 # si IndexNow falla, se apunta sin mover nada, y la vez siguiente va otra vez
 urllib.request.urlopen(API + "/__indexnow?estado=500").read()
@@ -112,6 +122,9 @@ db.commit()
 atrasar()
 d = esperar("IndexNow falla")
 assert d["estado"] == 500 and d["desde"] == liquidado and "error" in d and d["espera_h"] == 6, d
+# primero el que aceptó (500) y luego el otro (429); se sigue acordando del que aceptó
+assert [(f["destino"], f["estado"]) for f in d["fallidos"]] == [(DESTINO, 500), (LLENO, 429)] and d["destino"] == DESTINO, d
+assert len(lleno()) == m + 2
 urllib.request.urlopen(API + "/__indexnow?estado=200").read()
 atrasar()   # tras un fallo espera 6 horas, no 3: a las 4, nada
 n = len(recibidas())
@@ -121,7 +134,8 @@ assert len(recibidas()) == n and json.loads(doc()[0])["estado"] == 500
 atrasar(3)
 d = esperar("después del fallo")
 assert f"{WEB}/partido/{q['id']}" in recibidas()[-1]["urlList"] and d["desde"] == liquidado + 1 and d["estado"] == 200, d
-print("si IndexNow falla, lo vuelve a mandar pasadas 6 horas")
+assert len(lleno()) == m + 2 and d["destino"] == DESTINO and "fallidos" not in d, d
+print("si no acepta ninguno, lo vuelve a mandar pasadas 6 horas, empezando por el que aceptó la última vez")
 
 db.execute("DELETE FROM resultados WHERE id IN (?, ?)", (p["id"], q["id"]))
 db.commit()
