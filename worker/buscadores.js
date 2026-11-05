@@ -5,7 +5,7 @@
 // resultados.js), con su título ("Inter – Shakhtar: pronóstico"), su
 // descripción, su dirección canónica y su texto ya escrito, que enlaza con las demás.
 // El sitemap las lista todas (las ligas, los partidos por jugar, los equipos de las
-// tablas y las semanas con resultados), para que Google las encuentre sin que nadie las enlace, y el cron avisa a
+// tablas, las semanas con resultados y la porra, /porra), para que Google las encuentre sin que nadie las enlace, y el cron avisa a
 // Bing de las nuevas (indexnow.js).
 // Las direcciones salen del origen de la petición: si la web cambia de dominio,
 // cambian solas. Los datos de la web (/api/estado y los demás de solo lectura) no
@@ -52,6 +52,7 @@ ${r.results.map((f) => url(`/partido/${Number(f.id)}`, cuando(f.calculado))).joi
 ${equipos.map(([id, iso]) => url(`/equipo/${id}`, cuando(iso))).join("\n")}
 ${semanas.length ? url("/resultados", "<changefreq>daily</changefreq>") : ""}
 ${semanas.map((s) => url(`/resultados/${s}`)).join("\n")}
+${url("/porra", "<changefreq>daily</changefreq>")}
 </urlset>
 `;
 }

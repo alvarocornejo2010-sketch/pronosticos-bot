@@ -161,6 +161,19 @@ assert [f["apodo"] for f in clasif("siempre")[2]["filas"]] == ["Pepe Gol"]
 print(f"clasificación: Pepe Gol 1 de 1 y Rival 0 de 1 (la web, {web_n} cada uno), con ETag y 304; cada partido en su semana;"
       " quien se quita el apodo deja de salir")
 
+# /porra: la web con la tarjeta de la porra y su texto, con la clasificación (esta semana, o la
+# pasada, o desde siempre: la primera con alguien), escapada; la dirección, en el sitemap
+r = urllib.request.urlopen(W + "/porra")
+html = r.read().decode()
+assert r.status == 200 and "text/html" in r.headers.get("Content-Type", "") and "script-src 'self'" in r.headers.get("Content-Security-Policy", "")
+assert "<title>La porra: juega contra la web · Pronósticos</title>" in html, html[:400]
+assert f'<link rel="canonical" href="{W}/porra">' in html and 'property="og:title" content="La porra: juega contra la web"' in html
+assert "<h1" in html and "La porra contra la web</h1>" in html
+assert "1. Pepe Gol: 1 acierto de 1; la web, " + str(web_n) + "." in html and "Rival" not in html, html[-3000:]
+assert html.count("Pepe Gol") >= 1 and "Clasificación, " in html
+assert f"<loc>{W}/porra</loc>" in urllib.request.urlopen(W + "/sitemap.xml").read().decode()
+print("/porra: su tarjeta, su texto con la clasificación y en el sitemap")
+
 # la descarga de datos lo trae; borrar la cuenta lo borra
 req = urllib.request.Request(W + "/api/cuenta/datos", headers={"Cookie": f"sesion={token}"})
 datos = json.loads(urllib.request.urlopen(req).read())

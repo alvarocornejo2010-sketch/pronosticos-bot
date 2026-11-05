@@ -291,6 +291,13 @@ for (const [ancho, alto] of ANCHOS) {
   // la porra, con una cuenta de mentira: el bloque "Tu pronóstico" del detalle (elegir se ve
   // en el acto) y la vista Tu porra, con un partido ya jugado
   if (ancho === 390 || ancho === 1440) {
+    // antes, sin cuenta: la porra se ve igual (la fila de Ligas, el botón de la tira del móvil y
+    // el tablero de Panorama, que lleva a #/porra)
+    await p.goto(W + "/#/semana");
+    await p.waitForSelector(".m-porra a[href='#/porra']", { state: "attached", timeout: 15000 })   // en el móvil, en la pestaña Panorama.catch(() => fallo(`${ancho}px: sin cuenta, no sale el tablero La porra`));
+    const sinC = await p.evaluate(() => ({ fila: document.querySelector('.m-ligas [data-hash="#/porra"] .nom')?.textContent || "",
+      chip: document.querySelector('.tira-ligas [data-hash="#/porra"]')?.textContent || "" }));
+    if (sinC.fila !== "La porra" || !sinC.chip.includes("La porra")) fallo(`${ancho}px: sin cuenta, la porra no sale en Ligas (${JSON.stringify(sinC)})`);
     const jugado = { ...jugados[0], signo: "2" };
     let elegido = null;
     await p.route("**/api/cuenta", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ disponible: true,
@@ -334,6 +341,10 @@ for (const [ancho, alto] of ANCHOS) {
       for (const x of v) fallo(`${ancho}px, ${nombre}: accesibilidad ${x}`);
     }
     if (!(await p.textContent("#vista")).includes("Acertaste 1 de 1; la web, en esos mismos, 0.")) fallo(`${ancho}px: Tu porra no trae lo sumado`);
+    // Compartir: el enlace a /porra con lo sumado (sin menú del sistema, al portapapeles o en el aviso)
+    await p.click("#vista [data-compartir-porra]");
+    await p.waitForFunction(() => /\/porra/.test(document.querySelector("#aviso-flotante")?.textContent || "") || /Copiado/.test(document.querySelector("#aviso-flotante")?.textContent || ""),
+      null, { timeout: 5000 }).catch(() => fallo(`${ancho}px: Compartir de Tu porra no hace nada`));
     // lo elegido, con su recuadro en la fila; los jugados, con su propia cabecera y lo de cada uno en
     // su línea; y sin la cabecera de columnas de la tabla, que aquí no va con nada
     const vp = await p.evaluate((id) => ({

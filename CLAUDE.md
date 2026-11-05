@@ -186,10 +186,10 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
   `#/liga/PD/2026-10-10`, `#/liga/PD/tabla` (ver "Tabla y proyección"), `#/favoritos`,
   `#/equipo/86` (ver "Página de cada equipo"), `#/resultados` y `#/resultados/2026-10-26`
   (ver "Historial de aciertos"), `#/porra` (ver "Porra contra el modelo"). `#/` es toda la semana en escritorio y
-  el primer día en móvil. Y cuatro sin hash, para compartir y para los buscadores:
+  el primer día en móvil. Y cinco sin hash, para compartir y para los buscadores:
   `/partido/123` (ver "Compartir y favoritos"), `/equipo/86`, que pasa en el acto a
-  `/#/equipo/86`, `/liga/PD`, que pasa a `/#/liga/PD` (ver "Buscadores"), y `/resultados`
-  (o `/resultados/2026-10-26`), que pasa a `/#/resultados`.
+  `/#/equipo/86`, `/liga/PD`, que pasa a `/#/liga/PD` (ver "Buscadores"), `/resultados`
+  (o `/resultados/2026-10-26`), que pasa a `/#/resultados`, y `/porra`, que pasa a `/#/porra`.
 - Tipografía: Saira (marca, títulos y todos los números) y Figtree (nombres y
   textos), de Google Fonts. Las dos tienen cifras tabulares, comprobadas en el
   navegador: las columnas de números no bailan.
@@ -241,7 +241,7 @@ ver "Compartir y favoritos"), y `/robots.txt` y `/sitemap.xml` para los buscador
 (ver "Instalable y buscadores"). Y las cuentas: `/api/cuenta` (la de la sesión;
 en Render, `disponible: false`) y, solo en Cloudflare, `/api/cuenta/crear`,
 `/entrar`, `/equipo`, `/contrasena`, `/correo`, `/usuario`, `/salir`, `/borrar` (POST),
-`/datos` (ver "Cuentas"), `/porra` (GET y POST) y `/apodo` (POST), y `/api/porra/clasificacion` (ver "Porra contra el modelo"). Y `/api/tabla/PD`, la tabla de una liga y lo que le falta
+`/datos` (ver "Cuentas"), `/porra` (GET y POST) y `/apodo` (POST), y `/api/porra/clasificacion` y `/porra`, la web con la tarjeta de la porra y su texto (en Render, la web sin ellos; ver "Porra contra el modelo"). Y `/api/tabla/PD`, la tabla de una liga y lo que le falta
 de temporada (en Render, `no_disponible`; ver "Tabla y proyección"). Y los avisos de
 Mis equipos: `/api/avisos` (la clave pública VAPID; en Render, `disponible: false`) y,
 solo en Cloudflare, `/api/avisos/alta` y `/api/avisos/baja` (POST; ver "Avisos de Mis
@@ -734,6 +734,20 @@ sale solo quien elige un apodo (ver más abajo).
   descarga de datos lleva el apodo y borrar la cuenta lo borra; la política de privacidad dice que el
   apodo y los aciertos los ve cualquiera. En el panel de visitas, cuántos salen. En Render,
   `/api/porra/clasificacion` responde `no_disponible`.
+- **Que se sepa que existe** (4 nov 2026: una sola cuenta jugaba y nadie salía en la clasificación;
+  sin cuenta, la porra solo aparecía en el detalle de un partido). En el tablero de Ligas, "La porra"
+  ("Juega contra la web") también sin cuenta (con ella, "Tu porra", como antes), y en la tira de ligas
+  del móvil, después de Mis equipos (`filaPorra`, `chipPorra`). En Panorama, después de Los más claros,
+  el tablero **La porra** (`htmlTableroPorra`): qué es, lo suyo con la cuenta abierta, los tres
+  primeros de la clasificación (esta semana; sin nadie, la pasada, y si no, desde siempre: la misma
+  tabla de `#/porra`, `htmlTablaClasif`) y el enlace a `#/porra`. Lo pide al pintar Panorama, como
+  mucho una vez cada 10 minutos por periodo, con ETag (en el servidor, leer una fila). **Compartir**
+  en Tu porra y en la invitación sin cuenta (`compartirPorra`): "En la porra contra la web acerté 7 de
+  12; la web, 6. ¿Le ganas?" (o la invitación, sin partidos terminados) y el enlace a **`/porra`**,
+  la web con su tarjeta ("La porra: juega contra la web") y su texto ya escrito (`paginaPorra` y
+  `textosPorra` en `porra.js`): qué es y la clasificación, los 10 primeros de la primera que tenga a
+  alguien, con los apodos escapados; en el sitemap. En las visitas, las llegadas por `/porra` van con
+  las demás (`enlace`, `porra`) y las veces que se pulsa su Compartir, aparte (`compartir_porra`).
 
 ## Avisos de Mis equipos (oct 2026)
 
@@ -1371,6 +1385,12 @@ vueltas y los goles esperados (con dos decimales) salían iguales salvo algún
    `validacion.py` metía la temporada anterior entera en la media de liga
    (380 partidos más los de esta más K_LIGA de ancla), y producción usa solo
    los de esta más K_LIGA. Ahora las dos hacen lo de producción.
+9. **La vista de una liga perdía el orden Hora / Claros / Reñidos** (nov 2026). En `render`,
+   `classList.toggle("en-tabla", enTabla)` recibía `undefined` fuera de la tabla, y `toggle` sin
+   un booleano alterna en vez de fijar: tras un número impar de repintados, `#/liga/PD` quedaba
+   como si fuera la tabla. Salió al añadir el tablero La porra (más repintados al cargar);
+   `interfaz.mjs` lo cazó al no poder pulsar "Claros". Al segundo argumento de `toggle`, siempre
+   un booleano (`!!`).
 
 ## Champions: cómo se predice (oct 2026)
 
@@ -1797,7 +1817,7 @@ Environment).
     ya escrito de un partido, un equipo y una liga, con los enteros de la web, escapado y con sus
     enlaces; lo sumado de una semana de resultados y su texto; las marcas de `index.html`, una de
     cada; y qué se manda a IndexNow, todo la primera vez y luego solo lo nuevo, sin perder nada
-    si falla, y cada vez más tarde), `node
+    si falla, y cada vez más tarde; y el texto de `/porra`, con los apodos escapados), `node
     pruebas/sw.mjs` (el service worker: "Sin conexión" sin red, la web con red, y los
     avisos: su texto, adónde llevan y la pestaña que abren) y `node pruebas/push.mjs`
     (el cifrado de los avisos contra el ejemplo de RFC 8291, la firma VAPID, la hora
@@ -1837,7 +1857,8 @@ Environment).
     sin sesión o desde otra web, suma bien con un resultado (también la web), no cuenta lo
     publicado tarde, va en la descarga de datos y se borra con la cuenta; el apodo (lo que no vale, el propio
     usuario, repetido entre cuentas) y la clasificación con dos cuentas, en orden, con ETag y cada partido en su
-    semana, y que quitarse el apodo saca de ella al momento (`porra.py`, con `MINUTOS_CLASIFICACION=0`). Que los
+    semana, y que quitarse el apodo saca de ella al momento, y `/porra` con su tarjeta, su texto con la clasificación y en el
+    sitemap (`porra.py`, con `MINUTOS_CLASIFICACION=0`). Que los
     avisos de Mis equipos llegan (`avisos.mjs`, con el servicio de avisos de mentira
     de `api_falsa.py`, `/push/<id>`, y `AVISO_ANTES_MIN` de dos semanas para que toquen
     todos los de la semana): cuatro navegadores de mentira se suscriben, cada aviso se
@@ -1882,7 +1903,8 @@ Environment).
     mentira (elegir en el detalle y Tu porra, con axe en 390 y 1440; el recuadro de lo elegido, la cabecera
     de "Ya jugados", lo de cada uno en su línea, sin la cabecera de la tabla, y la clasificación con la fila
     propia marcada y los apodos enteros; el apodo, que se cambia, y uno repetido, que da error y se queda en el
-    campo; y que los botones de la porra no cortan los nombres), una casilla de cada tramo
+    campo; y que los botones de la porra no cortan los nombres; sin cuenta, "La porra" en Ligas, en la tira del móvil y su
+    tablero en Panorama, y con ella, Compartir en Tu porra), una casilla de cada tramo
     de la rampa (el contraste, con axe en 390 y 1440), los nombres del detalle enlazando con
     la página de su equipo, el texto sin JavaScript de la portada, un partido, un equipo y una
     liga en los 7 anchos (con axe en 390 y 1440) y que la web lo cambia por lo suyo, y axe-core sin nada en la semana,
