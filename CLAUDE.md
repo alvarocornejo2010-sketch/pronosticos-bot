@@ -1291,8 +1291,15 @@ cuántos partidos se ajustó con tiros, el exponente y si falló la última desc
 goles y el exponente baja solo. Medido: sin los tiros de la temporada en curso, +9.13 % en
 la prueba (-4.0 se frente al modelo 5); sin ninguno, igual que el modelo 5. Su retraso normal
 (los tiros de los últimos días aún no publicados) no cuesta nada (4 días de retraso: igual).
-Sus condiciones de uso no se pudieron leer desde aquí (la red de la sesión no llega a ese
-dominio): que las mire el dueño del proyecto (ver "Pendiente").
+**Sus condiciones** (su página `data.php`, vista el 5 nov 2026 en un buscador: la red de la
+sesión no llega a ese dominio): los CSV gratis son «for private individuals only, NOT
+commerical or data training products using automated bots/scrapers/AI» y se dan «for the
+purposes of league match prediction only»; para uso comercial remiten a una API de pago. El
+dueño del proyecto decidió usarlos (nov 2026): la web es gratis, no es comercial, no entrena
+nada, predice partidos de liga y del CSV no enseña nada, solo sus pronósticos. Pocas descargas
+(dos CSV por liga, cada 12 h el de la temporada en curso). Se les cita en el pie del tablero
+de Ligas ("tiros a puerta de football-data.co.uk") y en la política de privacidad. Si algún
+día se oponen o cambian las condiciones: `TIROS_BASE` vacío y el modelo sigue solo con goles.
 
 **Recién llegados** (`prior_recien_llegado`, oct 2026). Un equipo que no estaba
 en la liga la temporada anterior parte de:
@@ -1908,12 +1915,12 @@ Environment).
   buscadores"); mejorar el modelo en ligas tan igualadas necesitaría otra
   información (ver "xG real"). Los tiros a puerta (modelo 6) ayudan a la Championship
   (+0.4) y nada al Brasileirão, que no los trae en football-data.co.uk.
-- **Las condiciones de uso de football-data.co.uk** (de donde salen los tiros a puerta desde
-  el modelo 6): la sesión que lo programó no podía leer esa web (su red no llegaba a ese
-  dominio). Que el dueño del proyecto las mire. Si no permitieran este uso, se quita
-  `TIROS_BASE` (vacío) y el modelo sigue solo con goles, como el modelo 5 (medido). Hay un
-  entorno de Claude Code, "pronosticos-bot", con acceso a ese dominio para las sesiones
-  siguientes.
+- **Las condiciones de football-data.co.uk, enteras** (de donde salen los tiros a puerta desde
+  el modelo 6; lo que dicen y la decisión, en "El modelo"): la sesión que lo programó solo pudo
+  verlas en un buscador. Leer la página desde una sesión en el entorno de Claude Code
+  "pronosticos-bot", que llega a ese dominio, por si pide algo más (cómo citarlos, un
+  contacto). Si no permitieran este uso, `TIROS_BASE` vacío: el modelo sigue solo con goles,
+  como el modelo 5 (medido).
 - **Defensa de partida de un ascendido en las demás ligas:** 1.1 no se
   distingue de 1 en las temporadas de ajuste (-0.0001, -0.8 se) pero ayuda en
   las de prueba (-0.0003, -2.9 se). Con el protocolo no se puede poner; volver

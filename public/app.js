@@ -1951,7 +1951,7 @@ function pintarLigasPane(todos, ruta) {
     + '<span class="stats">' + ligas.length + (ligas.length === 1 ? " competición" : " competiciones") + ' esta semana</span>'
     + '<span class="n">' + todos.length + '</span></button>'
     + filaFav + filaPorra(ruta) + filas + '</div></section>' + htmlFiabilidad()
-    + '<p class="pie-izq">Datos de football-data.org · <a href="/privacidad">Privacidad</a></p>';
+    + '<p class="pie-izq">Datos de football-data.org; tiros a puerta de football-data.co.uk · <a href="/privacidad">Privacidad</a></p>';
   if (paneLigas.dataset.huella === html) return;
   paneLigas.dataset.huella = html;
   paneLigas.innerHTML = html;
