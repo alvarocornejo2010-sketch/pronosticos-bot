@@ -11,6 +11,11 @@
   "workers_dev": true,
   "preview_urls": false,
   "compatibility_date": "2026-09-30",
+  // Desde la 4.150.0, wrangler sube además con cada despliegue el mapa del código
+  // (source map), para que los errores sin atrapar salgan en los Logs con la línea
+  // de worker/. Aquí no aporta: los errores se atrapan y los escribe el propio
+  // Worker, y esos no se traducen. Así el despliegue sube lo mismo que antes.
+  "upload_source_maps": false,
   // La web (public/index.html) la sirve Cloudflare directamente, sin gastar
   // CPU del Worker. public/_headers le pone las mismas cabeceras que app.py.
   "assets": {
