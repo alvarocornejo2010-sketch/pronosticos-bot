@@ -2076,7 +2076,11 @@ Environment).
     liga en los 7 anchos (con axe en 390 y 1440) y que la web lo cambia por lo suyo, y axe-core sin nada en la semana,
     Mis equipos, los dos detalles, la tabla, la página de un equipo y el historial, en el móvil y en escritorio. Es lo que en oct
     2026 encontró la fecha bajo el escudo y "Seguir" cortado en el móvil. El job
-    instala Chromium (`npx playwright install --with-deps chromium`); sin red para
+    instala Chromium (`npx playwright install --with-deps chromium`) y corre en
+    `ubuntu-24.04`, fijado (`runs-on`): Playwright 1.56.1 no sabe instalar las
+    dependencias del navegador en Ubuntu 26.04, y el 10 nov 2026 `ubuntu-latest` empezó a
+    ir ahí (la PR #48 falló en ese paso, antes de correr ninguna prueba). Al subir
+    Playwright a una versión que lo admita, subir también la imagen. Sin red para
     las fuentes de Google, `FUENTES=carpeta` (con `fuentes.css`, `mapa.txt` y los
     woff2) las sirve en local. En GitHub, 3-4 minutos; en local, unos 12.
   - Las variables del Worker van con `--var`, que manda sobre `.dev.vars`: el token

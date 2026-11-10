@@ -45,7 +45,10 @@ jobs:
 
   punta-a-punta:
     name: Flask contra el Worker
-    runs-on: ubuntu-latest
+    # Fijado en Ubuntu 24.04, y no ubuntu-latest: Playwright 1.56.1 no sabe instalar
+    # las dependencias del navegador en Ubuntu 26.04, adonde ubuntu-latest empezó a
+    # ir el 10 nov 2026. Al subir Playwright a una versión que lo admita, subir esto.
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
