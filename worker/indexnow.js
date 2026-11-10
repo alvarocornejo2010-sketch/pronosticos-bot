@@ -2,9 +2,12 @@
 // Seznam, Naver y Yep, y de Bing beben también DuckDuckGo, Yahoo, Ecosia y la búsqueda de
 // ChatGPT; Google no (para él están el sitemap y Search Console). Gratis y sin cuenta:
 // basta con publicar la clave en /<clave>.txt (public/) y mandar las direcciones a uno de
-// ellos, que las reparte entre todos: a Bing (www.bing.com/indexnow). Al principio iban a
-// api.indexnow.org, que el 30 oct 2026 respondió 429 ("demasiadas peticiones") las tres
-// veces, seguramente por las IP de salida de Cloudflare, que comparten muchas webs.
+// ellos, que las reparte entre todos. Se prueban en orden (INDEXNOW_DESTINOS, Bing el
+// primero) hasta que uno responde 200 o 202, y la vez siguiente se empieza por el que
+// aceptó. Al principio iban solo a api.indexnow.org, que el 30 oct 2026 respondió 429
+// ("demasiadas peticiones") las tres veces, y luego solo a Bing, que respondió lo mismo siete
+// veces seguidas hasta el 4 nov: seguramente por las IP de salida de Cloudflare, que
+// comparten muchas webs.
 //
 // Lo hace el cron en un minuto libre (planificador.js) cada HORAS_INDEXNOW, con la web al
 // día y sin la API ni el candado, como la limpieza, con lo que cambió desde la vez
@@ -31,7 +34,7 @@ const MAX_ESPERA_H = 48;  // lo más que se espera tras un fallo, aunque Retry-A
 // un fallo se espera lo que diga su espera_h; si no, HORAS_INDEXNOW. El texto solo se lee
 // pasadas esas horas: los demás minutos no cuesta nada.
 export function tocaIndexnow(doc, resumen, aj, ahora) {
-  if (!aj.indexnowUrl || !resumen || resumen.estado !== "listo") return null;
+  if (!(aj.indexnowUrls && aj.indexnowUrls.length) || !resumen || resumen.estado !== "listo") return null;
   if (!doc) return "nunca se ha hecho";
   const horas = (ahora - doc.actualizado) / MS_HORA;
   if (horas < HORAS_INDEXNOW) return null;
@@ -91,31 +94,57 @@ export async function cambios(almacen, previo, ahora, reloj = new Reloj(ajustes(
   return { rutas: rutas.slice(0, MAX_URLS), desde: hasta, enviados: ventana.results.map((f) => Number(f.id)) };
 }
 
-// Si no responde 200 o 202, se apunta igual (para no repetirlo cada minuto) sin mover lo
-// ya mandado: la vez siguiente va otra vez.
+// Los destinos en su orden, con el que aceptó la última vez delante: si Bing responde 429 y
+// Yandex acepta, la vez siguiente se empieza por Yandex.
+export function ordenDestinos(destinos, ultimo) {
+  return destinos.includes(ultimo) ? [ultimo, ...destinos.filter((d) => d !== ultimo)] : [...destinos];
+}
+
+// Lo mismo a cada destino, en orden, hasta que uno responde 200 o 202 (destino, en el
+// documento, que se guarda también las veces que no se manda nada o no acepta ninguno; los que
+// fallaron antes, en fallidos). Si no acepta ninguno, se apunta igual (para no repetirlo cada
+// minuto) sin mover lo ya mandado: la vez siguiente va otra vez. El estado, el error y el
+// Retry-After del documento son los del primero que se probó.
 export async function avisarBuscadores(almacen, aj, previo, ahora, fetchFn = fetch) {
   const c = await cambios(almacen, previo, ahora, new Reloj(aj.tz));
   const doc = { hecha: new Date(ahora).toISOString(), urls: c.rutas.length, al_dia: true, desde: c.desde, enviados: c.enviados };
-  if (c.rutas.length) {
+  const anterior = (previo && previo.destino) || null;   // el que aceptó la última vez
+  const destinos = ordenDestinos(aj.indexnowUrls || [], anterior);
+  if (c.rutas.length && destinos.length) {
     const origen = aj.urlWeb.replace(/\/+$/, "");
-    try {
-      const r = await fetchFn(aj.indexnowUrl, {
-        method: "POST", signal: AbortSignal.timeout(10000), headers: { "Content-Type": "application/json; charset=utf-8" },
-        body: JSON.stringify({ host: new URL(origen).host, key: INDEXNOW_CLAVE, keyLocation: `${origen}/${INDEXNOW_CLAVE}.txt`,
-          urlList: c.rutas.map((ruta) => origen + ruta) }),
-      });
-      doc.estado = r.status;
-      if (r.status !== 200 && r.status !== 202) {
-        doc.error = (await r.text()).slice(0, 300);
+    const cuerpo = JSON.stringify({ host: new URL(origen).host, key: INDEXNOW_CLAVE,
+      keyLocation: `${origen}/${INDEXNOW_CLAVE}.txt`, urlList: c.rutas.map((ruta) => origen + ruta) });
+    const fallidos = [];
+    let aceptado = null;
+    for (const destino of destinos) {
+      // 8 s cada uno: con los cinco sin responder, menos de un minuto, antes de la pasada siguiente
+      const intento = { destino };
+      try {
+        const r = await fetchFn(destino, { method: "POST", signal: AbortSignal.timeout(8000),
+          headers: { "Content-Type": "application/json; charset=utf-8" }, body: cuerpo });
+        intento.estado = r.status;
+        if (r.status === 200 || r.status === 202) {
+          aceptado = destino;
+          doc.estado = r.status;
+          break;
+        }
+        intento.error = (await r.text()).slice(0, 300);
         const ra = r.headers.get("Retry-After");
-        if (ra) doc.retry_after = ra.slice(0, 100);
+        if (ra) intento.retry_after = ra.slice(0, 100);
+      } catch (e) {
+        intento.estado = 0;
+        intento.error = String((e && e.message) || e).slice(0, 300);
       }
-    } catch (e) {
-      doc.estado = 0;
-      doc.error = String((e && e.message) || e).slice(0, 300);
+      console.error(`IndexNow ${destino}: ${intento.estado} ${intento.error}`);
+      fallidos.push(intento);
     }
-    if (doc.error !== undefined) {
-      console.error(`IndexNow: ${doc.estado} ${doc.error}`);
+    if (aceptado) {
+      doc.destino = aceptado;
+      if (fallidos.length) doc.fallidos = fallidos;
+    } else {
+      const { estado, error, retry_after } = fallidos[0];
+      Object.assign(doc, { estado, error }, retry_after ? { retry_after } : {});
+      if (fallidos.length > 1) doc.fallidos = fallidos;
       // cada fallo seguido dobla la espera (6, 12, 24 h), y si pide más con Retry-After, eso
       const fallos = ((previo && previo.fallos) || 0) + 1;
       const espera = Math.max(Math.min(24, HORAS_INDEXNOW * 2 ** fallos), horasRetryAfter(doc.retry_after, ahora));
@@ -123,6 +152,7 @@ export async function avisarBuscadores(almacen, aj, previo, ahora, fetchFn = fet
         enviados: previo ? previo.enviados : [], fallos, espera_h: Math.min(MAX_ESPERA_H, espera) });
     }
   }
+  if (doc.destino === undefined && anterior) doc.destino = anterior;
   await almacen.escribir([almacen.sentenciaDoc("indexnow", doc, ahora)]);
   return { urls: doc.urls, estado: doc.estado ?? null };
 }
