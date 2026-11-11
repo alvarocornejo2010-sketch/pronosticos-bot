@@ -1122,7 +1122,11 @@ asistentes (ChatGPT, Perplexity...) no, así que leían una página vacía. Lo q
   responder, menos de un minuto. Por qué varios: al principio iban a `api.indexnow.org`, que el
   30 oct 2026 respondió 429 ("demasiadas peticiones") las tres veces, y luego solo a Bing, que
   respondió lo mismo siete veces seguidas hasta el 4 nov, sin que entrara ni una dirección:
-  seguramente por las IP de salida de Cloudflare, que comparten muchas webs. Si no acepta
+  seguramente por las IP de salida de Cloudflare, que comparten muchas webs. **El 10 nov 2026
+  entró por primera vez:** tras doce intentos fallidos seguidos, Bing respondió otro 429 y
+  Yandex aceptó las 459 direcciones (202: recibidas, con la clave aún por comprobar); desde
+  entonces se empieza por Yandex. Que de ahí lleguen a Bing y a los demás no se ve desde aquí:
+  se verá en `/visitas`, si llega gente desde buscadores. Si no acepta
   ninguno, se apunta (el estado, el error y el `Retry-After` del primero que se probó, y todos
   en `fallidos`) y la vez siguiente va todo otra vez (`al_dia`), cada vez más tarde: 6, 12 y
   24 h (`fallos`, `espera_h`), o lo que pida `Retry-After`, hasta 48. Si tampoco así, queda Bing
@@ -1222,19 +1226,32 @@ de quien usa la web. En
 `wrangler.jsonc`, `preview_urls: false`: sin eso cada versión subida tendría
 una URL pública propia, con la base y los secretos de producción, para siempre.
 
-**Dependencias** (oct 2026, `pip-audit` y `npm audit` a cero): Flask 3.1.3 y
+**Dependencias** (10 nov 2026, `pip-audit` y `npm audit` a cero): Flask 3.1.3 y
 requests 2.33.1 (los avisos de 3.1.0 y 2.32.3 no afectaban a esta app: no usa
-sesiones ni `.netrc`), wrangler 4.149.0 (la 4.146 arrastraba un `sharp`
-vulnerable, solo en local). El 25 oct `npm audit` ya no daba cero: tres avisos de
-`undici` (dos moderados y uno alto, denegación de servicio y SRI), que llega por
-`wrangler` → `miniflare`. Solo en local (`wrangler dev`), nada en producción. Lo
-arregla wrangler 4.153.0, publicada el 26 oct 2026 (`npm audit` da vulnerables de la
-4.36.0 a la 4.152.0): **subirla hacia el 9 nov**, con dos semanas de vida. No antes
-porque es lo que corre Workers Builds para desplegar `main`, con las credenciales de la
-cuenta de Cloudflare: una versión recién publicada es la que más riesgo tiene de venir
-rota o alterada, y el aviso no toca producción. Fijarla exacta en `package.json`, `npm
-install` y `bash pruebas/e2e.sh`. Playwright 1.56.1 y axe-core
-4.10.2 solo sirven a las pruebas. Para repasarlo: `pip install pip-audit &&
+sesiones ni `.netrc`) y wrangler 4.153.0. La 4.146 arrastraba un `sharp` vulnerable, y
+de la 4.36.0 a la 4.152.0, un `undici` vulnerable (de la 7.0.0 a la 7.30.0), que llega
+por `wrangler` → `miniflare`: `npm audit` dejó de dar cero el 25 oct, y el 9 nov eran
+ocho avisos (denegación de servicio, SRI, una caché que podía dar a un usuario lo de
+otro, saltarse la comprobación del certificado TLS en un caso...). Solo en local
+(`wrangler dev`), nada en producción. **Una wrangler nueva se sube con dos semanas de
+vida, no antes:** es lo que corre Workers Builds para desplegar `main`, con las
+credenciales de la cuenta de Cloudflare, y una versión recién publicada es la que más
+riesgo tiene de venir rota o alterada. La 4.153.0 salió el 26 oct y se subió el 10 nov:
+sin avisos en npm y con la firma del registro de npm comprobada en los 95 paquetes de
+`package-lock.json` (`npm audit signatures` no pudo mirar además su procedencia, de
+Sigstore: la red de la sesión no llega a su CDN). Cómo: fijarla exacta en
+`package.json`, `npm install`, `npm audit` y `bash pruebas/e2e.sh`, y **mirar qué cambia
+en el despliegue**: sus notas de versión (`packages/wrangler/CHANGELOG.md`, en el
+repositorio cloudflare/workers-sdk de GitHub), `npx wrangler deploy --dry-run --outdir
+<carpeta>` con la versión de antes y con la nueva (el `index.js` y los bindings tienen
+que salir iguales) y `npx wrangler deploy --help` de las dos. De la 4.149.0 a la 4.153.0
+cambian dos cosas del despliegue, las dos desde la 4.150.0. Una: wrangler sube por
+defecto el mapa del código; se dejó apagado (ver "Cloudflare: cómo se despliega"), y con
+eso el `index.js` que sube la 4.153.0 es el de la 4.149.0 sin su última línea, el
+comentario que apuntaba al mapa. Otra: `wrangler deploy` se para sin subir nada si
+encuentra una carpeta `.cloudflare/output`, la de los proyectos que compilan con `cf`;
+aquí no la hay. Playwright 1.56.1 y
+axe-core 4.10.2 solo sirven a las pruebas. Para repasarlo: `pip install pip-audit &&
 pip-audit -r requirements.txt` y `npm audit`.
 
 **Riesgo que queda:** las rutas públicas solo leen, pero cada petición al
@@ -1815,6 +1832,15 @@ Create → Import a repository): **un push a `main` despliega solo**, con
 llamarse `pronosticos-bot`, como `name` en `wrangler.jsonc`, o el build falla.
 La base D1 va enlazada por su id en `wrangler.jsonc`; el cron, también ahí.
 
+**Sin mapa del código** (`upload_source_maps: false` en `wrangler.jsonc`, nov 2026).
+Desde la 4.150.0, `wrangler deploy` sube además por defecto el mapa del código (source
+map, unos 550 KB con el código de `worker/`), con el que Cloudflare traduce en los Logs
+las líneas de los errores sin atrapar, después de que corra el Worker (según su
+documentación, sin gastar CPU ni contar en el tamaño). Aquí no aporta: los errores se
+atrapan y los escribe el propio Worker (`console.error` con `e.stack`), y esos no se
+traducen. Con `false`, el despliegue sube lo mismo que con la 4.149.0. Si algún día hace
+falta ver en los Logs la línea de `worker/` de un error sin atrapar, quitar esa línea.
+
 **Builds de las otras ramas: hay que desactivarlos** (Settings → Build → Branch
 control → desmarcar "Enable Preview Builds"). Un Worker creado desde el 22 sept
 2026 compila las ramas que no son `main` como Worker Previews (`npx wrangler
@@ -2050,7 +2076,11 @@ Environment).
     liga en los 7 anchos (con axe en 390 y 1440) y que la web lo cambia por lo suyo, y axe-core sin nada en la semana,
     Mis equipos, los dos detalles, la tabla, la página de un equipo y el historial, en el móvil y en escritorio. Es lo que en oct
     2026 encontró la fecha bajo el escudo y "Seguir" cortado en el móvil. El job
-    instala Chromium (`npx playwright install --with-deps chromium`); sin red para
+    instala Chromium (`npx playwright install --with-deps chromium`) y corre en
+    `ubuntu-24.04`, fijado (`runs-on`): Playwright 1.56.1 no sabe instalar las
+    dependencias del navegador en Ubuntu 26.04, y el 10 nov 2026 `ubuntu-latest` empezó a
+    ir ahí (la PR #48 falló en ese paso, antes de correr ninguna prueba). Al subir
+    Playwright a una versión que lo admita, subir también la imagen. Sin red para
     las fuentes de Google, `FUENTES=carpeta` (con `fuentes.css`, `mapa.txt` y los
     woff2) las sirve en local. En GitHub, 3-4 minutos; en local, unos 12.
   - Las variables del Worker van con `--var`, que manda sobre `.dev.vars`: el token
