@@ -6,7 +6,8 @@
 // Uso: node pruebas/paginas.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { CODIGOS, filaResultado, paginaConTarjeta, textoPartido, veredicto } from "../worker/compartir.js";
+import { CODIGOS, datosLd, equipoConLiga, etiquetasOg, filaResultado, migaLiga, migas, paginaConTarjeta, partidoLd,
+  textoPartido, veredicto } from "../worker/compartir.js";
 import { textoEquipo } from "../worker/equipos.js";
 import { textosLiga } from "../worker/ligas.js";
 import { lunesDe, resumirSemana, textosResultados } from "../worker/resultados.js";
@@ -22,6 +23,40 @@ const ficha = {
   prob_visita: 22.2, xg_local: 1.8, xg_visita: 0.95, prob_mas_25: 52.6, prob_ambos: 47.4,
   marcadores: [[1, 0, 11.6], [2, 1, 9.4], [1, 1, 9.2]],
 };
+
+// los datos estructurados (JSON-LD) de un partido: quién juega, cuándo y de qué competición,
+// con su camino (la Champions tiene página; un equipo sin id, no), dentro del bloque og y
+// sin que un nombre pueda cerrar la etiqueta
+{
+  const O = "https://x.workers.dev";
+  const ld = datosLd(partidoLd(O, ficha, "la descripción"), migas(O, migaLiga("CL"), ["Inter – Shakhtar", "/partido/7"]), null);
+  assert.ok(ld.startsWith('<script type="application/ld+json">') && ld.endsWith("</script>"));
+  const dentro = ld.slice(ld.indexOf(">") + 1, ld.lastIndexOf("</script>"));
+  assert.ok(!dentro.includes("<") && dentro.includes("Shakhtar \\u003cb>&"), dentro);
+  const [partido, camino] = JSON.parse(dentro)["@graph"];
+  assert.equal(JSON.parse(dentro)["@context"], "https://schema.org");
+  assert.deepEqual([partido["@type"], partido.name, partido.startDate, partido.url, partido.description],
+    ["SportsEvent", "FC Internazionale Milano – Shakhtar <b>&", "2026-10-22T19:00:00Z", O + "/partido/7", "la descripción"]);
+  assert.deepEqual(partido.homeTeam, { "@type": "SportsTeam", name: "FC Internazionale Milano", sport: "Fútbol", url: O + "/equipo/108" });
+  assert.deepEqual(partido.awayTeam, { "@type": "SportsTeam", name: "Shakhtar <b>&", sport: "Fútbol" });
+  assert.deepEqual(partido.superEvent, { "@type": "SportsEvent", name: "Champions League", url: O + "/liga/CL" });
+  assert.equal(partido.location, undefined);   // la API no da el estadio: no se inventa
+  assert.deepEqual(camino.itemListElement.map((x) => [x.position, x.name, x.item]),
+    [[1, "Pronósticos", O + "/"], [2, "Champions League", O + "/liga/CL"], [3, "Inter – Shakhtar", O + "/partido/7"]]);
+  // una liga que no es de la web no tiene miga ni dirección; un escudo que no es https no va
+  assert.equal(migaLiga("XX"), null);
+  assert.equal(migas(O, migaLiga("XX"), ["A", "/a"]).itemListElement.length, 2);
+  assert.equal(partidoLd(O, { ...ficha, liga_codigo: "XX" }, "").superEvent.url, undefined);
+  assert.deepEqual(equipoConLiga(O, "Arsenal FC", 57, "https://crests.football-data.org/57.png", "PL"),
+    { "@type": "SportsTeam", name: "Arsenal FC", sport: "Fútbol", url: O + "/equipo/57", logo: "https://crests.football-data.org/57.png",
+      memberOf: { "@type": "SportsOrganization", name: "Premier League", url: O + "/liga/PL" } });
+  assert.equal(equipoConLiga(O, "X", 5, "http://sin-https/x.png", null).logo, undefined);
+  // en el bloque og, antes de su cierre; sin datos, el bloque de siempre
+  const og = etiquetasOg(O, "/partido/7", "t", "d", undefined, ld);
+  assert.ok(og.endsWith(ld + "\n<!-- /og -->") && og.split("<!-- og -->").length === 2, og);
+  assert.ok(!etiquetasOg(O, "/partido/7", "t", "d").includes("ld+json"));
+  console.log("datos estructurados: el partido con sus equipos y su liga, su camino, y los nombres sin poder cerrar la etiqueta");
+}
 
 // el partido: los enteros de la tabla (55, 23, 22), la doble oportunidad sumada de ellos,
 // el veredicto de la web, todo escapado, y solo los enlaces que existen

@@ -8,8 +8,10 @@
 <!-- Título, descripción, dirección canónica y la tarjeta que enseñan WhatsApp,
      Telegram o X al compartir la web. En /partido/123, /equipo/86 y /liga/PD el
      Worker cambia este bloque por el suyo, y también el título de la vista (h1) y el
-     texto de #vista (worker/compartir.js). canonical, og:url y og:image llevan la
-     dirección entera: si la web cambia de dominio, cambiarlas aquí. -->
+     texto de #vista (worker/compartir.js). canonical, og:url, og:image y los datos
+     estructurados (el bloque application/ld+json: datos para los buscadores, no un guion;
+     la CSP no lo mira) llevan la dirección entera: si la web cambia de dominio, cambiarlas
+     aquí. -->
 <!-- og -->
 <title>Pronósticos de fútbol: 1 X 2 y goles</title>
 <meta name="description" content="Pronósticos 1X2 y doble oportunidad de la Champions League, LaLiga, Premier League, Ligue 1, Bundesliga, Serie A, Eredivisie, Primeira Liga, Championship y Brasileirão con un modelo Poisson de la fuerza en ataque y en defensa de cada equipo, medida con sus goles y sus tiros a puerta.">
@@ -25,6 +27,11 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Pronósticos: probabilidades 1 X 2 de fútbol">
 <meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{ "@context": "https://schema.org", "@type": "WebSite", "name": "Pronósticos", "inLanguage": "es",
+  "url": "https://pronosticos-bot.alvarocornejo2010.workers.dev/",
+  "description": "Probabilidades de cada partido de la semana en 9 ligas y la Champions, con un modelo medido contra miles de partidos." }
+</script>
 <!-- /og -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b130f'/%3E%3Crect x='3' y='8.5' width='7.6' height='15' rx='2' fill='%23ffd24c'/%3E%3Crect x='12.2' y='8.5' width='7.6' height='15' rx='2' fill='%23a18047'/%3E%3Crect x='21.4' y='8.5' width='7.6' height='15' rx='2' fill='%23594d39'/%3E%3C/svg%3E">
 <!-- instalarla como app: manifiesto e iconos (el service worker, sw.js, lo registra app.js) -->

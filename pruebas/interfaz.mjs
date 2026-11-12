@@ -146,6 +146,8 @@ for (const [ancho, alto] of ANCHOS) {
   const p = await ctx.newPage();
   const errores = [];
   p.on("pageerror", (e) => errores.push(e.message));
+  // los datos estructurados (application/ld+json) son datos: si la CSP los tomara por un guion en línea, lo diría aquí
+  p.on("console", (m) => { if (m.type() === "error" && /inline script/i.test(m.text())) errores.push(m.text()); });
   for (const [nombre, hash, extra] of VISTAS) {
     await p.goto("about:blank");   // cada vista desde cero: cambiar solo el hash no recarga (la búsqueda seguiría puesta)
     await p.goto(W + "/" + hash);

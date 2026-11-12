@@ -15,7 +15,7 @@
 import { COMPETICIONES, ajustes } from "./config.js";
 import { CAMPOS_PARTIDO, TRAMOS, entradaDe, isoSinMs } from "./registro.js";
 import { Reloj, diaSemana, sumarDias } from "./tiempo.js";
-import { cuantos, enlaceLiga, enterosQueSuman, esc, etiquetasOg, favoritoDe, filaResultado,
+import { cuantos, datosLd, enlaceLiga, enterosQueSuman, esc, etiquetasOg, favoritoDe, filaResultado, migas,
   paginaConTarjeta } from "./compartir.js";
 
 const NOMBRES = Object.fromEntries(Object.entries(COMPETICIONES).map(([n, c]) => [c, n]));
@@ -161,8 +161,10 @@ export async function paginaResultados(request, env, almacen, semana) {
     const d = await datosResultados(almacen, reloj, semana);
     if (d.estado === "listo") {
       const t = textosResultados(d, reloj, Boolean(semana));
-      og = etiquetasOg(new URL(request.url).origin, semana ? `/resultados/${d.semana}` : "/resultados", t.titulo,
-        t.descripcion, `${t.titulo} · Pronósticos`);
+      const origen = new URL(request.url).origin;
+      og = etiquetasOg(origen, semana ? `/resultados/${d.semana}` : "/resultados", t.titulo,
+        t.descripcion, `${t.titulo} · Pronósticos`, datosLd(migas(origen, ["Resultados", "/resultados"],
+          semana ? [`Semana ${nombreSemana(d.semana)}`, `/resultados/${d.semana}`] : null)));
       texto = t.texto;
     }
   } catch (e) {

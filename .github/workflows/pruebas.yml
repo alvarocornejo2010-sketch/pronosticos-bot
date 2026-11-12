@@ -42,6 +42,8 @@ jobs:
         run: node pruebas/sw.mjs
       - name: Cifrado, firma y hora de los avisos
         run: node pruebas/push.mjs
+      - name: Vigilancia (desde cuándo falla un CSV de tiros)
+        run: node pruebas/salud.mjs
 
   punta-a-punta:
     name: Flask contra el Worker
