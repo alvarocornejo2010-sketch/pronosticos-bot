@@ -234,7 +234,8 @@ márgenes vacíos. La banda de arriba es el marcador; debajo, tableros redondead
 
 **Endpoints:** `/` (web), `/api/estado`, `/api/ligas` (qué ancla y qué media usa
 cada liga y, en las 8 con tiros a puerta, con cuántos partidos se ajustaron con tiros, el
-exponente de sus fuerzas y si falló la última descarga del CSV), `/salud`, `/actualizar?token=...&forzar=1`,
+exponente de sus fuerzas y si falló la última descarga del CSV), `/salud` (en Cloudflare, también las
+pasadas muertas y los CSV de tiros que fallan: ver "Pruebas automáticas", `vigilancia.yml`), `/actualizar?token=...&forzar=1`,
 `/validar?token=...[&temporada=N]` (lanza el backtest), `/api/validacion` (su
 resultado), `/api/registro` (el registro en vivo; en Render responde
 `no_disponible`) y `/api/contar` (POST: los avisos de visita de la web; en Render
@@ -362,7 +363,7 @@ fecha, `resultados_por_fecha`, para el historial de aciertos), `documentos` (`es
 de claves, y `avisos_resumen`, cuándo volver a mirar, `limpieza`, cuándo se hizo la
 del día y qué borró, e `indexnow`, cuándo se avisó a los buscadores y qué) y
 `candado` (que dos pasadas no se pisen, hora de la última petición, pasadas
-muertas), `visitas` (los contadores de visitas por día, ver "Visitas"), las de
+muertas seguidas y las del día), `visitas` (los contadores de visitas por día, ver "Visitas"), las de
 las cuentas: `cuentas`, `usuarios`, `correos`, `accesos`, `sesiones`, `favoritos`, `porra` y `apodos` (ver
 "Cuentas" y "Porra contra el modelo"), y las de los avisos: `suscripciones`, `avisos` y `envios` (ver "Avisos de
 Mis equipos"), y `calendarios` (ver "Calendario de Mis equipos").
@@ -1100,6 +1101,19 @@ asistentes (ChatGPT, Perplexity...) no, así que leían una página vacía. Lo q
   cada partido" y, en la portada, "Pronósticos de fútbol: 1 X 2 y goles" (antes, "Pronósticos" a
   secas). Las frases (`veredicto`, `lineaReparto`, `queDijo`) son las de la web y las de los
   avisos: viven en `compartir.js`, una sola vez.
+- **Datos estructurados** (schema.org en JSON-LD, tanda 22, nov 2026): cada una de esas
+  páginas dice además qué es, en un bloque `application/ld+json` dentro del bloque `og`
+  (`datosLd`, `migas`, `partidoLd` y `equipoConLiga` en `compartir.js`; el último argumento
+  de `etiquetasOg`). Un partido: `SportsEvent` con sus dos equipos (con su página y su
+  escudo), su hora y su liga. Un equipo: `SportsTeam`, de su liga. Y todas (también
+  `/liga/PD`, `/resultados` y `/porra`), su camino (`BreadcrumbList`: Pronósticos › La Liga ›
+  Real Madrid – Barcelona), que los buscadores pueden enseñar en vez de la dirección. La
+  portada, `WebSite` (escrito en `index.html`, con la dirección de workers.dev). **Lo que no
+  da:** la tarjeta de evento de Google pide el estadio, y la API no lo trae; no se inventa,
+  así que esa tarjeta no sale. Es un bloque de datos, no un guion: el navegador no lo
+  ejecuta y la CSP (`script-src 'self'`) no lo bloquea (`interfaz.mjs` falla si Chromium
+  se queja de un guion en línea). Los `<` van escapados (`\u003c`): un nombre de equipo no
+  puede cerrar la etiqueta. **Nada de apodos ni de datos de cuentas ahí.**
 - **El sitemap** lleva además las 10 ligas, `/resultados` y cada semana con resultados
   (`/resultados/2026-10-26`, ver "Historial de aciertos").
 - **IndexNow** (`indexnow.js`): avisa a Bing de las páginas nuevas o cambiadas (y a Yandex,
@@ -1981,7 +1995,10 @@ Environment).
     pruebas/sw.mjs` (el service worker: "Sin conexión" sin red, la web con red, y los
     avisos: su texto, adónde llevan y la pestaña que abren) y `node pruebas/push.mjs`
     (el cifrado de los avisos contra el ejemplo de RFC 8291, la firma VAPID, la hora
-    de cada aviso y qué servicios se aceptan).
+    de cada aviso y qué servicios se aceptan) y `node pruebas/salud.mjs` (desde cuándo falla
+    un CSV de tiros, para la vigilancia). `paginas.mjs` mira también los datos estructurados
+    de un partido: sus equipos, su liga y su camino, y que un nombre no puede cerrar la
+    etiqueta.
   - **Flask contra el Worker**: `bash pruebas/e2e.sh`. Levanta la API falsa
     (`pruebas/api_falsa.py`, determinista, que sirve además los CSV de tiros a puerta de
     football-data.co.uk de sus mismos partidos: otros nombres, uno escrito de dos formas,
@@ -2055,7 +2072,9 @@ Environment).
     del archivo que sirve la web: la primera vez la portada, las ligas, los partidos y los
     equipos, a los dos y en orden, luego solo lo que cambió (con `/resultados` y la semana del
     partido que terminó) y directo al que aceptó, nada antes de 3 horas, y si no acepta ninguno,
-    otra vez pasadas 6, empezando por el que aceptó la última vez (`indexnow.py`). Y la
+    otra vez pasadas 6, empezando por el que aceptó la última vez (`indexnow.py`). Que la
+    vigilancia pasa con la web sana y falla cuando debe (`salud.py`, la última: fuerza una
+    actualización; ver `vigilancia.yml` más abajo). Y la
     interfaz en un navegador de verdad (`interfaz.mjs`,
     Playwright): 14 vistas (semana, día, liga, por claros y por reñidos, búsqueda,
     Mis equipos, el detalle abierto, el de un partido de Mis equipos, la tabla con su
@@ -2089,7 +2108,22 @@ Environment).
     `bash pruebas/e2e.sh`.
 - `.github/workflows/vigilancia.yml`: cada 3 horas pide `/salud` a la web de
   Cloudflare. Falla si hay error, si no responde o si la última actualización tiene
-  más de 90 minutos, y GitHub manda un email. Se prueba a mano en Actions →
+  más de 90 minutos, y GitHub manda un email. Desde nov 2026 (tanda 22) falla también
+  con dos cosas que antes no se notaban, porque la web seguía actualizándose:
+  - **el cron se queda sin tiempo de CPU:** 2 pasadas muertas seguidas (`muertes` en
+    `/salud`) o 3 en el día de Lima (`muertes_hoy`). Una suelta se tolera: la siguiente
+    hace la mitad y sigue. Las seguidas vuelven a 0 en cuanto las pasadas terminan bien,
+    así que entre una mirada y otra no dirían nada: por eso la cuenta del día
+    (`muertes_dia` en `candado`, con el día en `dueno`; `sentenciaMuerteDelDia`);
+  - **los tiros a puerta no se bajan:** algún CSV de football-data.co.uk lleva más de 24
+    horas fallando (`tiros` en `/salud`: cuántos fallan y desde cuándo el que más). Un
+    fallo suelto se reintenta a las 6 h. Cada entrada de la sección `tiros` que falla
+    lleva `fallando_desde`, la fecha del primer fallo, que los reintentos no mueven y una
+    descarga buena quita (`obtenerTirosLiga`; solo en el Worker: Flask no se vigila).
+  Los umbrales están en el guion del workflow. Lo prueban `node pruebas/salud.mjs` (la
+  fecha del primer fallo) y `pruebas/salud.py`, en `e2e.sh`, que corre ese mismo guion
+  contra el Worker local sano, con una pasada muerta de verdad, con varias y con un CSV
+  que falla. Se prueba a mano en Actions →
   vigilancia → Run workflow, con una URL que no exista. En un repo público, GitHub
   desactiva las tareas programadas tras 60 días sin actividad (avisa antes por
   email; se reactivan en la pestaña Actions).

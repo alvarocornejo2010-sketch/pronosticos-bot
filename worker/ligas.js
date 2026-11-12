@@ -13,7 +13,8 @@
 import { COMPETICIONES, ajustes } from "./config.js";
 import { Reloj } from "./tiempo.js";
 import { CAMPOS_PARTIDO, entradaDe, isoSinMs } from "./registro.js";
-import { CODIGOS, cuandoCorto, cuantos, deLiga, enlaceEquipo, enlaceLiga, etiquetasOg, filaPartido, filaResultado,
+import { CODIGOS, cuandoCorto, cuantos, datosLd, deLiga, enlaceEquipo, enlaceLiga, etiquetasOg, filaPartido, filaResultado,
+  migaLiga, migas,
   paginaConTarjeta } from "./compartir.js";
 
 const NOMBRES = Object.fromEntries(Object.entries(COMPETICIONES).map(([n, c]) => [c, n]));
@@ -81,8 +82,9 @@ export async function paginaLiga(request, env, almacen, codigo) {
     try {
       const reloj = new Reloj(ajustes(env).tz);
       const t = textosLiga(codigo, await datosLiga(almacen, codigo, reloj), reloj);
-      og = etiquetasOg(new URL(request.url).origin, `/liga/${codigo}`, t.titulo, t.descripcion,
-        `${t.titulo}: probabilidades de cada partido`);
+      const origen = new URL(request.url).origin;
+      og = etiquetasOg(origen, `/liga/${codigo}`, t.titulo, t.descripcion,
+        `${t.titulo}: probabilidades de cada partido`, datosLd(migas(origen, migaLiga(codigo))));
       texto = t.texto;
     } catch (e) {
       console.error(`/liga/${codigo}: ${(e && e.stack) || e}`);

@@ -377,6 +377,30 @@ export class Almacen {
        ON CONFLICT (nombre) DO UPDATE SET hasta = excluded.hasta`).bind(n);
   }
 
+  // Una pasada muerta más en el día (de Lima): la cuenta del día va en hasta y el día en
+  // dueno, y otro día la empieza de nuevo. Para /salud y su vigilancia: las seguidas
+  // (muertes) vuelven a 0 en cuanto las pasadas terminan bien, y entre una mirada y otra no
+  // se sabría que hubo alguna.
+  sentenciaMuerteDelDia(dia) {
+    return this.db.prepare(
+      `INSERT INTO candado (nombre, hasta, dueno) VALUES ('muertes_dia', 1, ?1)
+       ON CONFLICT (nombre) DO UPDATE SET
+         hasta = CASE WHEN candado.dueno = excluded.dueno THEN candado.hasta + 1 ELSE 1 END,
+         dueno = excluded.dueno`).bind(dia);
+  }
+
+  // Las pasadas muertas, para /salud: cuántas seguidas y cuántas en ese día.
+  async leerMuertes(dia) {
+    const r = await this.consultar(() =>
+      this.db.prepare("SELECT nombre, hasta, dueno FROM candado WHERE nombre IN ('muertes', 'muertes_dia')").all());
+    const out = { seguidas: 0, hoy: 0 };
+    for (const f of r.results) {
+      if (f.nombre === "muertes") out.seguidas = f.hasta;
+      else if (f.dueno === dia) out.hoy = f.hasta;
+    }
+    return out;
+  }
+
   sentenciaUltimaPeticion(ms) {
     return this.db.prepare(
       `INSERT INTO candado (nombre, hasta, dueno) VALUES ('api', ?1, '')

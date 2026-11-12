@@ -27,6 +27,7 @@ def pedir(ruta, etag=None):
 
 
 og = lambda pagina, prop: html.unescape(re.search(rf'<meta property="og:{prop}" content="([^"]*)">', pagina).group(1))
+ld = lambda pagina: json.loads(re.search(r'<script type="application/ld\+json">(.*?)</script>', pagina, re.S).group(1))
 
 estado = json.loads(pedir("/api/estado")[2])
 partidos = [{**p, "fecha": d["fecha"]} for d in estado["dias"] for p in d["partidos"]]
@@ -109,6 +110,12 @@ assert og(pag, "title") == f"{corto}: próximos partidos y pronóstico", og(pag,
 desc = og(pag, "description")
 assert desc.startswith(f"{tabla['nombre']}: {d['tabla']['pos']}.º con {d['tabla']['pts']} puntos. Próximo partido: "), desc
 assert f'<link rel="canonical" href="{W}/equipo/{eid}">' in pag and og(pag, "url") == f"{W}/equipo/{eid}"
+# sus datos estructurados: el equipo, de su liga, y el camino hasta él
+equipo, camino = ld(pag)["@graph"]
+assert equipo["@type"] == "SportsTeam" and equipo["name"] == nombre and equipo["url"] == f"{W}/equipo/{eid}", equipo
+assert equipo["memberOf"] == {"@type": "SportsOrganization", "name": "La Liga", "url": f"{W}/liga/PD"}, equipo
+assert [(x["name"], x["item"]) for x in camino["itemListElement"]] == [
+    ("Pronósticos", W + "/"), ("La Liga", f"{W}/liga/PD"), (corto, f"{W}/equipo/{eid}")], camino
 texto = pag[pag.index('id="vista"'):pag.index("</main>")]
 e = html.escape
 t = d["tabla"]
@@ -139,6 +146,8 @@ st, cab, pag = pedir("/liga/PD")
 assert "resultados_por_liga" in {f[0] for f in db.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
 assert st == 200 and cab.get("X-Robots-Tag") is None and "script-src 'self'" in cab["Content-Security-Policy"], st
 assert og(pag, "title") == "Pronósticos de La Liga" and f'<link rel="canonical" href="{W}/liga/PD">' in pag
+assert [(x["name"], x["item"]) for x in ld(pag)["@graph"][0]["itemListElement"]] == [
+    ("Pronósticos", W + "/"), ("La Liga", f"{W}/liga/PD")]
 assert "<title>Pronósticos de La Liga: probabilidades de cada partido</title>" in pag
 assert 'id="titulo-vista">Pronósticos de La Liga</h1>' in pag and '<script src="/app.js"></script>' in pag
 texto = pag[pag.index('id="vista"'):pag.index("</main>")]

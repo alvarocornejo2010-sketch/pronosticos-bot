@@ -158,7 +158,49 @@ export function textoPartido(f, res, reloj) {
   return { h1: `${local} – ${visita}: pronóstico`, html: `<div class="escrito">${p.join("")}</div>` };
 }
 
-export function etiquetasOg(origen, ruta, titulo, descripcion, pagina = `${titulo} · Pronósticos`) {
+// Datos estructurados (schema.org, en JSON-LD) para los buscadores y los asistentes: qué es
+// la página, sin tener que deducirlo del texto. Es un bloque de datos, no un guion: el
+// navegador no lo ejecuta y la CSP (script-src) no lo mira. Los "<" van escapados, para que
+// un nombre no pueda cerrar la etiqueta.
+export function datosLd(...cosas) {
+  const json = JSON.stringify({ "@context": "https://schema.org", "@graph": cosas.filter(Boolean) });
+  return `<script type="application/ld+json">${json.replace(/</g, "\\u003c")}</script>`;
+}
+
+// El camino hasta la página (BreadcrumbList), que los buscadores enseñan en vez de la
+// dirección: Pronósticos › La Liga › Real Madrid – Barcelona. pasos: [nombre, ruta], sin
+// la portada, que va siempre la primera.
+export function migas(origen, ...pasos) {
+  return { "@type": "BreadcrumbList", itemListElement: [["Pronósticos", "/"], ...pasos.filter(Boolean)].map(
+    ([name, ruta], i) => ({ "@type": "ListItem", position: i + 1, name, item: origen + ruta })) };
+}
+
+// La miga de una liga, si es de las de la web (las demás no tienen página).
+export const migaLiga = (codigo) => (CODIGOS.has(codigo) ? [NOMBRES[codigo], `/liga/${codigo}`] : null);
+
+const equipoLd = (origen, nombre, id, escudo) => ({ "@type": "SportsTeam", name: nombre, sport: "Fútbol",
+  ...(Number.isInteger(id) && id > 0 ? { url: `${origen}/equipo/${id}` } : {}),
+  ...(typeof escudo === "string" && escudo.startsWith("https://") ? { logo: escudo } : {}) });
+
+// Un equipo (SportsTeam), con su liga si es de las de la web.
+export function equipoConLiga(origen, nombre, id, escudo, codigo) {
+  const e = equipoLd(origen, nombre, id, escudo);
+  if (CODIGOS.has(codigo)) e.memberOf = { "@type": "SportsOrganization", name: NOMBRES[codigo], url: `${origen}/liga/${codigo}` };
+  return e;
+}
+
+// Un partido (SportsEvent): quién juega, cuándo y de qué competición. Sin estadio: la API
+// no lo da, y sin él Google no enseña su tarjeta de evento; el resto lo lee igual.
+export function partidoLd(origen, f, descripcion) {
+  return { "@type": "SportsEvent", name: `${f.local || corto(f, "local")} – ${f.visita || corto(f, "visita")}`,
+    sport: "Fútbol", startDate: f.utcDate, url: `${origen}/partido/${f.id}`, description: descripcion,
+    homeTeam: equipoLd(origen, f.local || corto(f, "local"), f.local_id, f.local_escudo),
+    awayTeam: equipoLd(origen, f.visita || corto(f, "visita"), f.visita_id, f.visita_escudo),
+    ...(f.liga ? { superEvent: { "@type": "SportsEvent", name: f.liga,
+      ...(CODIGOS.has(f.liga_codigo) ? { url: `${origen}/liga/${f.liga_codigo}` } : {}) } } : {}) };
+}
+
+export function etiquetasOg(origen, ruta, titulo, descripcion, pagina = `${titulo} · Pronósticos`, datos = "") {
   return `<!-- og -->
 <title>${esc(pagina)}</title>
 <meta name="description" content="${esc(descripcion)}">
@@ -173,7 +215,7 @@ export function etiquetasOg(origen, ruta, titulo, descripcion, pagina = `${titul
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Pronósticos: probabilidades 1 X 2 de fútbol">
-<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:card" content="summary_large_image">${datos ? "\n" + datos : ""}
 <!-- /og -->`;
 }
 
@@ -191,7 +233,9 @@ export async function paginaPartido(request, env, almacen, id) {
       const reloj = new Reloj(ajustes(env).tz);
       const f = JSON.parse(fila.f);
       const { titulo, descripcion } = textosPartido(f, reloj);
-      og = etiquetasOg(url.origin, `/partido/${id}`, titulo, descripcion, `${titulo}: pronóstico y probabilidades`);
+      og = etiquetasOg(url.origin, `/partido/${id}`, titulo, descripcion, `${titulo}: pronóstico y probabilidades`,
+        datosLd(partidoLd(url.origin, { ...f, id }, descripcion),
+          migas(url.origin, migaLiga(f.liga_codigo), [titulo, `/partido/${id}`])));
       texto = textoPartido(f, fila.gl === null || fila.gl === undefined ? null : fila, reloj);
     }
   } catch (e) {

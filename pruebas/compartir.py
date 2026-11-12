@@ -30,6 +30,7 @@ def enteros(bruto):   # enterosQueSuman de app.js
 
 
 og = lambda pagina, prop: html.unescape(re.search(rf'<meta property="og:{prop}" content="([^"]*)">', pagina).group(1))
+ld = lambda pagina: json.loads(re.search(r'<script type="application/ld\+json">(.*?)</script>', pagina, re.S).group(1))
 
 estado = json.load(urllib.request.urlopen(W + "/api/estado"))
 p = next(p for d in estado["dias"] for p in d["partidos"] if not p.get("pendiente"))
@@ -48,8 +49,20 @@ assert f"<title>{html.escape(local)} – {html.escape(visita)}: pronóstico y pr
 desc = html.unescape(re.search(r'<meta name="description" content="([^"]*)">', pag).group(1))
 assert desc == og(pag, "description") and pag.count('<meta name="description"') == 1, desc
 assert f'<link rel="canonical" href="{W}/partido/{p["id"]}">' in pag
-print(f"/partido/{p['id']}: la web con la tarjeta de {local} – {visita} ({l}/{x}/{v}), su descripción y su"
-      " dirección canónica, con su CSP")
+# y sus datos estructurados: el partido con sus dos equipos, su hora y su liga, y el camino hasta él
+marca = '<script type="application/ld+json">'
+assert pag.count(marca) == 1 and pag.index("<!-- og -->") < pag.index(marca) < pag.index("<!-- /og -->")
+evento, camino = ld(pag)["@graph"]
+assert evento["@type"] == "SportsEvent" and evento["name"] == f"{p['local']} – {p['visita']}", evento
+assert evento["startDate"] == p["utcDate"] and evento["url"] == f"{W}/partido/{p['id']}" and evento["description"] == desc
+assert evento["homeTeam"] == {"@type": "SportsTeam", "name": p["local"], "sport": "Fútbol",
+                              "url": f"{W}/equipo/{p['local_id']}", "logo": p["local_escudo"]}, evento["homeTeam"]
+assert evento["awayTeam"]["name"] == p["visita"] and evento["awayTeam"]["url"] == f"{W}/equipo/{p['visita_id']}"
+assert evento["superEvent"] == {"@type": "SportsEvent", "name": p["liga"], "url": f"{W}/liga/{p['liga_codigo']}"}
+assert [(x["position"], x["item"]) for x in camino["itemListElement"]] == [
+    (1, W + "/"), (2, f"{W}/liga/{p['liga_codigo']}"), (3, f"{W}/partido/{p['id']}")], camino
+print(f"/partido/{p['id']}: la web con la tarjeta de {local} – {visita} ({l}/{x}/{v}), su descripción, su"
+      " dirección canónica y sus datos estructurados, con su CSP")
 
 # su texto, en el h1 y en #vista, en lugar del de la portada: lo que lee quien no ejecuta JavaScript
 texto = pag[pag.index('id="vista"'):pag.index("</main>")]
