@@ -18,7 +18,8 @@ import { ajustes, FORMATO_LISTAS } from "./config.js";
 import { fuerzaEquipo, redondear } from "./modelo.js";
 import { CAMPOS_PARTIDO, entradaDe, isoSinMs } from "./registro.js";
 import { Reloj } from "./tiempo.js";
-import { cuantos, deLiga, enlaceLiga, esc, etiquetasOg, filaPartido, filaResultado, paginaConTarjeta,
+import { cuantos, datosLd, deLiga, enlaceLiga, equipoConLiga, esc, etiquetasOg, filaPartido, filaResultado, migaLiga, migas,
+  paginaConTarjeta,
   textosPartido } from "./compartir.js";
 
 const FORMA = 5;      // los últimos partidos de liga que enseña
@@ -184,7 +185,10 @@ export async function paginaEquipo(request, env, almacen, id) {
     const { datos: d, proximos } = await leerEquipo(almacen, id, reloj, Date.now());
     if (d) {
       const { titulo, descripcion } = textosEquipo(d, proximos[0] || null, reloj);
-      og = etiquetasOg(new URL(request.url).origin, `/equipo/${id}`, titulo, descripcion);
+      const origen = new URL(request.url).origin;
+      og = etiquetasOg(origen, `/equipo/${id}`, titulo, descripcion, undefined,
+        datosLd(equipoConLiga(origen, d.nombre || d.corto, Number(id), d.escudo, d.liga),
+          migas(origen, migaLiga(d.liga), [d.corto || d.nombre, `/equipo/${id}`])));
       texto = textoEquipo(d, proximos, reloj);
     }
   } catch (e) {

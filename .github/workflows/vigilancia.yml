@@ -1,6 +1,9 @@
 # Mira cada 3 horas que la web de Cloudflare se sigue actualizando. Si no (el cron
 # parado, el token caducado, la API caída), la tarea falla y GitHub manda un email
-# a quien la creó o cambió por última vez el cron de este archivo.
+# a quien la creó o cambió por última vez el cron de este archivo. También falla si el
+# cron se queda sin tiempo (2 pasadas muertas seguidas o 3 en el día) o si algún CSV de
+# tiros a puerta lleva más de 24 horas sin bajar: la web seguiría actualizándose y no se
+# notaría. Lo prueba pruebas/salud.py, que corre este mismo guion contra el Worker local.
 # Ojo: en un repo público, GitHub desactiva las tareas programadas tras 60 días sin
 # actividad en el repo (avisa antes por email; se reactivan en la pestaña Actions).
 # Para probar el aviso: Actions → vigilancia → Run workflow, con una URL que no exista.
@@ -53,11 +56,27 @@ jobs:
           edad = None
           if ultima:
               edad = (datetime.now(timezone.utc) - datetime.fromisoformat(ultima)).total_seconds() / 60
-          linea = f"estado {estado}, {salud.get('total')} partidos, última actualización hace {edad and round(edad)} min"
+          seguidas, hoy = salud.get("muertes") or 0, salud.get("muertes_hoy") or 0
+          tiros = salud.get("tiros") or {}
+          horas_tiros = None
+          if tiros.get("desde"):
+              horas_tiros = (datetime.now(timezone.utc) - datetime.fromisoformat(tiros["desde"])).total_seconds() / 3600
+          linea = (f"estado {estado}, {salud.get('total')} partidos, última actualización hace {edad and round(edad)} min; "
+                   f"pasadas muertas: {seguidas} seguidas y {hoy} hoy; CSV de tiros que fallan: {tiros.get('fallan') or 0}"
+                   + (f", desde hace {round(horas_tiros)} h" if horas_tiros is not None else ""))
           print(linea)
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
               f.write(linea + "\n")
+          problemas = []
           # el cron pasa cada 25 min con la web al día: 90 sin pasar es que algo va mal
           if estado == "error" or edad is None or edad > 90:
-              sys.exit("la web no se está actualizando: " + linea)
+              problemas.append("la web no se está actualizando")
+          # una pasada muerta suelta se tolera (hace la mitad y sigue); varias, no
+          if seguidas >= 2 or hoy >= 3:
+              problemas.append("el cron se queda sin tiempo de CPU")
+          # un fallo suelto se reintenta a las 6 h; un día entero es que algo cambió
+          if horas_tiros is not None and horas_tiros > 24:
+              problemas.append("los tiros a puerta de football-data.co.uk no se bajan")
+          if problemas:
+              sys.exit("; ".join(problemas) + ": " + linea)
           EOF

@@ -22,7 +22,7 @@
 
 import { ajustes } from "./config.js";
 import { CAMPOS_PARTIDO, entradaDe, isoSinMs } from "./registro.js";
-import { cuantos, esc, etiquetasOg, favoritoDe, paginaConTarjeta } from "./compartir.js";
+import { cuantos, datosLd, esc, etiquetasOg, favoritoDe, migas, paginaConTarjeta } from "./compartir.js";
 import { inicioDia, lunesDe, nombreSemana } from "./resultados.js";
 import { Reloj, sumarDias } from "./tiempo.js";
 
@@ -214,6 +214,7 @@ export async function paginaPorra(request, env, almacen, ahora = Date.now()) {
     console.error(`/porra: ${(e && e.stack) || e}`);
   }
   const t = textosPorra(d);
-  const og = etiquetasOg(new URL(request.url).origin, "/porra", t.titulo, t.descripcion);
+  const origen = new URL(request.url).origin;
+  const og = etiquetasOg(origen, "/porra", t.titulo, t.descripcion, undefined, datosLd(migas(origen, ["La porra", "/porra"])));
   return paginaConTarjeta(request, env, og, t.texto);
 }

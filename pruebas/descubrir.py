@@ -61,6 +61,10 @@ print(f"buscadores: robots.txt apunta al sitemap; el sitemap trae la portada, la
 _, portada = pedir("/")
 portada = portada.decode()
 assert "<title>Pronósticos de fútbol: 1 X 2 y goles</title>" in portada
+# y qué web es, en datos estructurados (un bloque de datos, no un guion: no hay más <script> que app.js)
+sitio = json.loads(re.search(r'<script type="application/ld\+json">(.*?)</script>', portada, re.S).group(1))
+assert sitio["@type"] == "WebSite" and sitio["name"] == "Pronósticos" and sitio["url"].endswith(".workers.dev/"), sitio
+assert len(re.findall(r"<script\b", portada)) == 2 and '<script src="/app.js"></script>' in portada
 assert set(re.findall(r'<li><a href="/liga/([A-Z0-9]+)">', portada)) == CODIGOS
 print("portada: un enlace a la página de cada liga, para quien no ejecuta JavaScript")
 

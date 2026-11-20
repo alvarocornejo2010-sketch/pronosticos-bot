@@ -16,7 +16,8 @@
 # el calendario de Mis equipos es un .ics bien hecho que sigue a sus equipos (ics.py), la
 # limpieza del día borra lo caducado (limpieza.py) y el cron avisa a IndexNow de las páginas
 # nuevas (indexnow.py, contra dos IndexNow de mentira de la API falsa: uno que responde 429 y
-# otro que acepta). Los tiros a puerta salen de los CSV de football-data.co.uk de mentira de
+# otro que acepta), y la vigilancia de GitHub pasa con la web sana y falla si el cron muere
+# o un CSV de tiros no se baja (salud.py). Los tiros a puerta salen de los CSV de football-data.co.uk de mentira de
 # la API falsa (TIROS_BASE), en los dos.
 #
 # Uso: bash pruebas/e2e.sh   (antes: npm ci y pip install -r requirements.txt)
@@ -161,4 +162,7 @@ python3 "$REPO/pruebas/limpieza.py" "$P_W" "$TMP/d1"
 
 echo "== IndexNow"
 python3 "$REPO/pruebas/indexnow.py" "$P_W" "$P_API" "$TMP/d1"
+
+echo "== Vigilancia (/salud)"
+python3 "$REPO/pruebas/salud.py" "$P_W" "$TMP/d1" secreto_de_prueba_123
 echo "e2e: OK"

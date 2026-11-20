@@ -235,7 +235,7 @@ const porFecha = (a, b) => {
 // esa temporada) y se reintenta a las HORAS_REINTENTO_TIROS. Leerlo es una tarea pesada,
 // como una respuesta grande de la API: va sola en su pasada. No gasta peticiones de
 // football-data.org.
-async function obtenerTirosLiga(ctx, codigo, season, clave) {
+export async function obtenerTirosLiga(ctx, codigo, season, clave) {
   if (!(codigo in DIVISION_TIROS)) return null;
   const k = `${codigo}:${clave}`;
   let e = ctx.cache.get("tiros", k);
@@ -266,6 +266,8 @@ async function obtenerTirosLiga(ctx, codigo, season, clave) {
     ctx.cache.poner("tiros_filas", k, filas);
   } else {
     nueva.fallo = true;
+    // desde cuándo falla, para /salud: un fallo suelto se reintenta solo; uno que dura, no
+    nueva.fallando_desde = (e && e.fallo && e.fallando_desde) || nueva.actualizado;
     ctx.fallos.set("tiros:" + k, true);
     if (!e) ctx.cache.poner("tiros_filas", k, []);   // las de otra temporada ya no valen
   }

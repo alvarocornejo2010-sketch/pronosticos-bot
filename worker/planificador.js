@@ -152,7 +152,7 @@ export async function tick(env, { fetchFn = null } = {}) {
   if (candados.pasada > 0) {
     muertes += 1;
     console.warn(`La pasada anterior murió sin terminar (${muertes} seguidas): esta hace menos.`);
-    await almacen.escribir([almacen.sentenciaMuertes(muertes)]);
+    await almacen.escribir([almacen.sentenciaMuertes(muertes), almacen.sentenciaMuerteDelDia(reloj.local(ahora).fecha)]);
   }
   const ajp = aplicarEscala(aj, muertes);
 

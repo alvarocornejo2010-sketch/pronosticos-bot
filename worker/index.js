@@ -188,15 +188,27 @@ async function apiVisitas(url, env, almacen) {
   return no || json(await resumenVisitas(almacen, env));
 }
 
+// Lo que mira la vigilancia (.github/workflows/vigilancia.yml): que la web se actualiza,
+// que las pasadas del cron no mueren (muertes: seguidas; muertes_hoy: en el día de Lima) y
+// que los CSV de tiros a puerta se bajan (tiros: cuántos fallan y desde cuándo el que más).
 async function salud(almacen, env) {
-  const e = (await almacen.leerDoc("resumen")) || {};
+  const reloj = new Reloj(ajustes(env).tz);
+  const ahora = Date.now();
+  const [resumen, muertes, cache] = await Promise.all([
+    almacen.leerDoc("resumen"), almacen.leerMuertes(reloj.local(ahora).fecha), almacen.cargarCache(["tiros"])]);
+  const e = resumen || {};
+  const fallan = Object.values(cache.seccion("tiros")).filter((t) => t && t.fallo)
+    .map((t) => t.fallando_desde || t.actualizado).sort((a, b) => Date.parse(a) - Date.parse(b));
   return {
     ok: true,
     estado: e.estado ?? "sin_datos",
     total: e.total ?? 0,
     pendientes: e.pendientes ?? 0,
     ultima_actualizacion: e.ultima_actualizacion ?? null,
-    hora: new Reloj(ajustes(env).tz).iso(Date.now()),
+    muertes: muertes.seguidas,
+    muertes_hoy: muertes.hoy,
+    tiros: { fallan: fallan.length, desde: fallan[0] ?? null },
+    hora: reloj.iso(ahora),
   };
 }
 
