@@ -1866,6 +1866,15 @@ secretos (la página saldría rota), y el proyecto evita URLs de más
 (`preview_urls: false`). Los checks de las PR salen de GitHub Actions (ver
 "Pruebas automáticas").
 
+**Ojo al comprobar un despliegue por GitHub** (20 nov 2026): después de fusionar, la
+rama de trabajo se vuelve a poner en `main` y se empuja; ese push lanza una build de
+Preview del mismo commit, que falla y deja su check rojo **en el commit de `main`**. La
+lista de checks de un commit enseña por defecto solo el último de cada nombre, así que
+parece que falló el despliegue. Para verlos todos: `gh api
+repos/alvarocornejo2010-sketch/pronosticos-bot/commits/<sha>/check-runs?filter=all`. El
+de producción es el primero (empezó al fusionar) y tiene que acabar en `success`; el rojo
+de un minuto después es el de la rama.
+
 Secretos, en el panel (Settings → Variables and Secrets, tipo Secret):
 `FOOTBALL_DATA_TOKEN` y `UPDATE_SECRET`, los mismos valores que en Render →
 Environment, y las dos claves de Turnstile (`TURNSTILE_SITEKEY` y
