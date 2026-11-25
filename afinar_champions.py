@@ -8,7 +8,7 @@ El modelo de liga mide a un equipo con sus partidos en la misma competición.
 En la Champions eso solo no sirve: 4 partidos en casa y 4 fuera por temporada,
 contra rivales de niveles muy distintos. Aquí cada equipo se mide en su liga
 nacional (sus fuerzas de liga, las mismas que usa la app: ajustar_fuerzas con
-su temporada anterior y lo jugado de la actual, con sus tiros a puerta), se ajusta
+sus dos temporadas anteriores y lo jugado de la actual, con sus tiros a puerta), se ajusta
 por el nivel de la liga (dominar la Eredivisie no es dominar la Premier; ese
 nivel solo se ve donde se cruzan ligas, en la propia Champions) y se corrige
 con su historial en la Champions: lo que marcó y encajó en sus partidos de esta
@@ -17,7 +17,7 @@ contra esos rivales (historial_champions en app.py).
 
 Datos: openfootball, sin token. La Champions 2022/23 a 2025/26 (628 partidos)
 del repositorio champions-league, en formato de texto, y las ligas nacionales
-2021/22 a 2025/26 de football.json, con los nombres casados entre temporadas
+2020/21 a 2025/26 de football.json, con los nombres casados entre temporadas
 (afinar_liga.cargar). Los equipos de ligas que no están en el plan (Bélgica,
 Austria, Escocia...) cuentan como un equipo medio de "otra liga". Usa
 ajustar_fuerzas, fuerza_equipo, historial_champions, multiplicadores_historial,
@@ -64,13 +64,14 @@ import afinar_liga  # noqa: E402
 URL_CL = "https://raw.githubusercontent.com/openfootball/champions-league/master/{t}/cl.txt"
 CACHE = "openfootball_cache"
 TEMPORADAS_CL = ["2022-23", "2023-24", "2024-25", "2025-26"]
-TEMPORADAS_LIGA = [2021, 2022, 2023, 2024, 2025]
+TEMPORADAS_LIGA = [2020, 2021, 2022, 2023, 2024, 2025]   # 2020/21: la de antes de la anterior de 2022/23
 FICHERO_LIGA = {"PL": "en.1", "PD": "es.1", "SA": "it.1", "BL1": "de.1", "FL1": "fr.1", "DED": "nl.1", "PPL": "pt.1"}
 # país del sufijo "(ENG)" de openfootball -> liga del plan. Mónaco juega la Ligue 1.
 LIGA_DE_PAIS = {"ENG": "PL", "ESP": "PD", "ITA": "SA", "GER": "BL1", "FRA": "FL1", "MCO": "FL1", "NED": "DED", "POR": "PPL"}
 OTRA = "otra"
 NIVELES = list(FICHERO_LIGA) + [OTRA]
 BLOQUES = 5
+K_CL = None             # el K con que se ancla la media de la Champions (None: el de app.py)
 SIGMA_NIVEL = 0.30      # prior del log-factor de cada liga: a 1 sigma, ±35% de goles
 
 
@@ -185,11 +186,12 @@ class Liga:
 
     def fuerzas(self, d):
         """Las fuerzas con lo jugado antes del día d (los partidos de liga de ese
-        día se registran después de predecir los de Champions)."""
+        día se registran después de predecir los de Champions), con las dos temporadas
+        de antes, como obtener_fuerzas_liga."""
         if d not in self.memo:
             s = temporada_de(d)
             previa = self.partidos[s - 1] if len(self.partidos[s - 1]) >= 100 else []
-            fz = app.ajustar_fuerzas(previa, self.partidos[s])
+            fz = app.ajustar_fuerzas(previa, self.partidos[s], previa2=self.partidos[s - 2])
             self.memo[d] = self.ultimas[s] = fz
         return self.memo[d]
 
@@ -261,7 +263,7 @@ def preparar():
         act, prev = totales[s], totales[s - 1]
         hay_previa = prev[2] >= 100
         ancla = (prev[0] / prev[2], prev[1] / prev[2]) if hay_previa else (app.PRIOR_AVG_LOCAL, app.PRIOR_AVG_VISITA)
-        k = app.K_LIGA
+        k = K_CL if K_CL is not None else app.K_LIGA
         mu = ((act[0] + k * ancla[0]) / (act[2] + k), (act[1] + k * ancla[1]) / (act[2] + k))
         # la caché que tendría la app ese día: el historial lo calcula app.historial_champions
         cache = {"liga_equipo": liga_equipo, "fixtures": {},

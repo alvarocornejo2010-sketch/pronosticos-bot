@@ -97,8 +97,19 @@ t = {c: d[c].get('tiros') for c in d}
 assert t['BSA'] is None and t['CL'] is None, t
 for c, v in t.items():
     if c not in ('BSA', 'CL'):
-        assert v and v['partidos_con_tiros'] > 300 and 1.13 < v['exponente'] <= 1.15 and v['fallo'] is False, (c, v)
-print('tiros a puerta:', ', '.join(f\"{c} {v['partidos_con_tiros']}\" for c, v in t.items() if v))"
+        assert v and v['partidos_con_tiros'] > 300 and 1.18 < v['exponente'] <= 1.2 and v['fallo'] is False, (c, v)
+print('tiros a puerta:', ', '.join(f\"{c} {v['partidos_con_tiros']}\" for c, v in t.items() if v))
+# el filtro empieza en la temporada de antes de la anterior (modelo 7): sus partidos van además
+# de los de la anterior y los de esta; el Brasileirão, sin la anterior (la API falsa da 403), no
+# la usa, y ni la pide
+for c, x in d.items():
+    if c == 'CL':
+        assert 'partidos_fuerzas' not in x, x
+    elif c == 'BSA':
+        assert x['partidos_fuerzas'] == x['partidos_esta_temporada'], (c, x)
+    else:
+        assert x['partidos_fuerzas'] > x['ancla_partidos'] + x['partidos_esta_temporada'] + 100, (c, x)
+print('partidos de las fuerzas:', ', '.join(f\"{c} {x['partidos_fuerzas']}\" for c, x in d.items() if c != 'CL'))"
 (cd "$REPO" && FOOTBALL_DATA_TOKEN=sin_uso UPDATE_SECRET=tiros_dummy_secret python3 -c "
 import app
 app.TIROS_BASE = 'http://127.0.0.1:9'          # nadie escucha: el CSV falla

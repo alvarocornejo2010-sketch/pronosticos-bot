@@ -302,52 +302,97 @@ export function urlTiros(base, codigo, season) {
 // Fuerzas: un filtro de Kalman, partido a partido (ajustar_fuerzas en app.py)
 // ------------------------------------------
 // Ataque y defensa de todos los equipos de una liga con sus partidos de la temporada
-// anterior y lo jugado de esta ([[día, local, visita, gl, gv(, tiros local, visita)], ...]):
-// cada log-fuerza con su varianza, que crece con los días sin jugar y baja con cada
-// partido, corregida con lo observado (la mitad de los goles y la mitad de lo que valen
-// sus tiros a puerta) menos lo esperado. Mismas operaciones y en el mismo orden que en
-// Python, con expExacto y logExacto: sale el mismo double.
-export function ajustarFuerzas(previa, actual, codigo = null, deArriba = []) {
-  const conPrevia = previa.length > 0;
-  const arribaLista = [...new Set(deArriba)];
-  if (!previa.length && !actual.length) {
-    return { equipos: {}, con_previa: conPrevia, codigo, de_arriba: arribaLista, dia: null, exponente: 1.0, con_tiros: 0 };
-  }
-  const arriba = new Set(arribaLista);
-  const previos = new Set();
-  for (let r = 0; r < previa.length; r++) { previos.add(previa[r][1]); previos.add(previa[r][2]); }
-  let al, av;
-  if (previa.length >= 100) {
-    let sl = 0, sv = 0;
-    for (let r = 0; r < previa.length; r++) { sl += previa[r][3]; sv += previa[r][4]; }
-    al = sl / previa.length; av = sv / previa.length;
-  } else {
-    al = PRIOR_AVG_LOCAL; av = PRIOR_AVG_VISITA;
-  }
-  let kl = 0.0, kv = 0.0;
-  for (const lista of [previa, actual]) {
-    let gl = 0, gv = 0, tl = 0, tv = 0;
-    for (let r = 0; r < lista.length; r++) {
-      const p = lista[r];
-      if (p.length > 5) { gl += p[3]; gv += p[4]; tl += p[5]; tv += p[6]; }
+// anterior y lo jugado de esta ([[día, local, visita, gl, gv(, tiros local, visita)], ...]),
+// y los de la de antes de la anterior (previa2, modelo 7: el filtro empieza en ella si trae
+// al menos 100 partidos y hay previa): cada log-fuerza con su varianza, que crece con los
+// días sin jugar (y la de todos, al empezar cada temporada) y baja con cada partido,
+// corregida con lo observado (la mitad de los goles y la mitad de lo que valen sus tiros a
+// puerta) menos lo esperado. Mismas operaciones y en el mismo orden que en Python, con
+// expExacto y logExacto: sale el mismo double.
+export function ajustarFuerzas(previa, actual, codigo = null, deArriba = [], previa2 = []) {
+  return new FiltroFuerzas(previa, actual, codigo, deArriba, previa2).fuerzas();
+}
+
+// lo observado (y) frente a lo esperado (lam) corrige el ataque de uno y la defensa del otro
+function corregir(at, de, lam, y) {
+  const pa = at[2], pd = de[3];
+  const den = 1 + lam * (pa + pd);
+  at[0] += pa * (y - lam) / den;
+  de[1] += pd * (y - lam) / den;
+  at[2] = pa - lam * pa * pa / den;
+  de[3] = pd - lam * pd * pd / den;
+}
+
+// El filtro como algo que se va alimentando: ajustarFuerzas es crearlo (con las temporadas
+// pasadas y lo jugado de esta) y pedir sus fuerzas. La validación le da cada día lo jugado
+// (jugar) en vez de rehacerlo entero cada día: son las mismas operaciones en el mismo orden,
+// así que sale el mismo double que rehaciéndolo, mientras los goles por tiro a puerta salgan
+// de la temporada anterior (klDePrevia). Si salen de esta (la anterior sin tiros), cambian con
+// cada partido nuevo y hay que rehacerlo.
+export class FiltroFuerzas {
+  constructor(previa, actual, codigo = null, deArriba = [], previa2 = []) {
+    const antes = previa.length && previa2.length >= 100 ? previa2 : [];
+    this.conPrevia = previa.length > 0;
+    this.codigo = codigo;
+    this.arribaLista = [...new Set(deArriba)];
+    this.arriba = new Set(this.arribaLista);
+    this.previos = new Set();
+    for (let r = 0; r < previa.length; r++) { this.previos.add(previa[r][1]); this.previos.add(previa[r][2]); }
+    if (previa.length >= 100) {
+      let sl = 0, sv = 0;
+      for (let r = 0; r < previa.length; r++) { sl += previa[r][3]; sv += previa[r][4]; }
+      this.al = sl / previa.length; this.av = sv / previa.length;
+    } else {
+      this.al = PRIOR_AVG_LOCAL; this.av = PRIOR_AVG_VISITA;
     }
-    if (tl > 0 && tv > 0) { kl = gl / tl; kv = gv / tv; break; }
+    // y la de la de antes, entera
+    this.al2 = 0.0; this.av2 = 0.0;
+    if (antes.length) {
+      let sl = 0, sv = 0;
+      for (let r = 0; r < antes.length; r++) { sl += antes[r][3]; sv += antes[r][4]; }
+      this.al2 = sl / antes.length; this.av2 = sv / antes.length;
+    }
+    // goles por tiro a puerta, en casa y fuera: los de la temporada anterior (o, sin sus
+    // tiros, los de esta)
+    this.kl = 0.0; this.kv = 0.0; this.klDePrevia = false;
+    for (const lista of [previa, actual]) {
+      let gl = 0, gv = 0, tl = 0, tv = 0;
+      for (let r = 0; r < lista.length; r++) {
+        const p = lista[r];
+        if (p.length > 5) { gl += p[3]; gv += p[4]; tl += p[5]; tv += p[6]; }
+      }
+      if (tl > 0 && tv > 0) { this.kl = gl / tl; this.kv = gv / tv; this.klDePrevia = lista === previa; break; }
+    }
+    // el estado de cada equipo: [log-ataque, log-defensa, sus varianzas, último día, partidos]
+    this.estado = new Map();
+    this.orden = [];
+    this.conTiros = 0;
+    this.glT = 0; this.gvT = 0; this.nT = 0; this.pendL = 0; this.pendV = 0; this.pendN = 0; this.diaT = null;
+    this.n2 = antes.length;                 // donde empieza la previa
+    this.n1 = this.n2 + previa.length;      // y donde empieza la actual
+    this.i = 0;                             // partidos ya recorridos
+    this.ultimo = -Infinity;
+    this.jugar(antes);
+    this.jugar(previa);
+    this.jugar(actual);
   }
-  const W = PESO_TIROS;
-  const estado = new Map(), orden = [];
-  // el estado de un equipo ([log-ataque, log-defensa, sus varianzas, último día, partidos]),
-  // con la varianza que ganó desde su último partido
-  const equipo = (t, d, enActual) => {
-    let e = estado.get(t);
+
+  jugar(partidos) {
+    for (let r = 0; r < partidos.length; r++) this.paso(partidos[r]);
+  }
+
+  // el estado de un equipo, con la varianza que ganó desde su último partido
+  equipo(t, d, enActual) {
+    let e = this.estado.get(t);
     if (e === undefined) {
-      if (enActual && conPrevia && !previos.has(t)) {
-        const pr = priorRecienLlegado(codigo, t, arriba);
+      if (enActual && this.conPrevia && !this.previos.has(t)) {
+        const pr = priorRecienLlegado(this.codigo, t, this.arriba);
         e = [logExacto(pr[0]), logExacto(pr[1]), KALMAN_NUEVO, KALMAN_NUEVO, d, 0];
       } else {
         e = [0.0, 0.0, KALMAN_INICIO, KALMAN_INICIO, d, 0];
       }
-      estado.set(t, e);
-      orden.push(t);
+      this.estado.set(t, e);
+      this.orden.push(t);
     }
     if (d > e[4]) {
       e[2] += KALMAN_DERIVA * (d - e[4]);
@@ -356,62 +401,66 @@ export function ajustarFuerzas(previa, actual, codigo = null, deArriba = []) {
     }
     e[5] += 1;
     return e;
-  };
-  // lo observado (y) frente a lo esperado (lam) corrige el ataque de uno y la defensa del otro
-  const corregir = (at, de, lam, y) => {
-    const pa = at[2], pd = de[3];
-    const den = 1 + lam * (pa + pd);
-    at[0] += pa * (y - lam) / den;
-    de[1] += pd * (y - lam) / den;
-    at[2] = pa - lam * pa * pa / den;
-    de[3] = pd - lam * pd * pd / den;
-  };
-  let conTiros = 0;
-  let glT = 0, gvT = 0, nT = 0, pendL = 0, pendV = 0, pendN = 0, diaT = null;
-  const todos = previa.concat(actual);
-  let ultimo = -Infinity;
-  for (let i = 0; i < todos.length; i++) {
-    const p = todos[i];
+  }
+
+  paso(p) {
+    const i = this.i;
     const d = p[0], loc = p[1], vis = p[2], gl = p[3], gv = p[4];
-    if (d > ultimo) ultimo = d;
-    const enActual = i >= previa.length;
+    if (d > this.ultimo) this.ultimo = d;
+    const enActual = i >= this.n1;
+    if (i === this.n2 && this.n2) {         // empieza la previa: fichajes
+      for (const t of this.orden) { const e = this.estado.get(t); e[2] += KALMAN_TEMPORADA; e[3] += KALMAN_TEMPORADA; }
+    }
     let ml, mv;
     if (enActual) {
-      if (i === previa.length) {
-        for (const t of orden) { const e = estado.get(t); e[2] += KALMAN_TEMPORADA; e[3] += KALMAN_TEMPORADA; }
+      if (i === this.n1) {
+        for (const t of this.orden) { const e = this.estado.get(t); e[2] += KALMAN_TEMPORADA; e[3] += KALMAN_TEMPORADA; }
       }
-      if (d !== diaT) {
-        glT += pendL; gvT += pendV; nT += pendN;
-        pendL = 0; pendV = 0; pendN = 0;
-        diaT = d;
+      if (d !== this.diaT) {
+        this.glT += this.pendL; this.gvT += this.pendV; this.nT += this.pendN;
+        this.pendL = 0; this.pendV = 0; this.pendN = 0;
+        this.diaT = d;
       }
-      ml = (glT + K_LIGA * al) / (nT + K_LIGA);
-      mv = (gvT + K_LIGA * av) / (nT + K_LIGA);
+      ml = (this.glT + K_LIGA * this.al) / (this.nT + K_LIGA);
+      mv = (this.gvT + K_LIGA * this.av) / (this.nT + K_LIGA);
+    } else if (i >= this.n2) {
+      ml = this.al; mv = this.av;
     } else {
-      ml = al; mv = av;
+      ml = this.al2; mv = this.av2;
     }
-    const el = equipo(loc, d, enActual), ev = equipo(vis, d, enActual);
+    const el = this.equipo(loc, d, enActual), ev = this.equipo(vis, d, enActual);
     const lamL = ml * expExacto(el[0] + ev[1]);
     const lamV = mv * expExacto(ev[0] + el[1]);
     let yL, yV;
-    if (p.length > 5 && kl > 0) {
-      yL = (1 - W) * gl + W * kl * p[5];
-      yV = (1 - W) * gv + W * kv * p[6];
-      conTiros += 1;
+    if (p.length > 5 && this.kl > 0) {
+      yL = (1 - PESO_TIROS) * gl + PESO_TIROS * this.kl * p[5];
+      yV = (1 - PESO_TIROS) * gv + PESO_TIROS * this.kv * p[6];
+      this.conTiros += 1;
     } else {
       yL = gl; yV = gv;
     }
     corregir(el, ev, lamL, yL);
     corregir(ev, el, lamV, yV);
-    if (enActual) { pendL += gl; pendV += gv; pendN += 1; }
+    if (enActual) { this.pendL += gl; this.pendV += gv; this.pendN += 1; }
+    this.i = i + 1;
   }
-  const b = 1 + (EXPONENTE_FUERZAS - 1) * (conTiros / todos.length);
-  const equipos = {};
-  for (const t of orden) {
-    const e = estado.get(t);
-    equipos[String(t)] = [expExacto(b * e[0]), expExacto(b * e[1]), e[5]];
+
+  // las fuerzas de ahora (elevadas al exponente de lo recorrido): una foto, que no cambia
+  // aunque luego se juegue más
+  fuerzas() {
+    if (!this.i) {
+      return { equipos: {}, con_previa: this.conPrevia, codigo: this.codigo, de_arriba: this.arribaLista, dia: null,
+        exponente: 1.0, con_tiros: 0, partidos: 0 };
+    }
+    const b = 1 + (EXPONENTE_FUERZAS - 1) * (this.conTiros / this.i);
+    const equipos = {};
+    for (const t of this.orden) {
+      const e = this.estado.get(t);
+      equipos[String(t)] = [expExacto(b * e[0]), expExacto(b * e[1]), e[5]];
+    }
+    return { equipos, con_previa: this.conPrevia, codigo: this.codigo, de_arriba: this.arribaLista, dia: this.ultimo,
+      exponente: b, con_tiros: this.conTiros, partidos: this.i };
   }
-  return { equipos, con_previa: conPrevia, codigo, de_arriba: arribaLista, dia: ultimo, exponente: b, con_tiros: conTiros };
 }
 
 // [ataque, defensa] de los que parte un equipo que no estaba en la liga la

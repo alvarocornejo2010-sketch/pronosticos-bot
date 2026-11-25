@@ -22,11 +22,11 @@ export const TORNEOS = {
 export const COMPETICIONES = { ...LIGAS, ...TORNEOS };
 export const CODIGOS_TORNEO = new Set(Object.values(TORNEOS));
 
-export const FACTOR_LIGA = { PL: 1.27, PD: 1.05, FL1: 1.08, SA: 1.02, BL1: 1.06, PPL: 0.85, DED: 0.71 };
-export const FACTOR_OTRA_LIGA = 0.87;
-export const EXPONENTE_FUERZA_CHAMPIONS = 0.77;
-export const ESCALA_CHAMPIONS = [0.90, 0.90];
-export const K_HISTORIAL_CHAMPIONS = 66;
+export const FACTOR_LIGA = { PL: 1.27, PD: 1.05, FL1: 1.07, SA: 1.01, BL1: 1.05, PPL: 0.83, DED: 0.69 };
+export const FACTOR_OTRA_LIGA = 0.89;
+export const EXPONENTE_FUERZA_CHAMPIONS = 0.80;
+export const ESCALA_CHAMPIONS = [0.92, 0.91];
+export const K_HISTORIAL_CHAMPIONS = 75;
 export const DIAS_VALIDEZ_LIGA_EQUIPO = 30;
 
 export const HORAS_VALIDEZ_LIGA = 12;
@@ -44,13 +44,15 @@ export const ZONAS = {
   FL1: ZONAS_COMUNES(2), DED: ZONAS_COMUNES(2), PPL: ZONAS_COMUNES(2), BSA: ZONAS_COMUNES(4),
   ELC: [["Campeón", 1, 1], ["Ascenso directo", 1, 2], ["Descenso", -3, -1]],
 };
-// Las fuerzas (modelo 6, nov 2026): un filtro de Kalman con los goles y los tiros a puerta.
+// Las fuerzas (modelo 7, nov 2026): un filtro de Kalman con los goles y los tiros a puerta, que
+// empieza en la temporada de antes de la anterior (previa2) si la API la da.
 export const KALMAN_DERIVA = 5e-5;
-export const KALMAN_INICIO = 0.16;
-export const KALMAN_TEMPORADA = 0.005;
+export const KALMAN_INICIO = 0.08;
+export const KALMAN_TEMPORADA = 0.01;
 export const KALMAN_NUEVO = 0.06;
 export const PESO_TIROS = 0.5;
-export const EXPONENTE_FUERZAS = 1.15;
+export const EXPONENTE_FUERZAS = 1.2;
+export const DIAS_REINTENTO_PREVIA2 = 1;
 // Los tiros a puerta de football-data.co.uk: la división de cada liga en sus CSV (el
 // Brasileirão no los trae) y cada cuánto se vuelven a bajar.
 export const DIVISION_TIROS = { PL: "E0", ELC: "E1", PD: "SP1", BL1: "D1", SA: "I1", FL1: "F1", DED: "N1", PPL: "P1" };
@@ -58,14 +60,15 @@ export const HORAS_VALIDEZ_TIROS = 12;
 export const DIAS_VALIDEZ_TIROS_PREVIA = 30;
 export const HORAS_REINTENTO_TIROS = 6;
 export const ATAQUE_RECIEN_LLEGADO = 0.8;
-export const DEFENSA_RECIEN_LLEGADO = { PL: 1.3 };
+export const DEFENSA_RECIEN_LLEGADO = { PL: 1.1 };
 export const LIGA_DE_ARRIBA = { ELC: "PL" };
 export const ATAQUE_DESCENDIDO = 1.2;
 export const DEFENSA_DESCENDIDO = 0.85;
-export const VERSION_MODELO = 6;   // 3 (oct 2026): sin los playoffs de la Championship
+export const VERSION_MODELO = 7;   // 3 (oct 2026): sin los playoffs de la Championship
                                    // 4 (oct 2026): los mercados de goles con ENCOGER_TOTAL
                                    // 5 (oct 2026): los mercados de goles con MENOS_CEROS
                                    // 6 (nov 2026): Kalman, tiros a puerta y EXPONENTE_FUERZAS
+                                   // 7 (nov 2026): una temporada más en el filtro y K_LIGA 200
 export const FORMATO_LISTAS = 2;   // partidos_liga sin playoffs (soloLiga): las de antes se bajan otra vez
 // la validación de Cloudflare (validacion.js): una de otro formato se repite, como una de
 // otro modelo. 2 (oct 2026): con la Champions
@@ -81,7 +84,7 @@ export const INDEXNOW_CLAVE = "0929ae0a00d11dc89eade75a541f841f";
 // 2026, como api.indexnow.org el 30 oct: por eso los demás detrás.
 export const INDEXNOW_DESTINOS = ["https://www.bing.com/indexnow", "https://yandex.com/indexnow",
   "https://search.seznam.cz/indexnow", "https://searchadvisor.naver.com/indexnow", "https://indexnow.yep.com/indexnow"];
-export const K_LIGA = 50;
+export const K_LIGA = 200;
 export const PRIOR_AVG_LOCAL = 1.50;
 export const PRIOR_AVG_VISITA = 1.15;
 export const DIAS_VALIDEZ_PRIOR = 30;

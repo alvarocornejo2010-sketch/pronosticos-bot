@@ -164,7 +164,7 @@ export function textoEquipo(d, proximos, reloj) {
     const f = d.fuerza;
     p.push(`<p>Marca ${cuanto(f.ataque)} que un equipo medio ${esc(deSuLiga)} contra las mismas defensas (${f.puesto_ataque}.º`
       + ` de ${f.equipos}) y encaja ${cuanto(f.defensa)} contra los mismos ataques (${f.puesto_defensa}.º). `
-      + (f.partidos ? `Es lo que usa el modelo, con sus ${f.partidos} partidos de liga de esta temporada y la anterior.`
+      + (f.partidos ? `Es lo que usa el modelo, con sus ${f.partidos} partidos de liga de esta temporada y las dos anteriores.`
         : "Recién llegado a la liga: parte de lo que suelen rendir los que llegan, hasta que juegue.") + "</p>");
   }
   p.push("<h2>Próximos partidos</h2>", proximos.length

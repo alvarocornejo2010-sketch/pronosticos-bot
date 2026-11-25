@@ -1,6 +1,7 @@
 // Backtest walk-forward del modelo desplegado, como validacion.py: para cada
-// liga, la temporada anterior hace de ancla e historial y la última se recorre
-// día a día prediciendo cada partido SOLO con lo ocurrido en días anteriores.
+// liga, la temporada anterior hace de ancla y, con la de antes (modelo 7), de historial,
+// y la última se recorre día a día prediciendo cada partido SOLO con lo ocurrido en días
+// anteriores.
 // Usa las mismas funciones que publica la web (modelo.js), no una copia.
 //
 // Lo que cambia es el ritmo. Cada ejecución del cron tiene 10 ms de CPU, y una
@@ -8,7 +9,8 @@
 // recorrerla. Así que va por pasos de un minuto: bajar una temporada, bajar la
 // otra, y recorrer la liga de PARTIDOS_POR_PASO en PARTIDOS_POR_PASO, guardando
 // en D1 por dónde iba. Las temporadas terminadas no cambian: se guardan y la
-// próxima validación no las vuelve a pedir.
+// próxima validación no las vuelve a pedir (tres por liga: la evaluada, la anterior y
+// la de antes).
 //
 // Con los tiros a puerta de esas temporadas (football-data.co.uk), como en producción: un
 // CSV por liga y temporada, que se baja en su propio paso y queda en D1 (tiros:liga:...).
@@ -20,14 +22,14 @@
 
 import { DIVISION_TIROS, EXPONENTE_FUERZA_CHAMPIONS, FACTOR_LIGA, FACTOR_OTRA_LIGA, FORMATO_VALIDACION, K_LIGA, LIGAS,
   LIGA_DE_ARRIBA, PRIOR_AVG_LOCAL, PRIOR_AVG_VISITA, TORNEOS, VERSION_MODELO } from "./config.js";
-import { ajustarFuerzas, calcularPoisson, calcularXgChampions, calcularXgPartido, casarTiros, filasTiros, fuerzaEquipo,
+import { FiltroFuerzas, calcularPoisson, calcularXgChampions, calcularXgPartido, casarTiros, filasTiros, fuerzaEquipo,
   mercadosDeGoles, multiplicadoresHistorial, redondear, sumarHistorial, urlTiros } from "./modelo.js";
 import { Acumulador, Binario, MERCADOS, resultado, resumenMercado } from "./metricas.js";
 import { diaDe, goles90, soloLiga } from "./actualizacion.js";
 
-// Cada día con partidos es un recorrido del filtro de las fuerzas por las dos temporadas
-// (más en un isolate recién creado, que aún no ha compilado nada): con 15 partidos, que
-// son 2 o 3 días, un paso se queda en unos pocos ms.
+// Cada paso recorre el filtro de las fuerzas por las tres temporadas una vez (más en un
+// isolate recién creado, que aún no ha compilado nada) y luego le da lo de cada día
+// (FiltroFuerzas): con 15 partidos, que son 2 o 3 días, un paso se queda en unos pocos ms.
 export const PARTIDOS_POR_PASO = 15;
 
 // ==========================================
@@ -36,8 +38,10 @@ export const PARTIDOS_POR_PASO = 15;
 // Sabe responder "qué se sabía justo antes de este partido" (_Historial en
 // validacion.py): las fuerzas de todos los equipos (ajustarFuerzas, como en
 // producción) y la media de la temporada en curso anclada en la anterior. Se
-// recalculan al cambiar de día.
-// el día de cada fecha se recuerda: en cada paso se compactan las dos temporadas
+// recalculan al cambiar de día: el filtro, el del día anterior con lo jugado desde entonces
+// (el mismo double que rehacerlo, como hace validacion.py), salvo que los goles por tiro
+// salgan de esta temporada (FiltroFuerzas): entonces se rehace.
+// el día de cada fecha se recuerda: en cada paso se compactan las tres temporadas
 const DIAS = new Map();
 const diaDeFecha = (fecha) => {
   const k = fecha.slice(0, 10);
@@ -61,9 +65,11 @@ export function conTiros(partidos, filas) {
 }
 
 class Historial {
-  // al retomar, actual son los partidos ya recorridos y guardado lo demás
-  constructor(previa, ancla, k, actual = [], guardado = null, codigo = null, deArriba = []) {
+  // al retomar, actual son los partidos ya recorridos y guardado lo demás; previa2, la
+  // temporada de antes de la anterior (modelo 7), con la que empieza el filtro
+  constructor(previa, ancla, k, actual = [], guardado = null, codigo = null, deArriba = [], previa2 = []) {
     this.previa = previa.map(compacto);
+    this.previa2 = previa2.map(compacto);
     this.actual = actual.map(compacto);
     this.ancla = ancla;
     this.k = k;
@@ -75,6 +81,8 @@ class Historial {
     this.dia = guardado ? guardado.dia : null;
     this.fuerzas = guardado ? guardado.fuerzas : null;
     this.media = guardado ? guardado.media : null;
+    this.filtro = null;      // no se guarda: al retomar, el primer día nuevo lo rehace
+    this.jugados = 0;
   }
 
   antesDe(m) {
@@ -83,7 +91,13 @@ class Historial {
       const k = this.k;
       this.media = { avg_local: (this.gl + k * this.ancla.avg_local) / (this.n + k),
         avg_visita: (this.gv + k * this.ancla.avg_visita) / (this.n + k) };
-      this.fuerzas = ajustarFuerzas(this.previa, this.actual, this.codigo, this.deArriba);
+      if (this.filtro && this.filtro.klDePrevia) {
+        this.filtro.jugar(this.actual.slice(this.jugados));
+      } else {
+        this.filtro = new FiltroFuerzas(this.previa, this.actual, this.codigo, this.deArriba, this.previa2);
+      }
+      this.jugados = this.actual.length;
+      this.fuerzas = this.filtro.fuerzas();
       this.dia = dia;
     }
     return [this.fuerzas, this.media];
@@ -196,12 +210,12 @@ function foto(fuerzas, equipos) {
 // VALIDACIÓN DE UNA LIGA, POR TRAMOS
 // ==========================================
 export class ValidacionLiga {
-  // previa hace falta siempre: entra en las fuerzas de cada día. deArriba, los
-  // equipos de la temporada anterior de la liga de arriba (LIGA_DE_ARRIBA).
-  // champions ({fechas: la primera de cada día con Champions, equipos: un Set con
-  // los que la juegan}): apunta la fuerza de sus equipos de Champions antes de cada
-  // día de Champions (fotos), como validar_liga.
-  constructor(codigo, nombre, season, previa, ultima, guardado = null, deArriba = [], champions = null) {
+  // previa hace falta siempre: entra en las fuerzas de cada día (y previa2, la de antes,
+  // si la hay: el filtro empieza en ella). deArriba, los equipos de la temporada anterior
+  // de la liga de arriba (LIGA_DE_ARRIBA). champions ({fechas: la primera de cada día con
+  // Champions, equipos: un Set con los que la juegan}): apunta la fuerza de sus equipos de
+  // Champions antes de cada día de Champions (fotos), como validar_liga.
+  constructor(codigo, nombre, season, previa, ultima, guardado = null, deArriba = [], champions = null, previa2 = []) {
     this.codigo = codigo;
     this.nombre = nombre;
     this.season = season;
@@ -217,7 +231,7 @@ export class ValidacionLiga {
       this.i = g.i;
       this.ancla = g.ancla;
       this.hist = new Historial(previa.length >= 100 ? previa : [], this.ancla, K_LIGA, ultima.slice(0, g.i), g.hist,
-        codigo, this.deArriba);
+        codigo, this.deArriba, previa2);
       this.error = null;
     } else {
       this.i = 0;
@@ -225,7 +239,7 @@ export class ValidacionLiga {
       this.ancla = anclaDe(previa, season);
       // la temporada anterior entra en las fuerzas, no se puntúa
       this.hist = new Historial(previa.length >= 100 ? previa : [], this.ancla, K_LIGA, [], null,
-        codigo, this.deArriba);
+        codigo, this.deArriba, previa2);
     }
     this.medidas = new Medidas(g && g.medidas);
   }
@@ -278,8 +292,9 @@ export class ValidacionLiga {
 
 // La liga entera de una vez (lo que usa test_paridad.py). Con champions y fotos,
 // apunta en fotos[codigo] las de sus equipos de Champions.
-export function validarLiga(codigo, nombre, season, previa, ultima, deArriba = [], champions = null, fotos = null) {
-  const v = new ValidacionLiga(codigo, nombre, season, previa, ultima, null, deArriba, champions);
+export function validarLiga(codigo, nombre, season, previa, ultima, deArriba = [], champions = null, fotos = null,
+  previa2 = []) {
+  const v = new ValidacionLiga(codigo, nombre, season, previa, ultima, null, deArriba, champions, previa2);
   v.avanzar();
   if (fotos && !v.error) fotos[codigo] = v.fotos();
   return v.resultado();
@@ -540,12 +555,20 @@ export async function pasoValidacion(ctx, almacen, resumen, escala = 1) {
     let guardado = await almacen.leerDoc(PROGRESO + codigo);
     if (guardado && guardado.temporada !== season) guardado = null;
 
-    // las dos temporadas: la anterior entra en las fuerzas de cada día
+    // la evaluada y la anterior, que entra en las fuerzas de cada día
     const temporadas = {};
     for (const s of [season - 1, season]) {
       temporadas[s] = await temporada(ctx, almacen, doc, control, claveTemporada(codigo, s),
         `/competitions/${codigo}/matches`, s, compactarTemporada);
       if (temporadas[s] === null) return false;
+    }
+    // y la de antes de la anterior (modelo 7), si hay anterior: el filtro empieza en ella,
+    // como en producción; si la API no la da, empieza en la anterior
+    temporadas[season - 2] = [];
+    if (temporadas[season - 1].length >= 100) {
+      temporadas[season - 2] = await temporada(ctx, almacen, doc, control, claveTemporada(codigo, season - 2),
+        `/competitions/${codigo}/matches`, season - 2, compactarTemporada);
+      if (temporadas[season - 2] === null) return false;
     }
 
     // y sus tiros a puerta, como en producción
@@ -553,6 +576,11 @@ export async function pasoValidacion(ctx, almacen, resumen, escala = 1) {
       const filas = await tirosTemporada(ctx, almacen, doc, control, codigo, s);
       if (filas === null) return false;
       temporadas[s] = conTiros(temporadas[s], filas);
+    }
+    if (temporadas[season - 2].length >= 100) {
+      const filas = await tirosTemporada(ctx, almacen, doc, control, codigo, season - 2);
+      if (filas === null) return false;
+      temporadas[season - 2] = conTiros(temporadas[season - 2], filas);
     }
 
     // los que bajan de la liga de arriba parten de su propia fuerza: su temporada
@@ -566,7 +594,7 @@ export async function pasoValidacion(ctx, almacen, resumen, escala = 1) {
     const fin = [almacen.sentenciaBorrar(PROGRESO + codigo)];
     try {
       const v = new ValidacionLiga(codigo, nombre, season, temporadas[season - 1], temporadas[season], guardado,
-        deArriba, champions);
+        deArriba, champions, temporadas[season - 2]);
       v.avanzar(tramo);
       if (!v.terminada()) {
         await almacen.escribir([almacen.sentenciaDoc(PROGRESO + codigo, v)]);

@@ -9,8 +9,8 @@
 // salen de una sola consulta, sin leer (JSON.parse) partido por partido.
 
 import {
-  CODIGOS_TORNEO, COMPETICIONES, DIAS_SEMANA, DIAS_VALIDEZ_LIGA_EQUIPO, DIAS_VALIDEZ_PRIOR, DIAS_VALIDEZ_TIROS_PREVIA,
-  DIVISION_TIROS, FACTOR_LIGA, FACTOR_OTRA_LIGA, HORAS_REINTENTO_TIROS, HORAS_VALIDEZ_LIGA, HORAS_VALIDEZ_PREDICCION,
+  CODIGOS_TORNEO, COMPETICIONES, DIAS_REINTENTO_PREVIA2, DIAS_SEMANA, DIAS_VALIDEZ_LIGA_EQUIPO, DIAS_VALIDEZ_PRIOR,
+  DIAS_VALIDEZ_TIROS_PREVIA, DIVISION_TIROS, FACTOR_LIGA, FACTOR_OTRA_LIGA, HORAS_REINTENTO_TIROS, HORAS_VALIDEZ_LIGA, HORAS_VALIDEZ_PREDICCION,
   HORAS_VALIDEZ_TIROS, K_LIGA, LIGAS, LIGAS_ANO_NATURAL, FORMATO_LISTAS, LIGA_DE_ARRIBA, PRIOR_AVG_LOCAL,
   PRIOR_AVG_VISITA, VERSION_MODELO,
 } from "./config.js";
@@ -165,6 +165,32 @@ async function obtenerPriorLiga(ctx, codigo) {
   return nueva;
 }
 
+// Los partidos de la temporada de antes de la anterior de una liga (obtener_previa2_liga en
+// app.py), en partidos_liga "PD:previa2": con ellos el filtro de las fuerzas empieza una
+// temporada antes (modelo 7, ver ajustarFuerzas). Ya no cambia: se baja una vez y se vuelve a
+// pedir cada DIAS_VALIDEZ_PRIOR, como la anterior. Si la API no la da (el plan gratis solo deja
+// las últimas temporadas) o trae menos de 100 partidos, se apunta el fallo (con lo que ya hubiera
+// de esa temporada), el filtro empieza en la anterior y se vuelve a pedir pasados
+// DIAS_REINTENTO_PREVIA2; un 429 no cuenta como fallo (SinPresupuesto: el minuto siguiente).
+// Es una respuesta grande: va sola en su pasada.
+async function obtenerPrevia2Liga(ctx, codigo) {
+  const clave = codigo + ":previa2";
+  const season = temporadaActual(ctx.reloj, codigo) - 2;
+  const e = listaVigente(ctx, clave, season);
+  if (e && ctx.vigente(e.actualizado, e.fallo ? DIAS_REINTENTO_PREVIA2 : DIAS_VALIDEZ_PRIOR)) return e;
+  const r = await ctx.api.get(`/competitions/${codigo}/matches`, { season, status: "FINISHED" }, { grande: true });
+  let partidos = [];
+  if (r.status === 200) partidos = partidosCompactos(soloLiga(r.cuerpo.matches));
+  else console.warn(`Liga ${codigo}: temporada ${season} no disponible (HTTP ${r.status}); las fuerzas empiezan en la anterior.`);
+  const nueva = { temporada: season, partidos, actualizado: ctx.ahoraIso(), formato: FORMATO_LISTAS };
+  if (partidos.length < 100) {
+    nueva.partidos = (e && e.partidos) || [];
+    nueva.fallo = true;
+  }
+  ctx.cache.poner("partidos_liga", clave, nueva);
+  return nueva;
+}
+
 // ==========================================
 // PROMEDIO DE GOLES POR LIGA
 // ==========================================
@@ -232,7 +258,8 @@ const porFecha = (a, b) => {
 // (filasTiros), que solo se leen al ajustar las fuerzas (filasDeTiros). Los de la
 // temporada en curso se vuelven a bajar cada HORAS_VALIDEZ_TIROS y los de la anterior
 // cada DIAS_VALIDEZ_TIROS_PREVIA; un fallo se apunta (y se queda con lo que ya hubiera de
-// esa temporada) y se reintenta a las HORAS_REINTENTO_TIROS. Leerlo es una tarea pesada,
+// esa temporada) y se reintenta a las HORAS_REINTENTO_TIROS (los de la de antes de la
+// anterior, "previa2", como los de la anterior). Leerlo es una tarea pesada,
 // como una respuesta grande de la API: va sola en su pasada. No gasta peticiones de
 // football-data.org.
 export async function obtenerTirosLiga(ctx, codigo, season, clave) {
@@ -241,7 +268,7 @@ export async function obtenerTirosLiga(ctx, codigo, season, clave) {
   let e = ctx.cache.get("tiros", k);
   if (e && e.temporada !== season) e = null;
   const dias = e && e.fallo ? HORAS_REINTENTO_TIROS / 24
-    : clave === "previa" ? DIAS_VALIDEZ_TIROS_PREVIA : HORAS_VALIDEZ_TIROS / 24;
+    : clave === "actual" ? HORAS_VALIDEZ_TIROS / 24 : DIAS_VALIDEZ_TIROS_PREVIA;
   if ((e && ctx.vigente(e.actualizado, dias)) || !ctx.aj.tirosBase || ctx.fallos.has("tiros:" + k)) return e;
   if (ctx.api.bytes > UMBRAL_GRANDE || ctx.api.pesada) {
     throw new SinPresupuesto("los tiros a puerta van en la pasada siguiente");
@@ -291,7 +318,7 @@ async function filasDeTiros(ctx, codigo, clave, meta) {
 }
 
 // Las de todos los equipos de una liga, con las listas que ya bajaron
-// obtenerPriorLiga y obtenerPromedioLiga y sus tiros a puerta (obtenerTirosLiga; en una
+// obtenerPriorLiga, obtenerPromedioLiga y obtenerPrevia2Liga y sus tiros a puerta (obtenerTirosLiga; en una
 // liga con LIGA_DE_ARRIBA, también la temporada anterior de la de arriba): se
 // recalculan (y guardan en D1) solo cuando cambia alguna lista. Como mucho un ajuste
 // por pasada y nunca en la misma que una respuesta grande (leerla ya gasta casi la
@@ -301,10 +328,15 @@ export async function obtenerFuerzasLiga(ctx, codigo) {
   const season = temporadaActual(ctx.reloj, codigo);
   const previa = listaVigente(ctx, codigo + ":previa", season - 1) || {};
   const actual = listaVigente(ctx, codigo + ":actual", season) || {};
+  // sin la anterior no se usa (ajustarFuerzas): ni se pide
+  const previa2 = previa.partidos && previa.partidos.length ? await obtenerPrevia2Liga(ctx, codigo) : { partidos: [] };
   const tirosPrevia = (await obtenerTirosLiga(ctx, codigo, season - 1, "previa")) || {};
   const tirosActual = (await obtenerTirosLiga(ctx, codigo, season, "actual")) || {};
+  // los de la de antes, solo si esa temporada está
+  const tirosPrevia2 = previa2.partidos.length ? (await obtenerTirosLiga(ctx, codigo, season - 2, "previa2")) || {} : {};
   let version = `${VERSION_MODELO}|${previa.actualizado ?? null}|${actual.actualizado ?? null}`
-    + `|${promedio.actualizado ?? null}|${tirosPrevia.actualizado ?? null}|${tirosActual.actualizado ?? null}`;
+    + `|${promedio.actualizado ?? null}|${tirosPrevia.actualizado ?? null}|${tirosActual.actualizado ?? null}`
+    + `|${previa2.actualizado ?? null}|${tirosPrevia2.actualizado ?? null}`;
   let arriba = {};
   if (codigo in LIGA_DE_ARRIBA) {
     const sup = LIGA_DE_ARRIBA[codigo];
@@ -318,12 +350,14 @@ export async function obtenerFuerzasLiga(ctx, codigo) {
     throw new SinPresupuesto("el ajuste de fuerzas va en la pasada siguiente");
   }
   ctx.api.pesada = true;
-  const [filasPrevia, filasActual] = [await filasDeTiros(ctx, codigo, "previa", tirosPrevia.actualizado),
-    await filasDeTiros(ctx, codigo, "actual", tirosActual.actualizado)];
+  const [filasPrevia, filasActual, filasPrevia2] = [await filasDeTiros(ctx, codigo, "previa", tirosPrevia.actualizado),
+    await filasDeTiros(ctx, codigo, "actual", tirosActual.actualizado),
+    await filasDeTiros(ctx, codigo, "previa2", tirosPrevia2.actualizado)];
   const fuerzas = ajustarFuerzas(casarTiros(previa.partidos || [], filasPrevia),
-    casarTiros(actual.partidos || [], filasActual), codigo, equiposDePartidos(arriba.partidos || []));
+    casarTiros(actual.partidos || [], filasActual), codigo, equiposDePartidos(arriba.partidos || []),
+    casarTiros(previa2.partidos, filasPrevia2));
   fuerzas.version = version;
-  if (codigo in DIVISION_TIROS) fuerzas.tiros_fallo = Boolean(tirosPrevia.fallo || tirosActual.fallo);
+  if (codigo in DIVISION_TIROS) fuerzas.tiros_fallo = Boolean(tirosPrevia.fallo || tirosActual.fallo || tirosPrevia2.fallo);
   ctx.cache.poner("fuerzas", codigo, fuerzas);
   return fuerzas;
 }
@@ -672,7 +706,7 @@ async function calcularPartido(ctx, f) {
     // del registro en vivo
     media_local: redondear(promedioLiga.avg_local, 3), media_visita: redondear(promedioLiga.avg_visita, 3),
     version_modelo: VERSION_MODELO,
-    // cuántos partidos de liga (esta temporada y la anterior) hay detrás de cada equipo
+    // cuántos partidos de liga (esta temporada y las dos anteriores) hay detrás de cada equipo
     muestra_local: muestraLocal,
     muestra_visita: muestraVisita,
     calculado: ctx.ahoraIso(),

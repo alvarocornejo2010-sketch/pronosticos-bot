@@ -117,16 +117,16 @@ const ORDEN_LIGAS = Object.keys(LIGAS);
 
 // Las ligas donde el modelo aporta poco: su mejora sobre "no saber nada" (skill del
 // 1X2 frente a la base "equipo medio"), medida con afinar_liga.py en las temporadas
-// de prueba. En las demás ligas va de +7.5 a +15.6 %. Son las más igualadas: el
+// de prueba (modelo 7, nov 2026). En las demás ligas va de +8.4 a +16.9 %. Son las más igualadas: el
 // número es tan honesto como en las otras, pero se separa poco de la moneda al aire.
 const POCO_FIABLES = {
-  ELC: { skill: 2.7, partidos: "2.855", cuando: "las temporadas 2021/22 a 2025/26" },
-  BSA: { skill: 3.5, partidos: "277", cuando: "2026 hasta octubre" },
+  ELC: { skill: 3.2, partidos: "2.760", cuando: "las temporadas 2021/22 a 2025/26" },
+  BSA: { skill: 2.9, partidos: "657", cuando: "2020 y 2026" },
 };
 function textoPocoFiable(cod, nombre) {
   const f = POCO_FIABLES[cod];
   return "En " + (nombre || cod) + " el modelo acierta poco más que no saber nada: mejora un +" + f.skill
-    + " % medido en " + f.partidos + " partidos (" + f.cuando + "), frente a entre +7.5 y +15.6 % en las demás ligas."
+    + " % medido en " + f.partidos + " partidos (" + f.cuando + "), frente a entre +8.4 y +16.9 % en las demás ligas."
     + " Es de las ligas más igualadas: tómalo con cautela.";
 }
 function htmlMarcaPocoFiable(cod, nombre) {
@@ -592,7 +592,7 @@ function htmlComoSeCalculo(p, m) {
   const ch = p.champions;
   const dato = (t, v) => '<div><dt>' + t + '</dt><dd>' + v + '</dd></div>';
   const muestraTxt = (ch ? "En su liga: " : "") + m.l + " partidos del local y " + m.v
-    + " del visitante, de esta temporada y la anterior";
+    + " del visitante, de esta temporada y las dos anteriores";
   return '<section class="det-datos"><h2>Cómo se calculó</h2><dl>'
     + dato("Muestra", muestraTxt)
     + (p.calculado ? dato("Calculado", esc(haceCuanto(p.calculado))) : "")
@@ -1062,7 +1062,7 @@ function htmlFuerza(d) {
     + fila("Encaja", df, f.puesto_defensa, Math.round(df) === 0 ? "Lo mismo que un equipo medio contra los mismos ataques."
       : cuanto(df) + " que un equipo medio contra los mismos ataques.")
     + '</div><p class="nota">' + (f.partidos
-      ? "Con sus " + f.partidos + " partidos de liga de esta temporada y la anterior: sus goles y, donde los hay, sus tiros a"
+      ? "Con sus " + f.partidos + " partidos de liga de esta temporada y las dos anteriores: sus goles y, donde los hay, sus tiros a"
         + " puerta, que tienen menos azar. Lo más reciente cuenta más. Es lo que usa el modelo."
       : "Recién llegado a la liga: parte de lo que suelen rendir los que llegan, hasta que juegue.") + '</p>';
 }
