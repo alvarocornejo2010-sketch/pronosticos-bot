@@ -1,10 +1,11 @@
 """
 Mide y afina el modelo de liga de app.py con resultados reales: las fuerzas
-(ajustar_fuerzas, modelo 6: un filtro de Kalman con KALMAN_DERIVA, KALMAN_INICIO,
-KALMAN_TEMPORADA y KALMAN_NUEVO, los tiros a puerta con PESO_TIROS y
-EXPONENTE_FUERZAS, y los priors de los recién llegados), la corrección de empates
-(RHO_EMPATES) y los mercados de goles: el acercamiento del total (ENCOGER_TOTAL) y
-el 0 de cada equipo (MENOS_CEROS).
+(ajustar_fuerzas, modelo 7: un filtro de Kalman con KALMAN_DERIVA, KALMAN_INICIO,
+KALMAN_TEMPORADA y KALMAN_NUEVO que empieza en la temporada de antes de la anterior,
+los tiros a puerta con PESO_TIROS y EXPONENTE_FUERZAS, y los priors de los recién
+llegados), la media de la liga (K_LIGA), la corrección de empates (RHO_EMPATES) y los
+mercados de goles: el acercamiento del total (ENCOGER_TOTAL) y el 0 de cada equipo
+(MENOS_CEROS).
 
 Datos, gratis y sin token:
   - resultados: openfootball/football.json en GitHub. Ocho ligas (LaLiga, Premier,
@@ -17,16 +18,18 @@ Datos, gratis y sin token:
     con openfootball por el cruce y el marcador (_casar): el 99 % de los partidos.
     El Brasileirão no los trae.
 Cada temporada se recorre como en producción (validacion.py): la anterior hace de
-ancla e historial y cada partido se predice solo con lo jugado en días anteriores.
+ancla, con la de antes es el historial (si openfootball la tiene) y cada partido se
+predice solo con lo jugado en días anteriores.
 
 Dos grupos de temporadas, para no elegir y juzgar con los mismos partidos:
   ajuste   2010/11 a 2020/21: aquí se eligen los parámetros.
   prueba   2021/22 en adelante: solo se mira el resultado.
 
 Uso:
-    python afinar_liga.py             # el modelo de app.py frente al modelo 5 (el ajuste
-                                      # de goles pesados por antigüedad) y frente a
-                                      # bet365, por liga y por temporada (~2 min)
+    python afinar_liga.py             # el modelo de app.py frente al modelo 6 (el mismo
+                                      # filtro con dos temporadas y K_LIGA 50), al 5 (el
+                                      # ajuste de goles pesados por antigüedad) y a
+                                      # bet365, por liga y por temporada (~1 min)
     python afinar_liga.py afinar      # busca los parámetros en el grupo de ajuste y
                                       # los juzga en el de prueba
     python afinar_liga.py descensos   # de dónde parten los recién llegados: los
@@ -40,7 +43,8 @@ La evaluación usa las funciones de app.py (ajustar_fuerzas, calcular_poisson,
 mercados_de_goles) y el recorrido de validacion.py, no una copia. La búsqueda usa
 una gemela incremental del mismo filtro (_kalman), que recorre cada temporada una
 vez en vez de rehacer el filtro cada día; al final comprueba que da lo mismo que
-app.py. El modelo 5 vive aquí (_fuerzas_np y MODELO5), solo para comparar.
+app.py. Los modelos 6 (MODELO6, con la gemela) y 5 (_fuerzas_np y MODELO5) viven aquí, solo
+para comparar.
 
 Ojo con los nombres: openfootball cambió su forma de escribirlos en 2020/21
 (las cinco grandes y la Championship: "Arsenal" pasó a "Arsenal FC") y en
@@ -351,13 +355,21 @@ def _ancla(previa):
 # ------------------------------------------------------------------
 # Recorridos: cada partido con lo de antes, como validacion.py
 # ------------------------------------------------------------------
+def previa2_de(c, s):
+    """La temporada de antes de la anterior (modelo 7), si openfootball la tiene con al
+    menos 100 partidos; si no, [] (el filtro empieza en la anterior, como en producción)."""
+    p = cargar(c, s - 2)
+    return p if p and len(p) >= 100 else []
+
+
 def recorrer_app(caso):
     """El modelo de app.py: [xg_local, xg_visita, media local, media visita, goles
     local, goles visita, y las cuotas de bet365 de 1, X y 2 (nan si no las hay)] por
     partido, con el recorrido de validacion.py."""
     c, s = caso
     previa, ultima = cargar(c, s - 1), cargar(c, s)
-    hist = validacion._Historial(previa, _ancla(previa), app.K_LIGA, codigo_liga=c, de_arriba=de_arriba(c, s))
+    hist = validacion._Historial(previa, _ancla(previa), app.K_LIGA, codigo_liga=c, de_arriba=de_arriba(c, s),
+                                 previa2=previa2_de(c, s))
     filas = []
     for m in ultima:
         fz, media = hist.antes_de(m)
@@ -370,12 +382,15 @@ def recorrer_app(caso):
 
 
 def _kalman(caso, q=None, p_ini=None, q_temp=None, p_nuevo=None, peso=None, exponente=None,
-            a0=None, d0=None, baja=None):
+            a0=None, d0=None, baja=None, kliga=None, con_previa2=True, d0_liga=None):
     """Gemela incremental de ajustar_fuerzas con el recorrido de validacion.py: las
     mismas operaciones en el mismo orden (con exp_exacto y log_exacto), pero recorriendo
     cada temporada una sola vez en vez de rehacer el filtro cada día. Con los parámetros
     de app.py da lo mismo que recorrer_app (lo comprueba main); los que se den, mandan.
-    Devuelve las filas de recorrer_app, con los goles esperados sin redondear."""
+    con_previa2=False: sin la temporada de antes de la anterior (el modelo 6, con los
+    parámetros que se den). d0_liga: la defensa de partida de un ascendido por liga (si no,
+    la de app.py, DEFENSA_RECIEN_LLEGADO); d0, la misma para todas. Devuelve las filas de recorrer_app, con los goles esperados
+    sin redondear."""
     c, s = caso
     q = app.KALMAN_DERIVA if q is None else q
     p_ini = app.KALMAN_INICIO if p_ini is None else p_ini
@@ -383,8 +398,10 @@ def _kalman(caso, q=None, p_ini=None, q_temp=None, p_nuevo=None, peso=None, expo
     p_nuevo = app.KALMAN_NUEVO if p_nuevo is None else p_nuevo
     W = app.PESO_TIROS if peso is None else peso
     e_f = app.EXPONENTE_FUERZAS if exponente is None else exponente
+    K = app.K_LIGA if kliga is None else kliga
     previa, ultima = cargar(c, s - 1), cargar(c, s)
     prev = [validacion._compacto(m) for m in previa]
+    prev2 = [validacion._compacto(m) for m in previa2_de(c, s)] if con_previa2 else []
     act = [validacion._compacto(m) for m in ultima]
     kl = kv = 0.0
     gl = gv = tl = tv = 0
@@ -403,7 +420,7 @@ def _kalman(caso, q=None, p_ini=None, q_temp=None, p_nuevo=None, peso=None, expo
     else:
         al_, av_ = app.PRIOR_AVG_LOCAL, app.PRIOR_AVG_VISITA
     a_asc = app.ATAQUE_RECIEN_LLEGADO if a0 is None else a0
-    d_asc = app.DEFENSA_RECIEN_LLEGADO.get(c, 1.0) if d0 is None else d0
+    d_asc = (app.DEFENSA_RECIEN_LLEGADO if d0_liga is None else d0_liga).get(c, 1.0) if d0 is None else d0
     a_baj, d_baj = (app.ATAQUE_DESCENDIDO, app.DEFENSA_DESCENDIDO) if baja is None else baja
 
     def prior(t):
@@ -447,6 +464,13 @@ def _kalman(caso, q=None, p_ini=None, q_temp=None, p_nuevo=None, peso=None, expo
             de[3] = pd - lam * pd * pd / den
         cuenta["n"] += 1
 
+    if prev2:
+        ml2, mv2 = sum(x[3] for x in prev2) / len(prev2), sum(x[4] for x in prev2) / len(prev2)
+        for p in prev2:
+            paso(p, False, ml2, mv2)
+        for t in orden:                   # empieza la previa
+            estado[t][2] += q_temp
+            estado[t][3] += q_temp
     for p in prev:
         paso(p, False, al_, av_)
     ancla = _ancla(previa)
@@ -459,8 +483,8 @@ def _kalman(caso, q=None, p_ini=None, q_temp=None, p_nuevo=None, peso=None, expo
         # lo que diría app.py ese día: las fuerzas de lo jugado antes, elevadas a su exponente
         n = cuenta["n"]
         b = 1 + (e_f - 1) * (cuenta["tiros"] / n) if n else 1.0
-        ml = (gl_t + app.K_LIGA * ancla["avg_local"]) / (n_t + app.K_LIGA)
-        mv = (gv_t + app.K_LIGA * ancla["avg_visita"]) / (n_t + app.K_LIGA)
+        ml = (gl_t + K * ancla["avg_local"]) / (n_t + K)
+        mv = (gv_t + K * ancla["avg_visita"]) / (n_t + K)
 
         def fuerza(t):
             e = estado.get(t)
@@ -476,8 +500,8 @@ def _kalman(caso, q=None, p_ini=None, q_temp=None, p_nuevo=None, peso=None, expo
             m = ultima[k]
             filas.append([ml * ah * da, mv * aa * dh, ml, mv, m["gl"], m["gv"], *m.get("cuotas", (math.nan,) * 3)])
         # y luego se juegan
-        ml_f = (gl_t + app.K_LIGA * al_) / (n_t + app.K_LIGA)
-        mv_f = (gv_t + app.K_LIGA * av_) / (n_t + app.K_LIGA)
+        ml_f = (gl_t + K * al_) / (n_t + K)
+        mv_f = (gv_t + K * av_) / (n_t + K)
         for k in range(i, j):
             if k == 0:
                 for t in orden:
@@ -495,18 +519,24 @@ def _k(arg):
     return _kalman(caso, **sobre)
 
 
+# El modelo 6 (nov 2026), para comparar: el mismo filtro con las dos temporadas de siempre
+# (sin la de antes de la anterior), K_LIGA 50 y sus parámetros de entonces.
+MODELO6 = {"q": 5e-5, "p_ini": 0.16, "q_temp": 0.005, "p_nuevo": 0.06, "peso": 0.5, "exponente": 1.15,
+           "kliga": 50, "con_previa2": False, "d0_liga": {"PL": 1.3}}
+
 # El modelo 5 (hasta nov 2026), para comparar: el ataque y la defensa de cada equipo con
 # los goles de las dos temporadas pesados por antigüedad (factor^días), encogidos hacia su
 # prior con pseudo-goles y ajustados hasta que nada cambia. Ver "El modelo" en CLAUDE.md.
-MODELO5 = {"factor": 0.998, "k_at": 6, "k_de": 8, "tolerancia": 1e-4, "max_iter": 300}
+MODELO5 = {"factor": 0.998, "k_at": 6, "k_de": 8, "tolerancia": 1e-4, "max_iter": 300, "kliga": 50,
+           "d0_liga": {"PL": 1.3}}
 CLAVE_MODELO5 = (MODELO5["factor"], MODELO5["k_at"], MODELO5["k_de"], 0.8)
 
 
-def _fuerzas_np(caso, factor, k_at, k_de, a0, d0=None, baja=None):
+def _fuerzas_np(caso, factor, k_at, k_de, a0, d0=None, baja=None, kliga=MODELO5["kliga"]):
     """El modelo 5 en numpy (el ajuste de app.py hasta nov 2026) con el recorrido de
     validacion.py, para comparar con el de ahora. d0 (la defensa de la que parte un
     ascendido) y baja (ataque y defensa de un descendido de la liga de arriba) son,
-    si no se dan, los de app.py para esa liga."""
+    si no se dan, los de app.py para esa liga; kliga, el K_LIGA de entonces."""
     c, s = caso
     d0 = app.DEFENSA_RECIEN_LLEGADO.get(c, 1.0) if d0 is None else d0
     baja = (app.ATAQUE_DESCENDIDO, app.DEFENSA_DESCENDIDO) if baja is None else baja
@@ -532,8 +562,8 @@ def _fuerzas_np(caso, factor, k_at, k_de, a0, d0=None, baja=None):
             j += 1
         h, a, gh, ga = H[:i], A[:i], GH[:i], GA[:i]
         w = factor ** (D[:i].max() - D[:i]).astype(float)
-        ml = (GH[n0:i].sum() + app.K_LIGA * ancla["avg_local"]) / (i - n0 + app.K_LIGA)
-        mv = (GA[n0:i].sum() + app.K_LIGA * ancla["avg_visita"]) / (i - n0 + app.K_LIGA)
+        ml = (GH[n0:i].sum() + kliga * ancla["avg_local"]) / (i - n0 + kliga)
+        mv = (GA[n0:i].sum() + kliga * ancla["avg_visita"]) / (i - n0 + kliga)
         gf = np.bincount(h, w * gh, T) + np.bincount(a, w * ga, T) + k_at * p_at
         gc = np.bincount(h, w * ga, T) + np.bincount(a, w * gh, T) + k_de * p_de
         for _ in range(MODELO5["max_iter"]):
@@ -551,7 +581,7 @@ def _fuerzas_np(caso, factor, k_at, k_de, a0, d0=None, baja=None):
 
 def _np(arg):
     caso, params = arg
-    return _fuerzas_np(caso, *params)
+    return _fuerzas_np(caso, *params, d0=MODELO5["d0_liga"].get(caso[0], 1.0))
 
 
 # ------------------------------------------------------------------
@@ -638,44 +668,48 @@ def _juntar(res):
 # Informes
 # ------------------------------------------------------------------
 def evaluar(pool, lista):
+    """app.py frente al modelo 6 (y al 5), por grupo de temporadas, liga y temporada, en
+    los mercados de goles y frente a bet365. Los skills, todos frente a la misma base
+    "equipo medio": la media de liga de app.py (K_LIGA)."""
     nuevo, liga, temp = _juntar(pool.map(recorrer_app, lista))
+    m6, _, _ = _juntar(pool.map(_k, [(c, MODELO6) for c in lista]))
+    m6[:, :2] = np.round(m6[:, :2], 2)                # como calcular_xg_partido
     viejo, _, _ = _juntar(pool.map(_np, [(c, CLAVE_MODELO5) for c in lista]))
-    viejo[:, :2] = np.round(viejo[:, :2], 2)          # como calcular_xg_partido
+    viejo[:, :2] = np.round(viejo[:, :2], 2)
     pn = puntuar(nuevo, app.RHO_EMPATES, app.ENCOGER_TOTAL)
+    p6 = puntuar(m6, app.RHO_EMPATES, app.ENCOGER_TOTAL)
     pv = puntuar(viejo, app.RHO_EMPATES, app.ENCOGER_TOTAL)
+    sk = lambda p, m, k="1x2": skill(p[k][m], pn[k + "_base"][m])   # noqa: E731
     grupos = [("ajuste (hasta 2020/21)", temp <= FIN_AJUSTE), ("prueba (2021/22-2025/26)", (temp > FIN_AJUSTE) & (temp <= 2025)),
               ("2026/27 en curso", temp >= 2026)]
-    print("\n1X2: skill frente a la base 'equipo medio' y diferencia de Brier con el modelo 5")
+    print("\n1X2: skill frente a la base 'equipo medio' (la media de liga de app.py) y diferencia de "
+          "Brier y de LogLoss de app.py con el modelo 6")
     for nombre, m in grupos:
         if not m.any():
             continue
-        d, se = pareado(pn["1x2"][m], pv["1x2"][m])
-        dl, sel = pareado(pn["logloss"][m], pv["logloss"][m])
-        print(f"  {nombre:26s} {m.sum():6d} partidos   modelo 5 {skill(pv['1x2'][m], pv['1x2_base'][m]):+5.2f}%   "
-              f"app.py {skill(pn['1x2'][m], pn['1x2_base'][m]):+5.2f}%   Brier {d:+.4f} ± {se:.4f} ({d / se:+.1f} se)"
-              f"   LogLoss {dl:+.4f} ({dl / sel:+.1f} se)")
+        d, se = pareado(pn["1x2"][m], p6["1x2"][m])
+        dl, sel = pareado(pn["logloss"][m], p6["logloss"][m])
+        print(f"  {nombre:26s} {m.sum():6d} partidos   modelo 5 {sk(pv, m):+5.2f}%   modelo 6 {sk(p6, m):+5.2f}%   "
+              f"app.py {sk(pn, m):+5.2f}%   Brier {d:+.4f} ± {se:.4f} ({d / se:+.1f} se)   LogLoss {dl:+.4f} ({dl / sel:+.1f} se)")
     prueba = (temp > FIN_AJUSTE) & (temp <= 2025)
-    print("\nPor liga (prueba): skill del 1X2, modelo 5 -> app.py")
+    print("\nPor liga (prueba): skill del 1X2, modelo 6 -> app.py")
     for c in FICHERO:
         m = prueba & (liga == c)
         if m.any():
-            d, se = pareado(pn["1x2"][m], pv["1x2"][m])
-            print(f"  {c:4s} {m.sum():5d} partidos  {skill(pv['1x2'][m], pv['1x2_base'][m]):+5.2f}% -> "
-                  f"{skill(pn['1x2'][m], pn['1x2_base'][m]):+5.2f}%   ({d / se:+.1f} se)")
-    print("\nPor temporada: skill del 1X2, modelo 5 -> app.py")
+            d, se = pareado(pn["1x2"][m], p6["1x2"][m])
+            print(f"  {c:4s} {m.sum():5d} partidos  {sk(p6, m):+5.2f}% -> {sk(pn, m):+5.2f}%   ({d / se:+.1f} se)")
+    print("\nPor temporada: skill del 1X2, modelo 6 -> app.py")
     for s in sorted(set(temp.tolist())):
         m = temp == s
-        d, se = pareado(pn["1x2"][m], pv["1x2"][m])
-        print(f"  {s}/{(s + 1) % 100:02d} {m.sum():5d} partidos  {skill(pv['1x2'][m], pv['1x2_base'][m]):+5.2f}% -> "
-              f"{skill(pn['1x2'][m], pn['1x2_base'][m]):+5.2f}%   ({d / se:+.1f} se)")
-    print("\nMercados de goles (prueba): skill frente a la base, modelo 5 -> app.py")
+        d, se = pareado(pn["1x2"][m], p6["1x2"][m])
+        print(f"  {s}/{(s + 1) % 100:02d} {m.sum():5d} partidos  {sk(p6, m):+5.2f}% -> {sk(pn, m):+5.2f}%   ({d / se:+.1f} se)")
+    print("\nMercados de goles (prueba): skill frente a la base, modelo 6 -> app.py")
     for k, txt in (("mas_25", "más de 2.5"), ("ambos", "ambos marcan")):
-        d, se = pareado(pn[k][prueba], pv[k][prueba])
-        print(f"  {txt:13s} {skill(pv[k][prueba], pv[k + '_base'][prueba]):+5.2f}% -> "
-              f"{skill(pn[k][prueba], pn[k + '_base'][prueba]):+5.2f}%   ({d / se:+.1f} se)")
+        d, se = pareado(pn[k][prueba], p6[k][prueba])
+        print(f"  {txt:13s} {sk(p6, prueba, k):+5.2f}% -> {sk(pn, prueba, k):+5.2f}%   ({d / se:+.1f} se)")
     for nombre, m in grupos[:2]:
-        d, se = pareado(pn["marcador"][m], pv["marcador"][m])
-        print(f"  log loss del marcador frente al modelo 5, {nombre}: {d:+.5f} ({d / se:+.1f} se)")
+        d, se = pareado(pn["marcador"][m], p6["marcador"][m])
+        print(f"  log loss del marcador frente al modelo 6, {nombre}: {d:+.5f} ({d / se:+.1f} se)")
     print(f"\nEmpates (prueba): app.py predice {100 * pn['empate_pred'][prueba].mean():.1f}%, "
           f"hubo {100 * pn['empate_real'][prueba].mean():.1f}%")
     # bet365 sin su margen (las cuotas inversas, normalizadas), en los mismos partidos
@@ -690,8 +724,8 @@ def evaluar(pool, lista):
     print("\nFrente a bet365 sin su margen (los partidos con cuotas), skill del 1X2:")
     for nombre, m in grupos[:2]:
         m = m & con
-        print(f"  {nombre:26s} {m.sum():6d} partidos   modelo 5 {skill(pv['1x2'][m], pv['1x2_base'][m]):+5.2f}%   "
-              f"app.py {skill(pn['1x2'][m], pn['1x2_base'][m]):+5.2f}%   bet365 {skill(casa[m], pn['1x2_base'][m]):+5.2f}%")
+        print(f"  {nombre:26s} {m.sum():6d} partidos   modelo 5 {sk(pv, m):+5.2f}%   modelo 6 {sk(p6, m):+5.2f}%   "
+              f"app.py {sk(pn, m):+5.2f}%   bet365 {skill(casa[m], pn['1x2_base'][m]):+5.2f}%")
     return nuevo, liga, temp
 
 
@@ -700,11 +734,13 @@ def afinar(pool, lista):
     la gemela incremental (_kalman), y luego la corrección de empates y los mercados de
     goles con esas fuerzas."""
     ajuste = [x for x in lista if x[1] <= FIN_AJUSTE]
-    rejilla = {"exponente": [1.0, 1.05, 1.1, 1.15, 1.2, 1.25], "q": [3e-5, 5e-5, 7e-5, 1e-4],
-               "p_ini": [0.08, 0.12, 0.16, 0.24, 0.32], "q_temp": [0.0, 0.005, 0.01, 0.02],
-               "peso": [0.3, 0.4, 0.5, 0.6], "p_nuevo": [0.03, 0.04, 0.06, 0.08, 0.12]}
+    rejilla = {"exponente": [1.05, 1.1, 1.15, 1.2, 1.25], "q": [3e-5, 5e-5, 7e-5, 1e-4],
+               "p_ini": [0.04, 0.08, 0.12, 0.16, 0.24], "q_temp": [0.0, 0.005, 0.01, 0.02],
+               "peso": [0.4, 0.5, 0.6], "p_nuevo": [0.03, 0.04, 0.06, 0.08, 0.12],
+               "kliga": [50, 100, 150, 200, 300, 500]}
     mejor = {"exponente": app.EXPONENTE_FUERZAS, "q": app.KALMAN_DERIVA, "p_ini": app.KALMAN_INICIO,
-             "q_temp": app.KALMAN_TEMPORADA, "peso": app.PESO_TIROS, "p_nuevo": app.KALMAN_NUEVO}
+             "q_temp": app.KALMAN_TEMPORADA, "peso": app.PESO_TIROS, "p_nuevo": app.KALMAN_NUEVO,
+             "kliga": app.K_LIGA}
     memo = {}
 
     def coste(p):

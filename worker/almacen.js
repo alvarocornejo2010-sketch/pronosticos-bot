@@ -6,7 +6,7 @@
 export const ESQUEMA = [
   // Lo que se baja de football-data.org, por secciones: ligas (media de la
   // temporada en curso), priors (ancla de la temporada anterior), partidos_liga
-  // (los partidos de cada liga de las dos temporadas, compactos), fuerzas (las
+  // (los partidos de cada liga de las tres temporadas, compactos), fuerzas (las
   // de cada equipo, ajustadas con esos partidos), calendario (cuándo se bajó el
   // de cada competición) y liga_equipo (de qué liga es cada equipo de la Champions).
   // Y de football-data.co.uk, los tiros a puerta: tiros (cuándo se bajó el CSV de cada

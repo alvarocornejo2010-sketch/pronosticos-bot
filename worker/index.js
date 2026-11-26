@@ -32,7 +32,7 @@
 //
 // El trabajo de verdad lo hace el cron (planificador.js), una vez por minuto.
 
-import { COMPETICIONES, DIVISION_TIROS, ajustes } from "./config.js";
+import { CODIGOS_TORNEO, COMPETICIONES, DIVISION_TIROS, ajustes } from "./config.js";
 import { Almacen } from "./almacen.js";
 import { redondear } from "./modelo.js";
 import { SIN_EJECUTAR } from "./validacion.js";
@@ -126,6 +126,10 @@ async function apiLigas(almacen) {
       media_usada_visita: r3(m && m.avg_visita),
       partidos_esta_temporada: (m && m.partidos) ?? null,
     };
+    if (!CODIGOS_TORNEO.has(codigo)) {
+      // con cuántos partidos (de hasta tres temporadas) se ajustaron sus fuerzas
+      salida[codigo].partidos_fuerzas = (fuerzas[codigo] || {}).partidos ?? null;
+    }
     if (codigo in DIVISION_TIROS) {
       // con cuántos partidos se ajustaron sus fuerzas con tiros a puerta (football-data.co.uk)
       const f = fuerzas[codigo] || {};

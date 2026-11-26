@@ -7,13 +7,15 @@ realmente desplegado — `calcular_xg_partido` y `calcular_poisson` se importan 
 `app`, no se reimplementan. Una copia del modelo en otro archivo se desincroniza
 en cuanto tocas uno de los dos y entonces validas algo que no es lo que publicas.
 
-Método: para cada liga se bajan dos temporadas. La anterior sirve de ancla y de
-historial inicial; la última se recorre día a día prediciendo cada partido SOLO
-con lo ocurrido en días anteriores: las fuerzas de ajustar_fuerzas con la
-temporada anterior y lo ya jugado de esta, y la media de la temporada en curso
-anclada en la anterior. Es la misma situación que en producción.
+Método: para cada liga se bajan tres temporadas. La anterior sirve de ancla y, con
+la de antes (modelo 7), de historial inicial; la última se recorre día a día
+prediciendo cada partido SOLO con lo ocurrido en días anteriores: las fuerzas de
+ajustar_fuerzas con las dos temporadas de antes y lo ya jugado de esta, y la media
+de la temporada en curso anclada en la anterior. Es la misma situación que en
+producción. Si la API no da la de antes de la anterior, el filtro empieza en la
+anterior, como en producción.
 
-Con los tiros a puerta de esas dos temporadas (football-data.co.uk, como en
+Con los tiros a puerta de esas temporadas (football-data.co.uk, como en
 producción: _con_tiros), que se bajan una vez y quedan en disco.
 
 Además del 1X2 mide dos mercados de goles, más de 2.5 y ambos marcan, con la
@@ -27,7 +29,7 @@ las apunta al pasar por cada fecha de la Champions (fotos de los equipos que la
 juegan), y luego se recorre la Champions día a día.
 
 Se dispara con /validar?token=... y el resultado queda en /api/validacion.
-Cuesta 2 peticiones por liga (y 2 por la Champions), una sola vez: las temporadas
+Cuesta 3 peticiones por liga (y 2 por la Champions), una sola vez: las temporadas
 terminadas no cambian.
 """
 import json
@@ -153,8 +155,9 @@ class _Historial:
     (como obtener_promedio_liga). Se recalculan al cambiar de día, así que los
     partidos de un mismo día no se ven entre sí."""
 
-    def __init__(self, previa, ancla, k, codigo_liga=None, de_arriba=()):
+    def __init__(self, previa, ancla, k, codigo_liga=None, de_arriba=(), previa2=()):
         self.previa = [_compacto(m) for m in previa]
+        self.previa2 = [_compacto(m) for m in previa2]
         self.actual = []
         self.ancla, self.k = ancla, k
         self.codigo_liga, self.de_arriba = codigo_liga, list(de_arriba)
@@ -172,7 +175,8 @@ class _Historial:
             self.media = {"avg_local": (self.gl + k * self.ancla["avg_local"]) / (self.n + k),
                           "avg_visita": (self.gv + k * self.ancla["avg_visita"]) / (self.n + k)}
             self.fuerzas = app.ajustar_fuerzas(self.previa, self.actual,
-                                               codigo_liga=self.codigo_liga, de_arriba=self.de_arriba)
+                                               codigo_liga=self.codigo_liga, de_arriba=self.de_arriba,
+                                               previa2=self.previa2)
             self.dia = dia
         return self.fuerzas, self.media
 
@@ -388,8 +392,13 @@ def validar_liga(codigo_liga, nombre, season, champions=None, fotos=None):
     if len(ultima) < 100:
         return {"liga": nombre, "error": f"temporada {season} no disponible "
                                          f"({len(ultima)} partidos)"}
+    # la de antes de la anterior (modelo 7): el filtro empieza en ella, como en producción
+    # (obtener_previa2_liga); si la API no la da, empieza en la anterior
+    previa2 = _cargar_temporada(codigo_liga, season - 2) if len(previa) >= 100 else []
     previa = _con_tiros(codigo_liga, season - 1, previa)
     ultima = _con_tiros(codigo_liga, season, ultima)
+    if len(previa2) >= 100:
+        previa2 = _con_tiros(codigo_liga, season - 2, previa2)
 
     ancla = _ancla(previa, season)
 
@@ -402,7 +411,7 @@ def validar_liga(codigo_liga, nombre, season, champions=None, fotos=None):
 
     # la temporada anterior entra en las fuerzas, no se puntúa
     hist = _Historial(previa if len(previa) >= 100 else [], ancla, app.K_LIGA,
-                      codigo_liga=codigo_liga, de_arriba=de_arriba)
+                      codigo_liga=codigo_liga, de_arriba=de_arriba, previa2=previa2)
 
     equipos = sorted({t for m in ultima for t in (m["local"], m["visita"])})
     de_cl = [t for t in equipos if champions and t in champions["equipos"]]
